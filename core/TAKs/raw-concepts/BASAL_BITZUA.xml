@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="BASAL_BITZUA" concept-type="raw-merged">
+    <categories>Medications</categories>
+    <description>Raw concept to manage the administration of BASAL insulin</description>
+    <attributes>
+        <attribute name="BASAL_DOSAGE" type="numeric" min="0" max="100"/>
+        <attribute name="BASAL_ROUTE" type="nominal">
+            <nominal-allowed-values>
+                <allowed-value value="SubCutaneous"/>
+                <allowed-value value="IntraVenous"/>
+            </nominal-allowed-values>
+        </attribute>
+    </attributes>
+
+    <!-- Merge dosage+route if observed within ±15 min; route is optional -->
+    <merge tolerance-sec="900" require-all="false"/>
+    
+    <!-- Emit value as (dosage, route); if route missing -> (dosage, None) -->
+    <tuple>
+        <order>
+        <field key="BASAL_DOSAGE"/>
+        <field key="BASAL_ROUTE"/>
+        </order>
+    </tuple>
+</raw-concept>

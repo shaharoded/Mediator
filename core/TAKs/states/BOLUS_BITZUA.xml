@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<abstraction name="Fever_Level" loinc="39106-0">
+  
+<condition>
+    <persistence good-before="0h" good-after="24h" />
+    <rule value="Normal-Elevated" min="0" max="38.5" />
+    <rule value="High" min="38.5" max="40" />
+    <rule value="Very High" min="40" />
+</condition>
+
+</abstraction>

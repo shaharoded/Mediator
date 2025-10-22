@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="DEATH" concept-type="raw-boolean">
+    <categories>Events</categories>
+    <description>Raw concept to mark the death event</description>
+    <attributes>
+        <attribute name="DEATH" type="boolean"/>
+    </attributes>
+</raw-concept>

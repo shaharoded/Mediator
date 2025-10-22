@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="GLUCOSE_MEASURE" concept-type="raw-numeric">
+    <categories>Measurements</categories>
+    <description>Raw concept to manage the measurement of GLUCOSE</description>
+    <attributes>
+        <attribute name="GLUCOSE_LAB_MEASURE" type="numeric" min="0" max="800"/>
+        <attribute name="GLUCOSE_CAPILLARY_MEASURE" type="numeric" min="0" max="700"/>
+        <attribute name="GLUCOSE_MEASURE" type="numeric" min="0" max="800"/>
+    </attributes>
+
+    <!-- Don't merge records, treat all instances separately -->
+    <merge/>
+    
+    <!-- Emit value as (measure,) -->
+    <tuple/>
+
+</raw-concept>

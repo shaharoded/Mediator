@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="MEAL" concept-type="raw-nominal">
+    <categories>Events</categories>
+    <description>Raw concept to manage the assessed meal events in hospitalization</description>
+    <attributes>
+        <attribute name="MEAL" type="nominal">
+            <nominal-allowed-values>
+                <allowed-value value="Breakfast"/>
+                <allowed-value value="Lunch"/>
+                <allowed-value value="Dinner"/>
+                <allowed-value value="Night"/>
+            </nominal-allowed-values>
+        </attribute>
+    </attributes>
+</raw-concept>

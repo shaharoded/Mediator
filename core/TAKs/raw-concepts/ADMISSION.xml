@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ADMISSION" concept-type="raw-boolean">
+    <categories>Events</categories>
+    <description>Raw concept to mark the admission event</description>
+    <attributes>
+        <attribute name="ADMISSION" type="boolean"/>
+    </attributes>
+</raw-concept>
