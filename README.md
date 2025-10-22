@@ -34,6 +34,8 @@ Mediator/
 │   ├── dataaccess.py                       # Main DB access and CLI
 ├── core/
 │   ├── config.py                           # Paths to TAK files for engine
+│   ├── utils.py                            # Utility Functions
+│   ├── tak.py                              # Defines the TAK object and parser
 │   ├── mediator.py                         # Abstraction engine
 │   └── TAKs/                               # TAK/rule files (for abstraction logic)
 ├── images/
