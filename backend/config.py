@@ -4,7 +4,7 @@ import os
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 # DB
-DB_PATH = os.path.join(PROJECT_ROOT, 'data', 'mediator.db')
+DB_PATH = os.path.join(PROJECT_ROOT, 'backend', 'data', 'mediator.db')
 
 # DDL Queries
 INITIATE_TABLES_DDL = os.path.join(PROJECT_ROOT, 'backend', 'queries', 'create_tables.sql')

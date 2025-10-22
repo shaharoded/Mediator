@@ -119,7 +119,7 @@ To initialize a git repository and publish this project on GitHub:
 
 3. **Commit your changes:**
    ```sh
-   git commit -m "Initial commit: Mediator temporal abstraction sandbox"
+   git commit -m "message"
    ```
 
 4. **Create a new repository on GitHub** (via the GitHub web UI).
@@ -135,5 +135,5 @@ To initialize a git repository and publish this project on GitHub:
    - Use `git add`, `git commit`, and `git push` to update your repository as you develop.
    - Write clear commit messages describing your changes.
 
-## License & citation
+## Citation
 This code is a research tool. Track provenance and cite relevant KBTA literature when used in publications.

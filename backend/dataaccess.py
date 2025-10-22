@@ -18,7 +18,7 @@ from tqdm import tqdm
 DASK_FILESIZE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
 
 # Local Code
-from backend.config import *
+from config import *
 
 class DataAccess:
     def __init__(self, db_path=DB_PATH):
@@ -26,6 +26,16 @@ class DataAccess:
         Initialize the DataAccess class, connect to SQLite DB and ensure required tables exist.
         No automatic data import on init.
         '''
+        db_dir = os.path.dirname(db_path)
+        if not os.path.exists(db_dir):
+            print(f"[Info] Database folder '{db_dir}' does not exist. Creating it...")
+            os.makedirs(db_dir, exist_ok=True)
+        # --- GUARD: If DB file does not exist, suggest create_db ---
+        if not os.path.exists(db_path) and not self._is_create_db_call():
+            print(f"[Error] Database file '{db_path}' does not exist.")
+            print("Please run: python backend/dataaccess.py --create_db")
+            raise SystemExit(1)
+
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path)
         self.cursor = self.conn.cursor()
@@ -35,7 +45,6 @@ class DataAccess:
         if not self.__check_tables_exist():
             print('[Info]: Creating DB tables...')
             self.__execute_script(INITIATE_TABLES_DDL)
-        self.__print_db_info()
 
     def check_record(self, query_or_path, params):
         """
@@ -293,8 +302,8 @@ class DataAccess:
             # Start/End datetimes parseable
             s_series = df.iloc[:, idxs['start_idx']]
             e_series = df.iloc[:, idxs['end_idx']]
-            parsed_s = pd.to_datetime(s_series, errors='coerce', infer_datetime_format=True)
-            parsed_e = pd.to_datetime(e_series, errors='coerce', infer_datetime_format=True)
+            parsed_s = pd.to_datetime(s_series, errors='coerce')
+            parsed_e = pd.to_datetime(e_series, errors='coerce')
             n_bad_s = int(parsed_s.isna().sum())
             n_bad_e = int(parsed_e.isna().sum())
             if n_bad_s > 0 or n_bad_e > 0:
@@ -305,8 +314,8 @@ class DataAccess:
             # coerce PatientId -> int (and ensure no NaN)
             df.iloc[:, idxs['patient_idx']] = pd.to_numeric(df.iloc[:, idxs['patient_idx']], errors='coerce').astype('Int64').astype(int)
             # parse and format datetimes
-            df.iloc[:, idxs['start_idx']] = pd.to_datetime(df.iloc[:, idxs['start_idx']], errors='coerce', infer_datetime_format=True).dt.strftime('%Y-%m-%d %H:%M:%S')
-            df.iloc[:, idxs['end_idx']] = pd.to_datetime(df.iloc[:, idxs['end_idx']], errors='coerce', infer_datetime_format=True).dt.strftime('%Y-%m-%d %H:%M:%S')
+            df.iloc[:, idxs['start_idx']] = pd.to_datetime(df.iloc[:, idxs['start_idx']], errors='coerce').dt.strftime('%Y-%m-%d %H:%M:%S')
+            df.iloc[:, idxs['end_idx']] = pd.to_datetime(df.iloc[:, idxs['end_idx']], errors='coerce').dt.strftime('%Y-%m-%d %H:%M:%S')
             # ensure Value is string (non-null)
             df.iloc[:, idxs['value_idx']] = df.iloc[:, idxs['value_idx']].astype(str)
             return df
@@ -387,6 +396,10 @@ class DataAccess:
         for (table_name,) in tables:
             count = self.fetch_records(f"SELECT COUNT(*) FROM {table_name};", ())[0][0]
             print(f"[Info]: Table '{table_name}' - Rows: {count}")
+
+    def _is_create_db_call(self):
+        # Helper: detect if --create_db is in sys.argv to allow DB creation
+        return any(arg in ("--create_db", "--drop") for arg in sys.argv)
 
 
 # CLI entrypoint
