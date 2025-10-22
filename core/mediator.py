@@ -30,41 +30,36 @@ class Mediator:
         self.db = DataAccess()
     
 
-    def _get_patient_records(self, patient_id, concepts):
+    def _get_patient_records(self, patient_id, table="InputPatientData", concepts=[]):
         """
         Retrieves patient measurement records and patient-level attributes for abstraction.
         
         Args:
             patient_id (int): The ID of the patient.
+            table (str): The database table to query from. Choose from 'InputPatientData' or 'OutputPatientData'.
             concepts (list): The list of concepts to retrieve.
 
         Returns:
-            tuple: (list of measurement rows, dict of patient demographic params)
+            pd.DataFrame: DataFrame of patient measurement records.
         """
         # Construct query
-        filters = [
-            "m.PatientId = ?",
-            "m.TransactionInsertionTime <= ?",
-            "(m.TransactionDeletionTime IS NULL OR m.TransactionDeletionTime > ?)"
-        ]
-        params = [patient_id, snapshot_date, snapshot_date]
+        if concepts:
+            concept_placeholders = ",".join(["?"]*len(concepts))
+            params = [patient_id, table] + concepts
 
-        with open(GET_HISTORY_QUERY, 'r') as f:
-            base_query = f.read()
+            with open(GET_DATA_BY_PATIENT_CONCEPTS, 'r') as f:
+                base_query = f.read()
+            base_query = base_query.replace("{CONCEPT_PLACEHOLDERS}", concept_placeholders)
+        else:
+            params = [table, patient_id]
 
-        final_query = base_query.replace("{where_clause}", " AND ".join(filters))
-        patient_records = self.db.fetch_records(final_query, params)
+            with open(GET_DATA_BY_PATIENT, 'r') as f:
+                base_query = f.read()
 
-        # --- Fetch patient demographic parameters ---
-        patient_info = self.db.fetch_records(GET_PATIENT_PARAMS_QUERY, (patient_id,))
-        param_dict = {}
-        if patient_info:
-            row = patient_info[0]  # Single patient expected
-            # Gives columns returned by the last query, lowered.
-            columns = [desc[0].lower() for desc in self.db.cursor.description]
-            param_dict = dict(zip(columns, row))
+        # Get records as DataFrame
+        patient_records = pd.DataFrame(self.db.fetch_records(base_query, params))
 
-        return patient_records, param_dict
+        return patient_records
     
 
     def _merge_intervals(self, df):
