@@ -18,4 +18,3 @@ INSERT_QA_SCORE_QUERY = os.path.join(PROJECT_ROOT, 'backend', 'queries', 'insert
 CHECK_TABLE_EXISTS_QUERY = os.path.join(PROJECT_ROOT, 'backend', 'queries', 'check_table_exists.sql')
 GET_DATA_BY_PATIENT = os.path.join(PROJECT_ROOT, 'backend', 'queries', 'get_data_by_patient.sql')
 GET_DATA_BY_PATIENT_CONCEPTS = os.path.join(PROJECT_ROOT, 'backend', 'queries', 'get_data_by_patient_and_concepts.sql')
-GET_QA_SCORES = os.path.join(PROJECT_ROOT, 'backend', 'queries', 'get_qa_scores.sql')
