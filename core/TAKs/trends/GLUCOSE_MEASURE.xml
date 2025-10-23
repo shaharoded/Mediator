@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<trend name="GLUCOSE_MEASURE_TREND">
+    <categories>Measurements</categories>
+    <description>Trend for the measurements of GLUCOSE (Lab / Capillary)</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" significant-variation="40"/>
+
+    <!-- Each point will be classified as either "steady" or "changing" based on this window -->
+    <time-steady value="12h"/>
+
+    <!-- maximum difference between consecutive points to merge if both has the same classification -->
+    <persistence good-before="0h" good-after="24h"/>
+
+</trend>
