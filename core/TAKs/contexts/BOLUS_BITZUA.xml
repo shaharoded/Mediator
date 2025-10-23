@@ -27,5 +27,6 @@
     <!-- An instance of these will clip the context windows -->
     <clippers>
         <clipper name="DEATH" tak="raw-concept"/>
+        <clipper name="RELEASE" tak="raw-concept"/>
     </clippers>
 </context>
