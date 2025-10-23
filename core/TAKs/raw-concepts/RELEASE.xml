@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="RELEASE" concept-type="raw-boolean">
+    <categories>Events</categories>
+    <description>Raw concept to mark the release event</description>
+    <attributes>
+        <attribute name="RELEASE" type="boolean"/>
+    </attributes>
+    <merge/>
+    
+    <!-- Emit value as (True,) -->
+    <tuple/>
+</raw-concept>

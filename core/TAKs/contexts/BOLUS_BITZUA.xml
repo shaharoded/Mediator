@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="BOLUS_BITZUA_CONTEXT">
+    <categories>Medicine</categories>
+    <description>BOLUS influence context</description>
+    <derived-from name="BOLUS_BITZUA" tak="raw-concept" idx="0"/>
+
+    <!-- Use this to define different context windows based on value -->
+    <abstraction-rules>
+        <attribute idx="0">
+            <rule value="Very Low" min="0" max="4"/>
+            <rule value="Low" min="4" max="10"/>
+            <rule value="Medium" min="10" max="20"/>
+            <rule value="High" min="20" max="30"/>
+            <rule value="Very High" min="30"/>
+        </attribute>
+        <!-- idx="1" (route) is nominal; no discretization needed -->
+    </abstraction-rules>
+
+    <context-windows>
+        <persistence value="Very Low" good-before="0h" good-after="4h"/>
+        <persistence value="Low" good-before="0h" good-after="4h"/>
+        <persistence value="Medium" good-before="0h" good-after="8h"/>
+        <persistence value="High" good-before="0h" good-after="8h"/>
+        <persistence value="Very High" good-before="0h" good-after="8h"/>
+    </context-windows>
+
+    <!-- An instance of these will clip the context windows -->
+    <clippers>
+        <clipper name="DEATH" tak="raw-concept"/>
+    </clippers>
+</context>

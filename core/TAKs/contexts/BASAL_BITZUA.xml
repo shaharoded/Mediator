@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="BASAL_BITZUA_CONTEXT">
+    <categories>Medicine</categories>
+    <description>BASAL influence context</description>
+    <derived-from name="BASAL_BITZUA" tak="raw-concept" idx="0"/>
+    
+    <!-- Use this to define different context windows based on value -->
+    <abstraction-rules>
+        <attribute idx="0">
+            <rule value="Very Low" min="0" max="10"/>
+            <rule value="Low" min="10" max="20"/>
+            <rule value="Medium" min="20" max="40"/>
+            <rule value="High" min="40" max="60"/>
+            <rule value="Very High" min="60"/>
+        </attribute>
+        <!-- idx="1" (route) is nominal; no discretization needed -->
+    </abstraction-rules>
+
+    <context-windows>
+        <persistence value="Very Low" good-before="0h" good-after="12h"/>
+        <persistence value="Low" good-before="0h" good-after="12h"/>
+        <persistence value="Medium" good-before="0h" good-after="24h"/>
+        <persistence value="High" good-before="0h" good-after="24h"/>
+        <persistence value="Very High" good-before="0h" good-after="24h"/>
+    </context-windows>
+
+    <!-- An instance of these will clip the context windows -->
+    <clippers>
+        <clipper name="DEATH" tak="raw-concept"/>
+        <clipper name="RELEASE" tak="raw-concept"/>
+    </clippers>
+</context>

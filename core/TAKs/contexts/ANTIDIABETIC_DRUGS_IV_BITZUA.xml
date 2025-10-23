@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="ANTIDIABETIC_DRUGS_IV_BITZUA_CONTEXT">
+    <categories>Medicine</categories>
+    <description>ANTIDIABETIC_DRUGS_IV influence context</description>
+    <derived-from name="ANTIDIABETIC_DRUGS_IV_BITZUA" tak="raw-concept" idx="0"/>
+
+    <!-- Use this to define different context windows based on value -->
+    </abstraction-rules>
+
+    <context-windows>
+        <persistence value="Low" good-before="0h" good-after="6h"/>
+        <persistence value="Medium" good-before="0h" good-after="8h"/>
+        <persistence value="High" good-before="0h" good-after="12h"/>
+    </context-windows>
+
+    <!-- An instance of these will clip the context windows -->
+    <clippers>
+        <clipper name="DEATH" tak="raw-concept"/>
+        <clipper name="RELEASE" tak="raw-concept"/>
+    </clippers>
+
+</context>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="DIABETES_DIAGNOSYS_CONTEXT">
+    <categories>Medicine</categories>
+    <description>DIABETES context</description>
+    <derived-from name="DIABETES_DIAGNOSYS" tak="raw-concept" idx="0"/>
+
+    <!-- Use this to define different context windows based on value -->
+    </abstraction-rules>
+    
+    <context-windows>
+        <persistence good-before="0h" good-after="120y"/>
+    </context-windows>
+
+    <!-- An instance of these will clip the context windows -->
+    <clippers>
+        <clipper name="DEATH" tak="raw-concept"/>
+        <clipper name="RELEASE" tak="raw-concept"/>
+    </clippers>
+
+</context>

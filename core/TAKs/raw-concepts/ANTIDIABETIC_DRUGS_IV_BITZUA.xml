@@ -13,6 +13,6 @@
     </attributes>
     <merge/>
     
-    <!-- Emit value as (True,) -->
+    <!-- Emit value as (Val,) -->
     <tuple/>
 </raw-concept>
