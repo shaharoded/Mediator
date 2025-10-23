@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="GLUCOSE_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of GLUCOSE (Lab / Capillary)</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-before="0h" good-after="24h" interpolate="true" max-skip="1"/>
+
+    <!-- Discretization rules by values in order of appearance in the tuple (idx) -->
+    <!-- Range treated as min_value <= X < max_value -->
+    <discretization-rules>
+        <attribute idx="0">
+            <rule value="Severe hypoglycemia" min="0" max="54"/>
+            <rule value="Hypoglycemia" min="54" max="70"/>
+            <rule value="Low glucose" min="70" max="140"/>
+            <rule value="Normal glucose" min="140" max="180"/>
+            <rule value="High glucose" min="180" max="250"/>
+            <rule value="Hyperglycemia" min="250"/>
+        </attribute>
+        <!-- idx="1" (route) is nominal; no discretization needed -->
+    </discretization-rules>
+
+    <!-- Once all values are discrete, they can be abstracted -->
+    <!-- If no abstraction rules are defined, the abstraction will default to the original values -->
+    </abstraction-rules>
+</state>

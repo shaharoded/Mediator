@@ -1,21 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<state name="BOLUS_BITZUA_STATE">
+<state name="BASAL_BITZUA_STATE">
     <categories>Medications</categories>
-    <description>Abstraction for the dosage and route of administration of BOLUS insulin</description>
-    <derived-from name="BOLUS_BITZUA" tak="raw-concept"/>
-    
+    <description>Abstraction for the dosage and route of administration of BASAL insulin</description>
+    <derived-from name="BASAL_BITZUA" tak="raw-concept"/>
+
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-before="0h" good-after="8h" interpolate="true" max-skip="1"/>
+    <persistence good-before="0h" good-after="24h" interpolate="true" max-skip="1"/>
 
     <!-- Discretization rules by values in order of appearance in the tuple (idx) -->
     <!-- Range treated as min_value <= X < max_value -->
     <discretization-rules>
         <attribute idx="0">
-            <rule value="Very Low" min="0" max="4"/>
-            <rule value="Low" min="4" max="10"/>
-            <rule value="Medium" min="10" max="20"/>
-            <rule value="High" min="20" max="30"/>
-            <rule value="Very High" min="30"/>
+            <rule value="Very Low" min="0" max="10"/>
+            <rule value="Low" min="10" max="20"/>
+            <rule value="Medium" min="20" max="40"/>
+            <rule value="High" min="40" max="60"/>
+            <rule value="Very High" min="60"/>
         </attribute>
         <!-- idx="1" (route) is nominal; no discretization needed -->
     </discretization-rules>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="ANTIDIABETIC_DRUGS_IV_BITZUA_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of ANTIDIABETIC_DRUGS_IV_BITZUA (Lab / Capillary)</description>
+    <derived-from name="ANTIDIABETIC_DRUGS_IV_BITZUA" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-before="0h" good-after="12h" interpolate="true" max-skip="1"/>
+    
+    <!-- idx="0" is nominal; no discretization needed -->
+    </discretization-rules>
+
+    <!-- Once all values are discrete, they can be abstracted -->
+    <!-- If no abstraction rules are defined, the abstraction will default to the original values -->
+    </abstraction-rules>
+</state>

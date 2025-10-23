@@ -5,4 +5,8 @@
     <attributes>
         <attribute name="DIABETES_DIAGNOSIS" type="boolean"/>
     </attributes>
+    <merge/>
+    
+    <!-- Emit value as (True,) -->
+    <tuple/>
 </raw-concept>

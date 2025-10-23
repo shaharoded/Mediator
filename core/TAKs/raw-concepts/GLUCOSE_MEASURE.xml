@@ -8,7 +8,7 @@
         <attribute name="GLUCOSE_MEASURE" type="numeric" min="0" max="800"/>
     </attributes>
 
-    <!-- Don't merge records, treat all instances separately -->
+    <!-- Don't merge records (creating a tuple with a few values), treat all instances separately under one Concept-->
     <merge/>
     
     <!-- Emit value as (measure,) -->

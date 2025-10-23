@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ANTIDIABETIC_DRUGS_IV_BITZUA" concept-type="raw-nominal">
+    <categories>Medications</categories>
+    <description>Raw concept to manage the administration of IV antidiabetic treatment</description>
+    <attributes>
+        <attribute name="ANTIDIABETIC_DRUGS_IV_DOSAGE" type="nominal">
+            <nominal-allowed-values>
+                <allowed-value value="Low"/>
+                <allowed-value value="Medium"/>
+                <allowed-value value="High"/>
+            </nominal-allowed-values>
+        </attribute>
+    </attributes>
+    <merge/>
+    
+    <!-- Emit value as (True,) -->
+    <tuple/>
+</raw-concept>

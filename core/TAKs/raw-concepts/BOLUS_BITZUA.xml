@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<raw-concept name="BOLUS_BITZUA" concept-type="raw-merged">
+<raw-concept name="BOLUS_BITZUA" concept-type="raw">
     <categories>Medications</categories>
     <description>Raw concept to manage the administration of BOLUS insulin</description>
     <attributes>
@@ -13,7 +13,7 @@
     </attributes>
 
     <!-- Merge dosage+route if observed within ±15 min; route is optional -->
-    <merge tolerance-sec="900" require-all="false"/>
+    <merge tolerance="900s" require-all="false"/>
     
     <!-- Emit value as (dosage, route); if route missing -> (dosage, None) -->
     <tuple>
