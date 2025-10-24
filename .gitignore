@@ -1,5 +1,4 @@
 .venv/
-knowledge-base/
 __pycache__/
 backend/data/*.csv
 backend/data/*.db

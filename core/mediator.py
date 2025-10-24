@@ -3,8 +3,8 @@ import pandas as pd
 
 # Local Code
 from backend.dataaccess import DataAccess
-from core.tak import *
-from core.utils import *
+from core.tak.tak import *
+from core.tak.utils import *
 from backend.config import * 
 from core.config import *
 

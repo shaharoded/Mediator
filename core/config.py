@@ -4,4 +4,4 @@ import os
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 # TAK Folder
-TAK_FOLDER = os.path.join(PROJECT_ROOT, 'core', 'TAKs')
+TAK_FOLDER = os.path.join(PROJECT_ROOT, 'core', 'knowledge_base')
