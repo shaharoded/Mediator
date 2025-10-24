@@ -11,7 +11,7 @@ from .utils import parse_duration  # "8h" -> timedelta(hours=8)
 from .tak import TAK
 
 
-class RawConceptTAK(TAK):
+class RawConcept(TAK):
     """
     Raw Concept TAK — parsed from <raw-concept> XML.
     - 'raw'          : multi-attr; requires <tuple>/<order> and <merge tolerance require-all>
@@ -42,7 +42,7 @@ class RawConceptTAK(TAK):
         self.df: Optional[pd.DataFrame] = None
 
     @classmethod
-    def parse(cls, xml_path: Union[str, Path]) -> "RawConceptTAK":
+    def parse(cls, xml_path: Union[str, Path]) -> "RawConcept":
         """Parse a <raw-concept> XML definition file."""
         root = ET.parse(xml_path).getroot()
         if root.tag != "raw-concept":
