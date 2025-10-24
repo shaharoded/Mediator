@@ -40,8 +40,8 @@ class TAK:
 
 class TAKRule():
     """
-    Abstract base class for all TAK families.
-    Subclasses: StateTAK, EventTAK, ContextTAK, TrendTAK, PatternTAK.
+    Abstract base class for all TAK families to control execution of abstraction rules.
+    Consumers: StateTAK, ContextTAK, TrendTAK, PatternTAK.
     """
     pass
 
