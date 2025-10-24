@@ -3,23 +3,25 @@
     <categories>Medications</categories>
     <description>Raw concept to manage the administration of BOLUS insulin</description>
     <attributes>
-        <attribute name="BOLUS_DOSAGE" type="numeric" min="0" max="100"/>
+        <attribute name="BOLUS_DOSAGE" type="numeric">
+            <numeric-allowed-values>
+                <allowed-value min="0" max="100"/>
+            </numeric-allowed-values>
+        </attribute>
         <attribute name="BOLUS_ROUTE" type="nominal">
             <nominal-allowed-values>
                 <allowed-value value="SubCutaneous"/>
                 <allowed-value value="IntraVenous"/>
-            </nominal-allowed-values>
+            </allowed-values>
         </attribute>
     </attributes>
 
-    <!-- Merge dosage+route if observed within ±15 min; route is optional -->
-    <merge tolerance="900s" require-all="false"/>
+    <!-- Merge dosage+route if observed within ±1 min; route is optional -->
+    <merge tolerance="60s" require-all="false"/>
     
     <!-- Emit value as (dosage, route); if route missing -> (dosage, None) -->
-    <tuple>
-        <order>
-        <field key="BOLUS_DOSAGE"/>
-        <field key="BOLUS_ROUTE"/>
-        </order>
-    </tuple>
+    <tuple-order>
+        <attribute name="BOLUS_DOSAGE"/>
+        <attribute name="BOLUS_ROUTE"/>
+    </tuple-order>
 </raw-concept>

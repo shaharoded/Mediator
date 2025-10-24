@@ -25,6 +25,7 @@ def parse_duration(duration_str):
         raise ValueError(f"Invalid duration format: '{duration_str}'")
     
     try:
+        duration_str = duration_str.strip()
         value = int(duration_str[:-1])
     except ValueError:
         raise ValueError(f"Invalid numeric value in duration: '{duration_str}'")
