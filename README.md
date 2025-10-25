@@ -105,6 +105,14 @@ rows = da.fetch_records(GET_INPUT_BY_PATIENT, (patient_id,))
 - Back up `data/mediator.db` before destructive operations (e.g., `--create_db --drop`).
 - If you want lenient ingestion, add a preprocessing step to clean the CSV before loading.
 
+## Testing
+
+Self contained testing modules were created under `unittests\`. You can run:
+
+```bash
+python -m pytest -q
+```
+
 ## Git commit tips
 
 To initialize a git repository and publish this project on GitHub:

@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import pandas as pd
+import numpy as np
 import logging
 logger = logging.getLogger(__name__)
 
@@ -320,11 +321,12 @@ class RawConcept(TAK):
         merged: List[dict] = []
         start_idx = 0
         n = len(df)
-        times = df["StartDateTime"].to_numpy()
+        times = df["StartDateTime"].values.astype('datetime64[ns]')  # numpy datetime array
 
         windows = 0
         for i in range(1, n + 1):
-            if i == n or (times[i] - times[i-1]).total_seconds() > tol_s:
+            # Convert timedelta64 to float seconds for comparison
+            if i == n or (times[i] - times[i-1]) / np.timedelta64(1, 's') > tol_s:
                 block = df.iloc[start_idx:i]
                 block = block[block["ConceptName"].isin(self.tuple_order)]
                 if not block.empty:

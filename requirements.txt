@@ -3,3 +3,6 @@ pandas
 dask
 python-dateutil
 tqdm
+
+# For testing
+pytest
