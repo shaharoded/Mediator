@@ -226,7 +226,7 @@ def test_apply_raw_boolean(tmp_path: Path):
     df = df_for_raw_boolean()
     out = tak.apply(df)
 
-    # Both rows should become (True,)
+    # Both rows should become ("True",) — STRING not Python bool
     assert len(out) == 2
-    assert tuple(out["Value"]) == ((True,), (True,))
+    assert tuple(out["Value"]) == (("True",), ("True",))
     assert all(out["ConceptName"] == tak.name)
