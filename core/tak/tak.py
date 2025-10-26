@@ -80,7 +80,7 @@ class TAKRepository:
 class TAKRule(ABC):
     """
     Abstract base for all rule types (discretization, abstraction, trend, context, pattern).
-    Subclasses: DiscretizationRule, AbstractionRule, EventAbstractionRule.
+    Subclasses: StateDiscretizationRule, StateAbstractionRule, EventAbstractionRule.
     """
     @abstractmethod
     def matches(self, *args, **kwargs) -> bool:
@@ -88,7 +88,7 @@ class TAKRule(ABC):
         pass
 
 
-class DiscretizationRule(TAKRule):
+class StateDiscretizationRule(TAKRule):
     """
     Single discretization threshold for one attribute index.
     Example: attribute idx=0, value="Low", min=10, max=20
@@ -108,7 +108,7 @@ class DiscretizationRule(TAKRule):
             return False
 
 
-class AbstractionRule(TAKRule):
+class StateAbstractionRule(TAKRule):
     """
     Logical rule to combine discrete attribute values → final state label.
     Example: value="SubCutaneous Low", operator="and", constraints={(0, ['Very Low','Low']), (1, ['SubCutaneous'])}

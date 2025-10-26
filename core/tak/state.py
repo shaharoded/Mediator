@@ -9,7 +9,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .utils import parse_duration
-from .tak import TAK, get_tak_repository, DiscretizationRule, AbstractionRule
+from .tak import TAK, get_tak_repository, StateDiscretizationRule, StateAbstractionRule
 from .raw_concept import RawConcept
 from .event import Event
 
@@ -31,8 +31,8 @@ class State(TAK):
         good_after: timedelta,
         interpolate: bool,
         max_skip: int,
-        discretization_rules: List[DiscretizationRule],
-        abstraction_rules: List[AbstractionRule],
+        discretization_rules: List[StateDiscretizationRule],
+        abstraction_rules: List[StateAbstractionRule],
         abstraction_order: Literal["first","all"] = "first",
     ):
         super().__init__(name=name, categories=categories, description=description, family="state")
@@ -72,7 +72,7 @@ class State(TAK):
         max_skip = int(pers_el.attrib.get("max-skip", "0"))
 
         # --- discretization-rules (optional) ---
-        disc_rules: List[DiscretizationRule] = []
+        disc_rules: List[StateDiscretizationRule] = []
         disc_el = root.find("discretization-rules")
         if disc_el is not None:
             for attr_el in disc_el.findall("attribute"):
@@ -81,10 +81,10 @@ class State(TAK):
                     val = rule_el.attrib["value"]
                     min_v = float(rule_el.attrib["min"]) if "min" in rule_el.attrib else None
                     max_v = float(rule_el.attrib["max"]) if "max" in rule_el.attrib else None
-                    disc_rules.append(DiscretizationRule(idx, val, min_v, max_v))
+                    disc_rules.append(StateDiscretizationRule(idx, val, min_v, max_v))
 
         # --- abstraction-rules (optional, for 'raw') ---
-        abs_rules: List[AbstractionRule] = []
+        abs_rules: List[StateAbstractionRule] = []
         abs_el = root.find("abstraction-rules")
         abs_order: Literal["first","all"] = "first"
         if abs_el is not None:
@@ -97,7 +97,7 @@ class State(TAK):
                     idx = int(attr_el.attrib["idx"])
                     allowed = [av.attrib["value"] for av in attr_el.findall("allowed-value")]
                     constraints[idx] = allowed
-                abs_rules.append(AbstractionRule(val, op, constraints))
+                abs_rules.append(StateAbstractionRule(val, op, constraints))
 
         state = cls(
             name=name,
