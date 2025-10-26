@@ -2,5 +2,8 @@
 <event name="RELEASE_EVENT">
     <categories>Events</categories>
     <description>Release event</description>
-    <derived-from name="RELEASE" tak="raw-concept" idx="0"/>
+    <derived-from>
+        <attribute name="RELEASE" tak="raw-concept" idx="0"/>
+    </derived-from>
+    </abstraction-rules>
 </event>

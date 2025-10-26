@@ -2,5 +2,10 @@
 <event name="MEAL_EVENT">
     <categories>Events</categories>
     <description>Meal event</description>
-    <derived-from name="MEAL" tak="raw-concept" idx="0"/>
+    <derived-from>
+        <attribute name="MEAL" tak="raw-concept" idx="0"/>
+    </derived-from>
+
+    <!-- Invocation rules -> values on the raw concept -->
+    </abstraction-rules>
 </event>

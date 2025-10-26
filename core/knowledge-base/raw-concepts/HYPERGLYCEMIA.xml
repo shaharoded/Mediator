@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="HYPERGLYCEMIA" concept-type="raw-boolean">
+    <categories>Events</categories>
+    <description>Raw concept to mark the hyperglycemia event, inputed as 'Observation'</description>
+    <attributes>
+        <attribute name="HYPERGLYCEMIA" type="boolean"/>
+    </attributes>
+    <merge/>
+    
+    <!-- Emit value as ("True",) -->
+    <tuple/>
+</raw-concept>
