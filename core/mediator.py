@@ -1,3 +1,8 @@
+"""
+TO-DO:
+- Add global clippers (ADMISSION, RELEASE, DEATH) that will clip all states/trends/patterns/contexts
+"""
+
 from datetime import timedelta
 import pandas as pd
 
