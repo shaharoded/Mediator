@@ -27,7 +27,6 @@ class State(TAK):
         categories: Tuple[str, ...],
         description: str,
         derived_from: str,  # name of RawConcept TAK
-        good_before: timedelta,
         good_after: timedelta,
         interpolate: bool,
         max_skip: int,
@@ -37,7 +36,6 @@ class State(TAK):
     ):
         super().__init__(name=name, categories=categories, description=description, family="state")
         self.derived_from = derived_from
-        self.good_before = good_before
         self.good_after = good_after
         self.interpolate = interpolate
         self.max_skip = max_skip
@@ -66,12 +64,9 @@ class State(TAK):
         pers_el = root.find("persistence")
         if pers_el is None:
             raise ValueError(f"{name}: missing <persistence>")
-        gb = parse_duration(pers_el.attrib.get("good-before", "0h"))
         ga = parse_duration(pers_el.attrib.get("good-after", "0h"))
-        if ga < timedelta(0):
-            raise ValueError(f"{name}: good-after must be non-negative")
-        if gb == ga == timedelta(0):
-            raise ValueError(f"{name}: at least one of good-before or good-after must be positive. You can use events for instantaneous abstractions.")
+        if ga <= timedelta(0):
+            raise ValueError(f"{name}: good-after must be positive")
         interpolate = pers_el.attrib.get("interpolate", "false").lower() == "true"
         max_skip = int(pers_el.attrib.get("max-skip", "0"))
 
@@ -108,7 +103,6 @@ class State(TAK):
             categories=cats,
             description=desc,
             derived_from=derived_from,
-            good_before=gb,
             good_after=ga,
             interpolate=interpolate,
             max_skip=max_skip,
@@ -358,17 +352,15 @@ class State(TAK):
     def _merge_intervals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Merge adjacent identical state values using persistence windows + interpolation.
-        If order="all", explode multi-value rows into separate intervals at the end.
+        Each interval extends to last_merged_sample_time + good_after (or next sample's start, whichever is earlier).
         """
         if df.empty:
             return df
 
         df = df.sort_values("StartDateTime").reset_index(drop=True)
-        pid = df["PatientId"].iloc[0]
 
-        # If order="all", we may have list-valued rows; handle merging per unique value
+        # If order="all", explode multi-value rows and group by value
         if self.abstraction_order == "all":
-            # Explode list-valued rows into separate rows, then merge each value separately
             exploded_rows = []
             for _, row in df.iterrows():
                 val = row["Value"]
@@ -384,38 +376,97 @@ class State(TAK):
                         })
                 else:
                     exploded_rows.append(row.to_dict())
+            df = pd.DataFrame(exploded_rows)
             
-            df = pd.DataFrame(exploded_rows).sort_values("StartDateTime").reset_index(drop=True)
+            # CORRECTED: Process each unique Value independently
+            all_merged = []
+            for value in df["Value"].unique():
+                value_df = df[df["Value"] == value].sort_values("StartDateTime").reset_index(drop=True)
+                merged_for_value = self._merge_single_value_group(value_df)
+                all_merged.extend(merged_for_value)
+            
+            out = pd.DataFrame(all_merged) if all_merged else pd.DataFrame(columns=df.columns)
+            return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
+        else:
+            # order="first": standard merging
+            merged = self._merge_single_value_group(df)
+            out = pd.DataFrame(merged) if merged else pd.DataFrame(columns=df.columns)
+            return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
 
-        # Standard merge logic (now works per single value)
+    def _merge_single_value_group(self, df: pd.DataFrame) -> List[dict]:
+        """
+        Merge intervals for a single value group (all rows have same Value).
+        Returns list of merged interval dicts.
+        """
         merged: List[dict] = []
-        current = None
-        skip_count = 0
+        n = len(df)
+        i = 0
 
-        for _, row in df.iterrows():
-            if current is None:
-                current = row.to_dict()
-                skip_count = 0
-                continue
+        while i < n:
+            current_row = df.iloc[i]
+            interval_start = current_row["StartDateTime"]
+            interval_value = current_row["Value"]
+            interval_pid = current_row["PatientId"]
+            interval_cname = current_row["ConceptName"]
+            interval_abstype = current_row["AbstractionType"]
+            
+            # Collect all rows that merge into this interval
+            merged_rows = [i]
+            skip_count = 0
+            j = i + 1
+            
+            while j < n:
+                next_row = df.iloc[j]
+                same_value = (next_row["Value"] == interval_value)
+                within_window = (next_row["StartDateTime"] <= pd.Timestamp(interval_start) + self.good_after)
+                
+                if same_value and within_window:
+                    # Merge this row
+                    merged_rows.append(j)
+                    skip_count = 0
+                    j += 1
+                elif not same_value and within_window and self.interpolate and skip_count < self.max_skip:
+                    # Check if next row after this one is same_value and within_window
+                    if j + 1 < n:
+                        peek_row = df.iloc[j + 1]
+                        peek_same = (peek_row["Value"] == interval_value)
+                        peek_within = (peek_row["StartDateTime"] <= pd.Timestamp(interval_start) + self.good_after)
+                        if peek_same and peek_within:
+                            # Skip this outlier
+                            skip_count += 1
+                            j += 1
+                            continue
+                    # Can't skip → break
+                    break
+                else:
+                    # No more merges
+                    break
+            
+            # Determine interval EndDateTime
+            last_merged_idx = merged_rows[-1]
+            last_merged_time = df.iloc[last_merged_idx]["StartDateTime"]
+            
+            # Default: extend to last_merged_time + good_after
+            interval_end = pd.Timestamp(last_merged_time) + self.good_after
+            
+            # But if there's a next sample (SAME VALUE) that arrives BEFORE interval_end, stop at that sample's start
+            # NOTE: Since we're processing a single-value group, all rows in df have the same Value
+            # So we just check the next row in the df (not globally)
+            if j < n:
+                next_sample_time = df.iloc[j]["StartDateTime"]
+                if next_sample_time < interval_end:
+                    interval_end = next_sample_time
+            
+            merged.append({
+                "PatientId": interval_pid,
+                "ConceptName": interval_cname,
+                "StartDateTime": interval_start,
+                "EndDateTime": interval_end,
+                "Value": interval_value,
+                "AbstractionType": interval_abstype
+            })
+            
+            # Move to next unprocessed row
+            i = j
 
-            same_value = (row["Value"] == current["Value"])
-            within_window = (row["StartDateTime"] <= pd.Timestamp(current["EndDateTime"]) + self.good_after)
-
-            if same_value and within_window:
-                # Extend interval
-                current["EndDateTime"] = max(current["EndDateTime"], row["EndDateTime"])
-                skip_count = 0
-            elif not same_value and within_window and self.interpolate and skip_count < self.max_skip:
-                # Allow skip (outlier tolerance)
-                skip_count += 1
-            else:
-                # Finalize current, start new
-                merged.append(current)
-                current = row.to_dict()
-                skip_count = 0
-
-        if current is not None:
-            merged.append(current)
-
-        out = pd.DataFrame(merged) if merged else pd.DataFrame(columns=df.columns)
-        return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
+        return merged

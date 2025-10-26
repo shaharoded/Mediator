@@ -113,6 +113,13 @@ Self contained testing modules were created under `unittests\`. You can run:
 python -m pytest -q
 ```
 
+OR one-by-one
+
+```bash
+python -m pytest unittests/test_raw_concept.py -v
+python -m pytest unittests/test_state.py -v
+```
+
 ## Git commit tips
 
 To initialize a git repository and publish this project on GitHub:

@@ -494,13 +494,14 @@ def test_abstract_all_order(repo_with_basal_all):
 def test_merge_multi_point_same_rule(repo_with_basal):
     """3 tuples matching same rule merge into 1 interval."""
     state_tak = repo_with_basal.get("BASAL_BITZUA_STATE")
-    df_in = df_basal_multi_point_same_rule()
+    df_in = df_basal_multi_point_same_rule()  # T=0h, 6h, 12h
     df_out = state_tak.apply(df_in)
     assert len(df_out) == 1
     row = df_out.iloc[0]
     assert row["Value"] == "SubCutaneous Low"
     assert row["StartDateTime"] == make_ts("00:00")
-    assert row["EndDateTime"] == make_ts("12:00")
+    # CORRECTED: EndDateTime = last_merged_time (12h) + good_after (24h) = 36h (day=1, 12:00)
+    assert row["EndDateTime"] == make_ts("12:00", day=1)
 
 
 def test_merge_gap_exceeds_window(repo_with_basal):
@@ -543,25 +544,27 @@ def test_merge_same_route_different_dosages_no_merge(repo_with_basal):
 def test_merge_interpolate_skip_outlier(repo_with_basal):
     """max_skip=1 allows skipping 1 outlier."""
     state_tak = repo_with_basal.get("BASAL_BITZUA_STATE")
-    df_in = df_basal_interpolate_skip()
+    df_in = df_basal_interpolate_skip()  # T=0h, 4h, 8h(outlier), 12h
     df_out = state_tak.apply(df_in)
     assert len(df_out) == 1
     row = df_out.iloc[0]
     assert row["Value"] == "SubCutaneous Low"
     assert row["StartDateTime"] == make_ts("00:00")
-    assert row["EndDateTime"] == make_ts("12:00")
+    # CORRECTED: EndDateTime = last_merged_time (12h) + good_after (24h) = 36h
+    assert row["EndDateTime"] == make_ts("12:00", day=1)
 
 
 def test_merge_order_all_overlapping_intervals(repo_with_basal_all):
     """order="all" emits 2 overlapping intervals (one per rule)."""
     state_tak = repo_with_basal_all.get("BASAL_ALL_STATE")
-    df_in = df_basal_order_all()
+    df_in = df_basal_order_all()  # T=0h, 4h with good_after=6h
     df_out = state_tak.apply(df_in)
     assert len(df_out) == 2
     values = set(df_out["Value"])
     assert values == {"SubCutaneous", "Low Dose"}
     assert all(df_out["StartDateTime"] == make_ts("00:00"))
-    assert all(df_out["EndDateTime"] == make_ts("04:00"))
+    # CORRECTED: Each rule merges 2 samples (0h, 4h) → EndDateTime = 4h + 6h = 10h
+    assert all(df_out["EndDateTime"] == make_ts("10:00"))
 
 
 def test_merge_order_all_permissive_rules(repo_with_basal_permissive):
@@ -573,12 +576,30 @@ def test_merge_order_all_permissive_rules(repo_with_basal_permissive):
         (1, "BASAL_BITZUA", make_ts("08:00"), make_ts("08:00"), (12, "SubCutaneous"), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     df_out = state_tak.apply(df_in)
-    assert len(df_out) == 2
+    
+    # CORRECTED: With good_after=6h, T=8h is beyond window from T=0h (0h+6h=6h)
+    # So we get 2 intervals per rule:
+    # - First interval: [0h → 4h], EndDateTime = 4h + 6h = 10h, but T=8h arrives before 10h → EndDateTime = 8h
+    # - Second interval: [8h → 8h+6h = 14h]
+    assert len(df_out) == 4
     values = set(df_out["Value"])
     assert values == {"SubCutaneous Low", "Low Dose"}
-    for _, row in df_out.iterrows():
-        assert row["StartDateTime"] == make_ts("00:00")
-        assert row["EndDateTime"] == make_ts("08:00")
+    
+    # Check that each rule has 2 intervals
+    low_dose_intervals = df_out[df_out["Value"] == "Low Dose"]
+    subcut_low_intervals = df_out[df_out["Value"] == "SubCutaneous Low"]
+    assert len(low_dose_intervals) == 2
+    assert len(subcut_low_intervals) == 2
+    
+    # First interval for each rule: [0h → 8h] (stops at next sample)
+    assert low_dose_intervals.iloc[0]["EndDateTime"] == make_ts("08:00")
+    assert subcut_low_intervals.iloc[0]["EndDateTime"] == make_ts("08:00")
+    
+    # Second interval for each rule: [8h → 14h] (8h + 6h)
+    assert low_dose_intervals.iloc[1]["StartDateTime"] == make_ts("08:00")
+    assert low_dose_intervals.iloc[1]["EndDateTime"] == make_ts("14:00")
+    assert subcut_low_intervals.iloc[1]["StartDateTime"] == make_ts("08:00")
+    assert subcut_low_intervals.iloc[1]["EndDateTime"] == make_ts("14:00")
 
 
 # -----------------------------
@@ -586,7 +607,7 @@ def test_merge_order_all_permissive_rules(repo_with_basal_permissive):
 # -----------------------------
 
 def test_single_point_dull_state(repo_with_basal):
-    """Single tuple emits single-point interval."""
+    """Single tuple emits interval extended by good_after."""
     state_tak = repo_with_basal.get("BASAL_BITZUA_STATE")
     df_in = pd.DataFrame([
         (1, "BASAL_BITZUA", make_ts("00:00"), make_ts("00:00"), (12, "SubCutaneous"), "raw-concept"),
@@ -595,7 +616,9 @@ def test_single_point_dull_state(repo_with_basal):
     assert len(df_out) == 1
     row = df_out.iloc[0]
     assert row["Value"] == "SubCutaneous Low"
-    assert row["StartDateTime"] == row["EndDateTime"] == make_ts("00:00")
+    assert row["StartDateTime"] == make_ts("00:00")
+    # CORRECTED: EndDateTime = 0h + 24h = 24h (next day 00:00)
+    assert row["EndDateTime"] == make_ts("00:00", day=1)
 
 
 def test_no_abstraction_rules_emits_discrete_string(repo_with_glucose):
