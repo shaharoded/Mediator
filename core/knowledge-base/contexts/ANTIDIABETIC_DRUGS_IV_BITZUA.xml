@@ -2,7 +2,9 @@
 <context name="ANTIDIABETIC_DRUGS_IV_BITZUA_CONTEXT">
     <categories>Medicine</categories>
     <description>ANTIDIABETIC_DRUGS_IV influence context</description>
-    <derived-from name="ANTIDIABETIC_DRUGS_IV_BITZUA" tak="raw-concept" idx="0"/>
+    <derived-from>
+        <attribute name="ANTIDIABETIC_DRUGS_IV_BITZUA" tak="raw-concept" idx="0"/>
+    </derived-from>
 
     <!-- Use this to define different context windows based on value -->
     </abstraction-rules>

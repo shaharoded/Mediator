@@ -2,7 +2,9 @@
 <context name="DIABETES_DIAGNOSYS_CONTEXT">
     <categories>Medicine</categories>
     <description>DIABETES context</description>
-    <derived-from name="DIABETES_DIAGNOSYS" tak="raw-concept" idx="0"/>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSYS" tak="raw-concept" idx="0"/>
+    </derived-from>
 
     <!-- Use this to define different context windows based on value -->
     </abstraction-rules>
