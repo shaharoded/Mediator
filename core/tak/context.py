@@ -384,10 +384,13 @@ class Context(TAK):
                         new_start = clipper_start + pd.Timedelta(clip_before)
                         ctx_start = max(ctx_start, new_start)
 
-                    # Apply clip-after: delay context start if context overlaps clipper
-                    if clip_after is not None and ctx_start < clipper_end:
-                        delayed_start = clipper_end + pd.Timedelta(clip_after)
-                        ctx_start = max(ctx_start, delayed_start)
+                    # CORRECTED: Apply clip-after: delay context start ONLY if context start < clipper end
+                    # (after applying clip-before, ctx_start might already be >= clipper_end)
+                    if clip_after is not None:
+                        # Check if context STILL overlaps clipper after clip-before
+                        if ctx_start < clipper_end:
+                            delayed_start = clipper_end + pd.Timedelta(clip_after)
+                            ctx_start = max(ctx_start, delayed_start)
 
                 # Update df with clipped start time
                 df.at[idx, "StartDateTime"] = ctx_start

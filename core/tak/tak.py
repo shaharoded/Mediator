@@ -144,7 +144,7 @@ class AbstractionRule(TAKRule):
 
 class EventAbstractionRule(TAKRule):
     """
-    Custom abstraction rule for Event TAK.
+    Custom abstraction rule for Event and Context TAKs.
     constraints: {attr_name: [{type: 'equal'|'min'|'max'|'range', value/min/max: ...}]}
     
     Unlike AbstractionRule (which matches tuple indices), EventAbstractionRule matches
