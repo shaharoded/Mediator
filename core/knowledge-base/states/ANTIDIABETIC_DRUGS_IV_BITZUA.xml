@@ -5,7 +5,7 @@
     <derived-from name="ANTIDIABETIC_DRUGS_IV_BITZUA" tak="raw-concept"/>
 
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-before="0h" good-after="12h" interpolate="true" max-skip="1"/>
+    <persistence good-after="12h" interpolate="true" max-skip="1"/>
     
     <!-- idx="0" is nominal; no discretization needed -->
     </discretization-rules>

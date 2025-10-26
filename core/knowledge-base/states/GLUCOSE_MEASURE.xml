@@ -5,7 +5,7 @@
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
 
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-before="0h" good-after="24h" interpolate="true" max-skip="1"/>
+    <persistence good-after="24h" interpolate="true" max-skip="1"/>
 
     <!-- Discretization rules by values in order of appearance in the tuple (idx) -->
     <!-- Range treated as min_value <= X < max_value -->

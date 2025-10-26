@@ -4,8 +4,8 @@
     <description>Abstraction for the dosage and route of administration of BASAL insulin</description>
     <derived-from name="BASAL_BITZUA" tak="raw-concept"/>
 
-    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-before="0h" good-after="24h" interpolate="true" max-skip="1"/>
+    <!-- Concatenate adjacent equal states within good_after window; allow 1 outlier skip -->
+    <persistence good-after="24h" interpolate="true" max-skip="1"/>
 
     <!-- Discretization rules by values in order of appearance in the tuple (idx) -->
     <!-- Range treated as min_value <= X < max_value -->
