@@ -291,12 +291,12 @@ class RawConcept(TAK):
         if self.concept_type != "raw":
             out = df.loc[:, ["PatientId","StartDateTime","EndDateTime","ConceptName","Value"]].copy()
 
-            # boolean → set to (True,) only for those concepts
+            # boolean → set to ("True",) only for those concepts (string, not Python bool)
             if any(a["type"] == "boolean" for a in self.attributes):
                 bool_names = {a["name"] for a in self.attributes if a["type"] == "boolean"}
                 mask_bool = out["ConceptName"].isin(bool_names)
                 if mask_bool.any():
-                    out.loc[mask_bool, "Value"] = [(True,)] * int(mask_bool.sum())
+                    out.loc[mask_bool, "Value"] = [("True",)] * int(mask_bool.sum())
 
             # wrap scalars into 1-tuples (avoid double-wrap)
             out["Value"] = out["Value"].map(lambda v: v if isinstance(v, tuple) else (v,))

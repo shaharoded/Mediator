@@ -15,9 +15,9 @@ from .raw_concept import RawConcept
 
 class State(TAK):
     """
-    State abstraction: discretize + abstract + merge intervals.
+    State abstraction: discretize (for numeric) + abstract (for multi-attr concepts) + merge intervals (based on same rule match).
     - Handles nominal (no discretization), numeric (single-attr), and complex (multi-attr tuples).
-    - Requires derived_from raw-concept(s) to be pre-applied (df cached in TAKRepository).
+    - Requires derived_from raw-concept(s) to be pre-applied (TAK object cached in TAKRepository, df calculated on demand).
     
     A state will only be derived from one raw concept TAK, but that TAK can produce multiple values in it's tuple.
     """
@@ -71,7 +71,7 @@ class State(TAK):
         if ga < timedelta(0):
             raise ValueError(f"{name}: good-after must be non-negative")
         if gb == ga == timedelta(0):
-            raise ValueError(f"{name}: at least one of good-before or good-after must be positive")
+            raise ValueError(f"{name}: at least one of good-before or good-after must be positive. You can use events for instantaneous abstractions.")
         interpolate = pers_el.attrib.get("interpolate", "false").lower() == "true"
         max_skip = int(pers_el.attrib.get("max-skip", "0"))
 
@@ -173,6 +173,97 @@ class State(TAK):
                 for idx in rule.constraints.keys():
                     if idx >= tuple_size:
                         raise ValueError(f"{self.name}: abstraction rule constraint idx={idx} out of bounds (tuple size={tuple_size})")
+
+        # 5) NEW: Check numeric attributes are discretized if referenced in abstraction rules
+        if self.abstraction_rules and parent_tak.concept_type == "raw":
+            referenced_indices = set()
+            for rule in self.abstraction_rules:
+                referenced_indices.update(rule.constraints.keys())
+
+            for idx in referenced_indices:
+                attr_name = parent_tak.tuple_order[idx]
+                parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name), None)
+                if parent_attr is None:
+                    continue
+
+                has_discretization = any(r.attr_idx == idx for r in self.discretization_rules)
+
+                # ERROR: numeric attribute referenced in abstraction without discretization
+                if parent_attr["type"] == "numeric" and not has_discretization:
+                    raise ValueError(f"{self.name}: numeric attribute at idx={idx} ('{attr_name}') is referenced in abstraction rules "
+                                   f"but has no discretization rules. Add discretization.")
+
+        # 6) WARN: discretized or nominal/boolean attributes NOT referenced in abstraction rules
+        if self.abstraction_rules and parent_tak.concept_type == "raw":
+            referenced_indices = set()
+            for rule in self.abstraction_rules:
+                referenced_indices.update(rule.constraints.keys())
+
+            for idx, attr_name in enumerate(parent_tak.tuple_order):
+                parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name), None)
+                if parent_attr is None:
+                    continue
+
+                has_discretization = any(r.attr_idx == idx for r in self.discretization_rules)
+                is_nominal_or_boolean = parent_attr["type"] in ("nominal", "boolean")
+
+                if (has_discretization or is_nominal_or_boolean) and idx not in referenced_indices:
+                    logger.warning(f"{self.name}: attribute at idx={idx} ('{attr_name}', type={parent_attr['type']}) "
+                                 f"is discretized/nominal/boolean but never referenced in abstraction rules. "
+                                 f"This may be intentional (silent abstraction) or a mistake.")
+
+        # 7) Check abstraction rules cover all possible discrete values (existing code)
+        if self.abstraction_rules:
+            # Build set of all possible discrete values per attribute index
+            possible_values_per_idx: Dict[int, set] = defaultdict(set)
+
+            if parent_tak.concept_type == "raw":
+                # Collect from discretization rules or parent attributes
+                for idx, attr_name in enumerate(parent_tak.tuple_order):
+                    parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name), None)
+                    if parent_attr is None:
+                        continue
+
+                    # Check if discretization rules exist for this idx
+                    disc_for_idx = [r for r in self.discretization_rules if r.attr_idx == idx]
+                    if disc_for_idx:
+                        # Use discretization output values
+                        possible_values_per_idx[idx] = {r.value for r in disc_for_idx}
+                    else:
+                        # Use parent's allowed values (for nominal/boolean)
+                        if parent_attr["type"] == "nominal" and parent_attr["allowed"]:
+                            possible_values_per_idx[idx] = set(parent_attr["allowed"])
+                        elif parent_attr["type"] == "boolean":
+                            possible_values_per_idx[idx] = {"True"}  # boolean → string "True"
+            else:
+                # Non-raw: single attribute at idx=0
+                parent_attr = parent_tak.attributes[0]
+                if self.discretization_rules:
+                    # Use discretization outputs
+                    disc_for_idx = [r for r in self.discretization_rules if r.attr_idx == 0]
+                    possible_values_per_idx[0] = {r.value for r in disc_for_idx}
+                else:
+                    # Use parent's allowed values
+                    if parent_attr["type"] == "nominal" and parent_attr["allowed"]:
+                        possible_values_per_idx[0] = set(parent_attr["allowed"])
+                    elif parent_attr["type"] == "boolean":
+                        possible_values_per_idx[0] = {"True"}
+
+            # Check if abstraction rules cover all combinations (warn if not)
+            if possible_values_per_idx:
+                # Collect all values referenced in abstraction rules per idx
+                covered_per_idx: Dict[int, set] = defaultdict(set)
+                for rule in self.abstraction_rules:
+                    for idx, allowed in rule.constraints.items():
+                        covered_per_idx[idx].update(allowed)
+
+                # Compare covered vs possible
+                for idx, possible in possible_values_per_idx.items():
+                    covered = covered_per_idx.get(idx, set())
+                    uncovered = possible - covered
+                    if uncovered:
+                        logger.warning(f"{self.name}: abstraction rules do not cover all discrete values at idx={idx}. "
+                                     f"Uncovered: {uncovered}. Rows with these values will be filtered out.")
 
         # All checks passed
         return None

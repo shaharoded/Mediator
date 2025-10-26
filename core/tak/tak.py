@@ -112,20 +112,28 @@ class AbstractionRule(TAKRule):
     """
     Logical rule to combine discrete attribute values → final state label.
     Example: value="SubCutaneous Low", operator="and", constraints={(0, ['Very Low','Low']), (1, ['SubCutaneous'])}
+    
+    Rule matches if ALL specified constraints are satisfied (tuple can have additional unreferenced attributes).
     """
     def __init__(self, value: str, operator: Literal["and","or"], constraints: Dict[int, List[str]]):
         self.value = value
         self.operator = operator.lower()
         self.constraints = constraints  # {attr_idx: [allowed_discrete_values]}
 
-    def matches(self, discrete_tuple: Tuple[str, ...]) -> bool:
-        """Check if a discrete tuple satisfies this rule."""
+    def matches(self, discrete_tuple: Tuple[Any, ...]) -> bool:
+        """
+        Check if a discrete tuple satisfies this rule.
+        Rule matches if all constraint indices are satisfied (tuple can have MORE attributes than rule references).
+        """
         results = []
         for idx, allowed in self.constraints.items():
             if idx >= len(discrete_tuple):
+                # Rule references an index not present in tuple → fail
                 results.append(False)
             else:
-                results.append(discrete_tuple[idx] in allowed)
+                # Convert tuple element to string for comparison (handles bool/nominal uniformly)
+                val_str = str(discrete_tuple[idx])
+                results.append(val_str in allowed)
         
         if self.operator == "and":
             return all(results)
