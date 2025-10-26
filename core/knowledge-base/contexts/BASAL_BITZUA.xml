@@ -45,7 +45,7 @@
 
     <!-- An instance of these will clip the context windows -->
     <clippers>
-        <clipper name="DEATH" tak="raw-concept"/>
-        <clipper name="RELEASE" tak="raw-concept"/>
+        <clipper name="DEATH" tak="raw-concept" clip-before="0s" clip-after="120y"/>
+        <clipper name="RELEASE" tak="raw-concept" clip-before="0s" clip-after="120y"/>
     </clippers>
 </context>
