@@ -321,12 +321,13 @@ class RawConcept(TAK):
         merged: List[dict] = []
         start_idx = 0
         n = len(df)
-        times = df["StartDateTime"].values.astype('datetime64[ns]')  # numpy datetime array
+        # OPTIMIZATION: Use numpy datetime array (avoid repeated conversions)
+        times = df["StartDateTime"].to_numpy(dtype='datetime64[ns]')
 
         windows = 0
         for i in range(1, n + 1):
-            # Convert timedelta64 to float seconds for comparison
-            if i == n or (times[i] - times[i-1]) / np.timedelta64(1, 's') > tol_s:
+            # OPTIMIZATION: Compute time delta in seconds using numpy
+            if i == n or (times[i] - times[i-1]).astype('timedelta64[s]').astype(float) > tol_s:
                 block = df.iloc[start_idx:i]
                 block = block[block["ConceptName"].isin(self.tuple_order)]
                 if not block.empty:

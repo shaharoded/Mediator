@@ -19,7 +19,7 @@ from core.tak.state import State
 from core.tak.raw_concept import RawConcept
 from core.tak.tak import set_tak_repository, TAKRepository
 from core.tak.utils import parse_duration
-
+from core.tak.event import Event  # NEW IMPORT
 
 # -----------------------------
 # Helpers: XML writers & timestamp builders
@@ -258,6 +258,46 @@ STATE_GLUCOSE_XML = """\
 </state>
 """
 
+# NEW: Event + State XMLs for testing State-from-Event
+EVENT_MEAL_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="MEAL_EVENT">
+    <categories>Events</categories>
+    <description>Meal event</description>
+    <derived-from>
+        <attribute name="MEAL" tak="raw-concept" idx="0"/>
+    </derived-from>
+</event>
+"""
+
+RAW_MEAL_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="MEAL" concept-type="raw-nominal">
+  <categories>Events</categories>
+  <description>Meal type</description>
+  <attributes>
+    <attribute name="MEAL_TYPE" type="nominal">
+      <nominal-allowed-values>
+        <allowed-value value="Breakfast"/>
+        <allowed-value value="Lunch"/>
+        <allowed-value value="Dinner"/>
+        <allowed-value value="Snack"/>
+      </nominal-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+
+STATE_FROM_EVENT_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="MEAL_STATE">
+    <categories>Events</categories>
+    <description>Meal state derived from event</description>
+    <derived-from name="MEAL_EVENT" tak="event"/>
+    <persistence good-after="3h" interpolate="false" max-skip="0"/>
+</state>
+"""
+
 
 # -----------------------------
 # DF Builders (simulate raw-concept output)
@@ -385,6 +425,26 @@ def repo_with_glucose(tmp_path: Path) -> TAKRepository:
     raw_tak = RawConcept.parse(raw_path)
     repo.register(raw_tak)
     set_tak_repository(repo)
+    state_tak = State.parse(state_path)
+    repo.register(state_tak)
+    return repo
+
+
+@pytest.fixture
+def repo_with_meal_event_state(tmp_path: Path) -> TAKRepository:
+    """MEAL raw-concept → MEAL_EVENT → MEAL_STATE (State from Event)."""
+    raw_path = write_xml(tmp_path, "MEAL.xml", RAW_MEAL_XML)
+    event_path = write_xml(tmp_path, "MEAL_EVENT.xml", EVENT_MEAL_XML)
+    state_path = write_xml(tmp_path, "MEAL_STATE.xml", STATE_FROM_EVENT_XML)
+    
+    repo = TAKRepository()
+    raw_tak = RawConcept.parse(raw_path)
+    repo.register(raw_tak)
+    set_tak_repository(repo)
+    
+    event_tak = Event.parse(event_path)
+    repo.register(event_tak)
+    
     state_tak = State.parse(state_path)
     repo.register(state_tak)
     return repo
@@ -641,3 +701,50 @@ def test_empty_input_returns_empty(repo_with_basal):
     df_in = pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     df_out = state_tak.apply(df_in)
     assert df_out.empty
+
+
+def test_state_from_event(repo_with_meal_event_state):
+    """State can be derived from Event TAK (treat like raw-nominal)."""
+    raw_tak = repo_with_meal_event_state.get("MEAL")
+    event_tak = repo_with_meal_event_state.get("MEAL_EVENT")
+    state_tak = repo_with_meal_event_state.get("MEAL_STATE")
+    
+    # Simulate raw-concept input
+    df_raw = pd.DataFrame([
+        (1, "MEAL_TYPE", make_ts("08:00"), make_ts("08:00"), "Breakfast"),
+        (1, "MEAL_TYPE", make_ts("12:00"), make_ts("12:00"), "Lunch"),
+        (1, "MEAL_TYPE", make_ts("18:00"), make_ts("18:00"), "Dinner"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    # Apply raw-concept (wrap as tuples)
+    df_raw_out = raw_tak.apply(df_raw)
+    assert len(df_raw_out) == 3
+    assert all(isinstance(v, tuple) for v in df_raw_out["Value"])
+    
+    # Apply event (no rules → emit raw values as-is)
+    df_event_out = event_tak.apply(df_raw_out)
+    assert len(df_event_out) == 3
+    assert all(df_event_out["ConceptName"] == "MEAL_EVENT")
+    assert list(df_event_out["Value"]) == [("Breakfast",), ("Lunch",), ("Dinner",)]
+    # CORRECTED: Events preserve input EndDateTime
+    assert all(df_event_out["StartDateTime"] == df_event_out["EndDateTime"])
+    
+    # Apply state (treat event like raw-nominal, merge with good_after=3h)
+    df_state_out = state_tak.apply(df_event_out)
+    
+    # Expected: 3 intervals (no merging since gaps > 3h)
+    # - [08:00 → 11:00] (8h + 3h) "('Breakfast',)"
+    # - [12:00 → 15:00] (12h + 3h) "('Lunch',)"
+    # - [18:00 → 21:00] (18h + 3h) "('Dinner',)"
+    assert len(df_state_out) == 3
+    assert all(df_state_out["ConceptName"] == "MEAL_STATE")
+    
+    # Check EndDateTime extensions
+    assert df_state_out.iloc[0]["EndDateTime"] == make_ts("11:00")  # 8h + 3h
+    assert df_state_out.iloc[1]["EndDateTime"] == make_ts("15:00")  # 12h + 3h
+    assert df_state_out.iloc[2]["EndDateTime"] == make_ts("21:00")  # 18h + 3h
+    
+    # Values remain as string-ified tuples (no abstraction rules)
+    assert df_state_out.iloc[0]["Value"] == "('Breakfast',)"
+    assert df_state_out.iloc[1]["Value"] == "('Lunch',)"
+    assert df_state_out.iloc[2]["Value"] == "('Dinner',)"

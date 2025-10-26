@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 from .utils import parse_duration
 from .tak import TAK, get_tak_repository, DiscretizationRule, AbstractionRule
 from .raw_concept import RawConcept
+from .event import Event
 
 
 class State(TAK):
@@ -117,18 +118,24 @@ class State(TAK):
         """Business logic validation using global TAKRepository."""
         repo = get_tak_repository()
 
-        # 1) Check derived_from references a valid RawConcept
+        # 1) Check derived_from references a valid RawConcept OR Event
         parent_tak = repo.get(self.derived_from)
         if parent_tak is None:
             raise ValueError(f"{self.name}: derived_from='{self.derived_from}' not found in TAK repository")
-        if not isinstance(parent_tak, RawConcept):
-            raise ValueError(f"{self.name}: derived_from='{self.derived_from}' is not a RawConcept (found {parent_tak.family})")
+        # Allow Event TAKs as parents (treat like raw-nominal)
+        if not isinstance(parent_tak, (RawConcept, Event)):
+            raise ValueError(f"{self.name}: derived_from='{self.derived_from}' is not a RawConcept or Event (found {parent_tak.family})")
 
-        # 2) Determine tuple size: only 'raw' type has len > 1
-        if parent_tak.concept_type == "raw":
-            tuple_size = len(parent_tak.tuple_order)
+        # 2) Determine tuple size
+        if isinstance(parent_tak, RawConcept):
+            if parent_tak.concept_type == "raw":
+                tuple_size = len(parent_tak.tuple_order)
+            else:
+                tuple_size = 1
+        elif isinstance(parent_tak, Event):
+            # Events always emit single-value strings (not tuples)
+            tuple_size = 1
         else:
-            # raw-numeric, raw-nominal, raw-boolean → always emit 1-tuples
             tuple_size = 1
 
         # 3) Validate discretization rules coherence
@@ -401,10 +408,14 @@ class State(TAK):
         merged: List[dict] = []
         n = len(df)
         i = 0
-
+        
+        # OPTIMIZATION: Pre-convert StartDateTime to numpy array (avoid repeated pd.Timestamp calls)
+        start_times = df["StartDateTime"].values  # numpy datetime64 array
+        good_after_td = pd.Timedelta(self.good_after)  # convert once
+        
         while i < n:
             current_row = df.iloc[i]
-            interval_start = current_row["StartDateTime"]
+            interval_start = start_times[i]  # numpy datetime64
             interval_value = current_row["Value"]
             interval_pid = current_row["PatientId"]
             interval_cname = current_row["ConceptName"]
@@ -415,58 +426,53 @@ class State(TAK):
             skip_count = 0
             j = i + 1
             
+            # OPTIMIZATION: Compute window boundary once
+            window_end = interval_start + good_after_td
+            
             while j < n:
-                next_row = df.iloc[j]
-                same_value = (next_row["Value"] == interval_value)
-                within_window = (next_row["StartDateTime"] <= pd.Timestamp(interval_start) + self.good_after)
+                next_start = start_times[j]
+                next_value = df.iloc[j]["Value"]
+                same_value = (next_value == interval_value)
+                within_window = (next_start <= window_end)
                 
                 if same_value and within_window:
-                    # Merge this row
                     merged_rows.append(j)
                     skip_count = 0
                     j += 1
                 elif not same_value and within_window and self.interpolate and skip_count < self.max_skip:
                     # Check if next row after this one is same_value and within_window
                     if j + 1 < n:
-                        peek_row = df.iloc[j + 1]
-                        peek_same = (peek_row["Value"] == interval_value)
-                        peek_within = (peek_row["StartDateTime"] <= pd.Timestamp(interval_start) + self.good_after)
+                        peek_start = start_times[j + 1]
+                        peek_value = df.iloc[j + 1]["Value"]
+                        peek_same = (peek_value == interval_value)
+                        peek_within = (peek_start <= window_end)
                         if peek_same and peek_within:
-                            # Skip this outlier
                             skip_count += 1
                             j += 1
                             continue
-                    # Can't skip → break
                     break
                 else:
-                    # No more merges
                     break
             
             # Determine interval EndDateTime
-            last_merged_idx = merged_rows[-1]
-            last_merged_time = df.iloc[last_merged_idx]["StartDateTime"]
+            last_merged_time = start_times[merged_rows[-1]]
+            interval_end = last_merged_time + good_after_td
             
-            # Default: extend to last_merged_time + good_after
-            interval_end = pd.Timestamp(last_merged_time) + self.good_after
-            
-            # But if there's a next sample (SAME VALUE) that arrives BEFORE interval_end, stop at that sample's start
-            # NOTE: Since we're processing a single-value group, all rows in df have the same Value
-            # So we just check the next row in the df (not globally)
+            # Cap at next sample's start if it arrives sooner
             if j < n:
-                next_sample_time = df.iloc[j]["StartDateTime"]
+                next_sample_time = start_times[j]
                 if next_sample_time < interval_end:
                     interval_end = next_sample_time
             
             merged.append({
                 "PatientId": interval_pid,
                 "ConceptName": interval_cname,
-                "StartDateTime": interval_start,
-                "EndDateTime": interval_end,
+                "StartDateTime": pd.Timestamp(interval_start),  # convert back to Timestamp for output
+                "EndDateTime": pd.Timestamp(interval_end),
                 "Value": interval_value,
                 "AbstractionType": interval_abstype
             })
             
-            # Move to next unprocessed row
             i = j
 
         return merged

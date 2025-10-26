@@ -4,7 +4,9 @@
 The Mediator converts time-stamped clinical input into interval-based abstractions for research, development and predictive models. It implements a compact Knowledge-Based Temporal Abstraction (KBTA) style pipeline locally.
 
 ## Implemented abstractions
-- **Events** — point-in-time occurrences (e.g., medication administration).
+- **Events** — point-in-time occurrences (e.g., medication administration, dysglycemia).
+  - Can be derived from **multiple raw-concepts** (bridging data gaps).
+  - Support flexible constraints: `equal`, `min`, `max`, or `min + max` (range).
 - **Contexts** — background facts that affect abstraction logic. Similar to `Events` but might be time bounded.
 - **States** — symbolic intervals derived from numeric concepts by discretization or from nominal concepts by equality (e.g., "high glucose").
 - **Trends** — gradients over time (e.g., increasing, decreasing).
@@ -118,6 +120,7 @@ OR one-by-one
 ```bash
 python -m pytest unittests/test_raw_concept.py -v
 python -m pytest unittests/test_state.py -v
+python -m pytest unittests/test_event.py -v
 ```
 
 ## Git commit tips

@@ -80,7 +80,7 @@ class TAKRepository:
 class TAKRule(ABC):
     """
     Abstract base for all rule types (discretization, abstraction, trend, context, pattern).
-    Subclasses: DiscretizationRule, AbstractionRule, TrendRule, ContextRule, PatternRule.
+    Subclasses: DiscretizationRule, AbstractionRule, EventAbstractionRule.
     """
     @abstractmethod
     def matches(self, *args, **kwargs) -> bool:
@@ -135,6 +135,91 @@ class AbstractionRule(TAKRule):
                 val_str = str(discrete_tuple[idx])
                 results.append(val_str in allowed)
         
+        if self.operator == "and":
+            return all(results)
+        elif self.operator == "or":
+            return any(results)
+        return False
+
+
+class EventAbstractionRule(TAKRule):
+    """
+    Custom abstraction rule for Event TAK.
+    constraints: {attr_name: [{type: 'equal'|'min'|'max'|'range', value/min/max: ...}]}
+    
+    Unlike AbstractionRule (which matches tuple indices), EventAbstractionRule matches
+    by raw-concept name and supports flexible numeric constraints (min/max/range/equal).
+    """
+    def __init__(self, value: str, operator: Literal["and","or"], constraints: Dict[str, List[Dict[str, Any]]]):
+        self.value = value
+        self.operator = operator.lower()
+        self.constraints = constraints  # {attr_name: [{constraint_spec}]}
+
+    def matches(self, row: pd.Series, derived_from: List[Dict[str, Any]]) -> bool:
+        """
+        Check if a row satisfies this rule.
+        operator="or": any attribute matches
+        operator="and": all attributes match
+        
+        Args:
+            row: DataFrame row with columns [PatientId, ConceptName, StartDateTime, EndDateTime, Value, AbstractionType]
+            derived_from: List of {name, tak_type, idx} dicts from Event.derived_from
+        """
+        results = []
+        for attr_name, constraint_list in self.constraints.items():
+            # Find derived-from entry for this attribute
+            df_entry = next((df for df in derived_from if df["name"] == attr_name), None)
+            if df_entry is None:
+                results.append(False)
+                continue
+
+            # Check if row's ConceptName matches this attribute
+            if row["ConceptName"] != attr_name:
+                results.append(False)
+                continue
+
+            # Extract value from tuple (using idx)
+            idx = df_entry["idx"]
+            row_value = row["Value"]
+            if isinstance(row_value, tuple):
+                if idx >= len(row_value):
+                    results.append(False)
+                    continue
+                val = row_value[idx]
+            else:
+                val = row_value
+
+            # Check constraints
+            attr_matches = False
+            for c in constraint_list:
+                if c["type"] == "equal":
+                    if str(val) == c["value"]:
+                        attr_matches = True
+                        break
+                elif c["type"] == "min":
+                    try:
+                        if float(val) >= c["value"]:
+                            attr_matches = True
+                            break
+                    except (ValueError, TypeError):
+                        pass
+                elif c["type"] == "max":
+                    try:
+                        if float(val) <= c["value"]:
+                            attr_matches = True
+                            break
+                    except (ValueError, TypeError):
+                        pass
+                elif c["type"] == "range":
+                    try:
+                        if c["min"] <= float(val) <= c["max"]:
+                            attr_matches = True
+                            break
+                    except (ValueError, TypeError):
+                        pass
+            
+            results.append(attr_matches)
+
         if self.operator == "and":
             return all(results)
         elif self.operator == "or":
