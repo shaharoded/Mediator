@@ -5,5 +5,5 @@
     <derived-from>
         <attribute name="ADMISSION" tak="raw-concept" idx="0"/>
     </derived-from>
-    </abstraction-rules>
+    <abstraction-rules/>
 </event>

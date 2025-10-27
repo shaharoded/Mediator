@@ -12,16 +12,16 @@
             <nominal-allowed-values>
                 <allowed-value value="SubCutaneous"/>
                 <allowed-value value="IntraVenous"/>
-            </allowed-values>
+            </nominal-allowed-values>
         </attribute>
     </attributes>
 
-    <!-- Merge dosage+route if observed within ±1 min; route is optional -->
-    <merge tolerance="60s" require-all="false"/>
-    
     <!-- Emit value as (dosage, route); if route missing -> (dosage, None) -->
     <tuple-order>
         <attribute name="BOLUS_DOSAGE"/>
         <attribute name="BOLUS_ROUTE"/>
     </tuple-order>
+
+    <!-- Merge dosage+route if observed within ±1 min; route is optional -->
+    <merge tolerance="60s" require-all="false"/>
 </raw-concept>

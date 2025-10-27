@@ -81,20 +81,24 @@ Mediator/
 ## CLI
 - **Create DB tables:**
   ```
-  python backend/dataaccess.py --create_db
+  python -m backend/dataaccess --create_db
   ```
   - Drop existing and recreate:
   ```
-  python backend/dataaccess.py --create_db --drop
+  python -m backend.dataaccess --create_db --drop
   ```
 - **Load CSV into InputPatientData:**
   - Interactive (prompts if table not empty):
     ```
-    python backend/dataaccess.py --load_csv data/my_input.csv
+    python -m backend/dataaccess --load_csv data/my_input.csv
+    
+    # Like:
+    
+    python -m backend.dataaccess --load_csv backend/data/synthetic_input_data.csv
     ```
   - Replace input, clear outputs, auto-confirm:
     ```
-    python backend/dataaccess.py --load_csv data/my_input.csv --replace-input --clear-output-qa --yes
+    python -m backend/dataaccess --load_csv data/my_input.csv --replace-input --clear-output-qa --yes
     ```
 - Loader auto-selects Dask for large files (>=100 MB) if available; otherwise uses pandas chunking.
 - Loading is transactional: validations + inserts per chunk; any validation error rolls back all changes.
@@ -152,7 +156,7 @@ python -m pytest unittests/test_event.py -v
 python -m pytest unittests/test_state.py -v
 python -m pytest unittests/test_trend.py -v -s # Added validation prints
 python -m pytest unittests/test_context.py -v
-python -m pytest unittests/test_mediator.py -v
+python -m pytest unittests/test_mediator.py -v -s # Added validation prints
 ```
 
 ## Git commit tips

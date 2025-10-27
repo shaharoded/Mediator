@@ -18,7 +18,7 @@ from tqdm import tqdm
 DASK_FILESIZE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
 
 # Local Code
-from config import *
+from .config import *
 
 class DataAccess:
     def __init__(self, db_path=DB_PATH):
@@ -37,7 +37,8 @@ class DataAccess:
             raise SystemExit(1)
 
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        # Allow SQLite connection to be used across threads (for asyncio)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
         print(f"[DEBUG] Connected to SQLite: {self.db_path}")
 
@@ -105,8 +106,15 @@ class DataAccess:
     def insert_many(self, query_path, rows, batch_size=1000):
         """
         Insert many rows using executemany in batches.
-        query_path: path to .sql insert template (with ? placeholders)
-        rows: iterable of tuples
+        Returns the number of rows actually inserted (respects INSERT OR IGNORE).
+        
+        Args:
+            query_path: path to .sql insert template (with ? placeholders)
+            rows: iterable of tuples
+            batch_size: number of rows per batch
+        
+        Returns:
+            Total number of rows actually inserted (excluding duplicates)
         """
         if not os.path.isfile(query_path):
             raise FileNotFoundError(f"Query file not found: {query_path}")
@@ -114,19 +122,23 @@ class DataAccess:
             query = f.read()
 
         batch = []
-        count = 0
+        total_inserted = 0
+        
         for r in rows:
             batch.append(r)
             if len(batch) >= batch_size:
                 self.cursor.executemany(query, batch)
+                total_inserted += self.cursor.rowcount  # Count actual inserts (respects OR IGNORE)
                 self.conn.commit()
-                count += len(batch)
                 batch = []
+        
+        # Final batch
         if batch:
             self.cursor.executemany(query, batch)
+            total_inserted += self.cursor.rowcount
             self.conn.commit()
-            count += len(batch)
-        return count
+        
+        return total_inserted
 
     def fetch_records(self, query_or_path, params=()):
         """

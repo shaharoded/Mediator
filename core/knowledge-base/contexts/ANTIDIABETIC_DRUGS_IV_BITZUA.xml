@@ -7,7 +7,7 @@
     </derived-from>
 
     <!-- Use this to define different context windows based on value -->
-    </abstraction-rules>
+    <abstraction-rules/>
 
     <context-windows>
         <persistence value="Low" good-before="0h" good-after="6h"/>

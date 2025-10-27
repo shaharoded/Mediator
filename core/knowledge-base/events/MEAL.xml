@@ -7,5 +7,5 @@
     </derived-from>
 
     <!-- Invocation rules -> values on the raw concept -->
-    </abstraction-rules>
+    <abstraction-rules/>
 </event>

@@ -405,7 +405,7 @@ class State(TAK):
                     exploded_rows.append(row.to_dict())
             df = pd.DataFrame(exploded_rows)
             
-            # CORRECTED: Process each unique Value independently
+            # Process each unique Value independently
             all_merged = []
             for value in df["Value"].unique():
                 value_df = df[df["Value"] == value].sort_values("StartDateTime").reset_index(drop=True)
@@ -429,8 +429,9 @@ class State(TAK):
         n = len(df)
         i = 0
         
-        # OPTIMIZATION: Pre-convert StartDateTime to numpy array (avoid repeated pd.Timestamp calls)
-        start_times = df["StartDateTime"].values  # numpy datetime64 array
+        # Ensure StartDateTime is datetime64[ns] (not object/string)
+        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
+        start_times = df["StartDateTime"].values  # numpy datetime64[ns] array
         good_after_td = pd.Timedelta(self.good_after)  # convert once
         
         while i < n:

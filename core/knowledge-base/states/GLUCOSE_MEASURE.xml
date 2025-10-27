@@ -23,5 +23,5 @@
 
     <!-- Once all values are discrete, they can be abstracted -->
     <!-- If no abstraction rules are defined, the abstraction will default to the original values -->
-    </abstraction-rules>
+    <abstraction-rules/>
 </state>
