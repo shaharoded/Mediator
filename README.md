@@ -121,7 +121,7 @@ OR one-by-one
 python -m pytest unittests/test_raw_concept.py -v
 python -m pytest unittests/test_event.py -v
 python -m pytest unittests/test_state.py -v
-python -m pytest unittests/test_trend.py -v # TO-DO
+python -m pytest unittests/test_trend.py -v
 python -m pytest unittests/test_context.py -v
 ```
 
