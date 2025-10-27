@@ -116,34 +116,37 @@ class Trend(TAK):
             raise ValueError(f"{self.name}: attribute at idx={self.attribute_idx} is not numeric (required for trends)")
 
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Apply trend classification to raw-concept data.
-        Input:  PatientId, ConceptName(=derived_from), StartDateTime, EndDateTime, Value(tuple), AbstractionType
-        Output: PatientId, ConceptName(self.name), StartDateTime, EndDateTime, Value("Increasing"|"Decreasing"|"Steady"), AbstractionType
-        """
+        """Apply trend classification to raw-concept data."""
         if df.empty:
             return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
 
         logger.info("[%s] apply() start | input_rows=%d", self.name, len(df))
 
-        # 1) Extract numeric values and compute trends
-        df = self._compute_trends(df.copy())
-        if df.empty:
-            logger.info("[%s] apply() end | post-trend=0 rows", self.name)
-            return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+        # OPTIMIZATION: Process each patient independently (can be parallelized)
+        patients = df["PatientId"].unique()
+        if len(patients) > 1:
+            # Multi-patient: process separately and concatenate
+            results = []
+            for pid in patients:
+                patient_df = df[df["PatientId"] == pid].copy()
+                patient_trends = self._compute_trends(patient_df)
+                patient_intervals = self._build_intervals(patient_trends)
+                results.append(patient_intervals)
+            df_out = pd.concat(results, ignore_index=True)
+        else:
+            # Single patient: process directly
+            df = self._compute_trends(df.copy())
+            df_out = self._build_intervals(df)
 
-        # 2) Build anchor-based intervals
-        df = self._build_intervals(df)
-
-        df["ConceptName"] = self.name
-        df["AbstractionType"] = self.family
-        logger.info("[%s] apply() end | output_rows=%d", self.name, len(df))
-        return df[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
+        df_out["ConceptName"] = self.name
+        df_out["AbstractionType"] = self.family
+        logger.info("[%s] apply() end | output_rows=%d", self.name, len(df_out))
+        return df_out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
 
     def _compute_trends(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Classify each point using OLS slope over the entire lookback window (time_steady).
-        The window includes the current point and all prior points within time_steady.
+        OPTIMIZED: Binary search for window boundaries, pre-allocated arrays, vectorized operations.
         """
         if df.empty:
             return df
@@ -162,59 +165,76 @@ class Trend(TAK):
         if df.empty:
             return df
 
-        # Ensure numpy-friendly dtypes
+        # OPTIMIZATION 1: Pre-convert to numpy arrays (avoid repeated pandas overhead)
         df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
-        t = df["StartDateTime"].to_numpy(dtype="datetime64[ns]")
-        y = df["numeric_value"].to_numpy(dtype=float)
-
-        # Use timedelta64[ns] for proper window comparison
-        win_delta = np.timedelta64(int(pd.Timedelta(self.time_steady).value), "ns")
-
+        times_ns = df["StartDateTime"].to_numpy(dtype="datetime64[ns]")  # nanosecond timestamps
+        values = df["numeric_value"].to_numpy(dtype=float)
+        
+        # OPTIMIZATION 2: Convert to float seconds ONCE (for stable OLS computation)
+        times_sec = (times_ns - times_ns[0]).astype('timedelta64[s]').astype(float)
+        
+        # Window size in nanoseconds (for binary search)
+        win_ns = np.timedelta64(int(pd.Timedelta(self.time_steady).value), "ns")
+        
         T = len(df)
-        labels = []
-        # Seconds from first point (monotonic increasing)
-        t_sec = (t - t[0]) / np.timedelta64(1, "s")
-
-        # For each i, include all j<=i with t_i - t_j <= time_steady
+        labels = np.empty(T, dtype=object)  # Pre-allocate output array
+        
+        # OPTIMIZATION 3: Binary search for window boundaries (O(log n) instead of O(n))
         for i in range(T):
-            # find earliest index j_start within the window
-            j = i
-            while j >= 0 and (t[i] - t[j]) <= win_delta:
-                j -= 1
-            j_start = j + 1
-
-            # Need at least two points in window to estimate a slope
-            if i - j_start < 1:
-                labels.append("Steady")
+            t_i = times_ns[i]
+            window_start = t_i - win_ns
+            
+            # Binary search for first index >= window_start
+            j_start = np.searchsorted(times_ns, window_start, side='left')
+            
+            # Window: [j_start, i]
+            window_size = i - j_start + 1
+            
+            if window_size < 2:
+                labels[i] = "Steady"
                 continue
-
-            xs = t_sec[j_start:i+1]
-            ys = y[j_start:i+1]
-
-            # OLS slope: cov(x,y)/var(x)
+            
+            # OPTIMIZATION 4: Slice arrays directly (no intermediate data structures)
+            xs = times_sec[j_start:i+1]
+            ys = values[j_start:i+1]
+            
+            # OPTIMIZATION 5: Vectorized OLS computation (no loops)
             x_mean = xs.mean()
             y_mean = ys.mean()
             dx = xs - x_mean
             dy = ys - y_mean
-            denom = float((dx * dx).sum())
-            if denom <= 0.0:
-                labels.append("Steady")
+            
+            # Use dot product for numerator (faster than sum of elementwise products)
+            numerator = np.dot(dx, dy)
+            denominator = np.dot(dx, dx)
+            
+            if denominator <= 1e-10:  # numerical stability check
+                labels[i] = "Steady"
                 continue
-
-            slope = float((dx * dy).sum()) / denom  # value per second
-            horizon_sec = float(pd.Timedelta(self.time_steady) / pd.Timedelta(seconds=1))
+            
+            slope = numerator / denominator  # units: value per second
+            
+            # Total variation over time_steady window
+            horizon_sec = self.time_steady.total_seconds()
             total_var = slope * horizon_sec
-
+            
             if total_var >= self.significant_variation:
-                labels.append("Increasing")
+                labels[i] = "Increasing"
             elif total_var <= -self.significant_variation:
-                labels.append("Decreasing")
+                labels[i] = "Decreasing"
             else:
-                labels.append("Steady")
-
-        # Overwrite Value with labels; keep schema
-        df_out = df.loc[:, ["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "AbstractionType"]].copy()
-        df_out["Value"] = labels
+                labels[i] = "Steady"
+        
+        # OPTIMIZATION 6: Build output DataFrame without copying unnecessary columns
+        df_out = pd.DataFrame({
+            "PatientId": df["PatientId"].values,
+            "ConceptName": df["ConceptName"].values,
+            "StartDateTime": df["StartDateTime"].values,
+            "EndDateTime": df["EndDateTime"].values,
+            "Value": labels,
+            "AbstractionType": df["AbstractionType"].values
+        })
+        
         return df_out
 
     def _build_intervals(self, df: pd.DataFrame) -> pd.DataFrame:
