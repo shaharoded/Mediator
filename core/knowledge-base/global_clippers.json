@@ -1,16 +1,16 @@
 {
     "global_clippers": [
         {
-        "name": "ADMISSION",
-        "how": "START"
+            "name": "ADMISSION",
+            "how": "START"
         },
         {
-        "name": "RELEASE",
-        "how": "END"
+            "name": "RELEASE",
+            "how": "END"
         },
         {
-        "name": "DEATH",
-        "how": "END"
+            "name": "DEATH",
+            "how": "END"
         }
     ]
 }

@@ -2,7 +2,7 @@
 -- Template: Caller must replace {CONCEPT_PLACEHOLDERS} with "?, ?, ..." (N placeholders)
 -- Params order: TableName, PatientId, <concept1>, <concept2>, ... <conceptN>
 SELECT PatientId, ConceptName, StartDateTime, EndDateTime, Value
-FROM ?
+FROM {table}
 WHERE PatientId = ?
   AND ConceptName IN ({CONCEPT_PLACEHOLDERS})
 ORDER BY ConceptName ASC, StartDateTime ASC;

@@ -17,7 +17,7 @@ class Trend(TAK):
     """
     Trend abstraction: compute local slopes over time-steady windows, build intervals using anchor logic.
     - Derived from one raw-concept with exactly 1 numeric attribute
-    - Outputs: "Increasing", "Decreasing", "Steady" (hardcoded values)
+    - Outputs: "Increasing", "Decreasing", "Steady"
     - Uses linear regression over time-steady window to compute slope
     - Intervals stretch backward to last anchor (point where previous interval ended)
     """
@@ -145,8 +145,8 @@ class Trend(TAK):
 
     def _compute_trends(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Classify each point using OLS slope over the entire lookback window (time_steady).
-        OPTIMIZED: Binary search for window boundaries, pre-allocated arrays, vectorized operations.
+        Classify each point using OLS slope over the lookback window (time_steady).
+        Uses binary search for window boundaries and vectorized operations.
         """
         if df.empty:
             return df
@@ -243,7 +243,7 @@ class Trend(TAK):
         - First point creates no interval; it sets the anchor.
         - Each next point can stretch back to the current anchor if (t_i - anchor) <= good_after.
         - If the gap exceeds good_after, emit a hole interval [anchor, t_i] with Value=None and reset anchor=t_i.
-        - Labeled intervals use the CURRENT point's label and stretch [anchor, t_i].
+        - Labeled intervals use the current point's label and stretch [anchor, t_i].
         - Consecutive identical labels merge by extending EndDateTime.
         """
         if df.empty:

@@ -15,10 +15,10 @@ from .tak import TAK
 class RawConcept(TAK):
     """
     Raw Concept TAK — parsed from <raw-concept> XML.
-    - 'raw'          : multi-attr; requires <tuple>/<order> and <merge tolerance require-all>
-    - 'raw-numeric'  : one or more numeric attrs; all must be numeric; ranges kept per-attr (min/max) in self.attributes
-    - 'raw-nominal'  : one or more nominal attrs; all must be nominal; each must have <nominal-allowed-values>
-    - 'raw-boolean'  : one or more boolean attrs; all must be boolean
+    - 'raw': multi-attr; requires <tuple-order> and <merge tolerance require-all>
+    - 'raw-numeric': one or more numeric attrs; ranges kept per-attr (min/max)
+    - 'raw-nominal': one or more nominal attrs; each must have allowed values
+    - 'raw-boolean': one or more boolean attrs
     """
     def __init__(
         self,
@@ -176,11 +176,11 @@ class RawConcept(TAK):
 
     def _finalize_tuple(self, pid: int, block: pd.DataFrame) -> Optional[dict]:
         """
-        Build a single merged tuple from a time-tolerance block (already filtered).
-        - Uses the *last* value per ConceptName within the block
-        - Respects require-all
+        Build a single merged tuple from a time-tolerance block.
+        - Uses the last value per ConceptName within the block
+        - Respects require-all setting
         - Skips tuples that are entirely None
-        - Emits warnings when the block composition is suspicious
+        - Emits warnings when block composition is suspicious
         """
         # Last observed value per concept in the block
         last_vals = (
@@ -321,7 +321,7 @@ class RawConcept(TAK):
         merged: List[dict] = []
         start_idx = 0
         n = len(df)
-        # OPTIMIZATION: Use numpy datetime array (avoid repeated conversions)
+        # Use numpy datetime array for efficient time delta computations
         times = df["StartDateTime"].to_numpy(dtype='datetime64[ns]')
 
         windows = 0

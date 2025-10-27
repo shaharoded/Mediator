@@ -44,7 +44,7 @@ class DataAccess:
         # Ensure tables exist (create if missing)
         if not self.__check_tables_exist():
             print('[Info]: Creating DB tables...')
-            self.__execute_script(INITIATE_TABLES_DDL)
+            self.__execute_script(INITIALIZE_TABLES_DDL)
 
     def check_record(self, query_or_path, params):
         """
@@ -185,7 +185,7 @@ class DataAccess:
             print("[Info] Dropping existing tables...")
             self.drop_tables()
         print("[Info] Creating tables from DDL...")
-        self.__execute_script(INITIATE_TABLES_DDL)
+        self.__execute_script(INITIALIZE_TABLES_DDL)
         self.__print_db_info()
 
     # Table stats helper

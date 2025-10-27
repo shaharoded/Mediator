@@ -15,7 +15,7 @@ from .utils import parse_duration
 class Context(TAK):
     """
     Context abstraction: background facts with interval windowing and clipping.
-    - Derived from one or more raw-concepts (like Event)
+    - Derived from one or more raw-concepts
     - Applies context window (before/after) — can vary by abstraction value
     - Supports clippers (external raw-concepts that trim interval boundaries)
     - No interval merging (unlike State)
@@ -226,17 +226,17 @@ class Context(TAK):
                                     if c["type"] == "equal" and c["value"] not in ("True", "False"):
                                         raise ValueError(f"{self.name}: boolean constraint must be 'True' or 'False'")
 
-        # UPDATED: Validate context windows vs abstraction rules (bidirectional) - RAISE ERRORS
+        # Validate context windows vs abstraction rules (bidirectional)
         if self.abstraction_rules:
             rule_values = {rule.value for rule in self.abstraction_rules}
-            window_values = {v for v in self.context_windows.keys() if v is not None}  # exclude default (None)
+            window_values = {v for v in self.context_windows.keys() if v is not None}
             
-            # Check 1: Windows defined for non-existent rule values (typo detection) - RAISE
+            # Check 1: Windows defined for non-existent rule values (typo detection)
             for window_val in window_values:
                 if window_val not in rule_values:
                     raise ValueError(f"{self.name}: context-window for value='{window_val}' does not match any abstraction rule value (possible typo)")
             
-            # Check 2: Rules without value-specific windows AND no default - RAISE
+            # Check 2: Rules without value-specific windows AND no default
             default_window_exists = None in self.context_windows
             for rule_val in rule_values:
                 if rule_val not in window_values and not default_window_exists:
@@ -298,7 +298,7 @@ class Context(TAK):
     def _apply_context_window(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Extend intervals using context window (before/after).
-        OPTIMIZED: Simple vectorized implementation (group by Value).
+        Windows are applied per unique value (vectorized by group).
         """
         if df.empty:
             return df
@@ -326,7 +326,7 @@ class Context(TAK):
     def _apply_clippers(self, df: pd.DataFrame, clipper_dfs: Dict[str, pd.DataFrame] = None) -> pd.DataFrame:
         """
         Clip intervals using clipper boundaries.
-        SIMPLIFIED: Readable row-by-row implementation with basic optimizations.
+        Processes each context row to find overlapping clippers and adjust start times.
         """
         if df.empty or not self.clippers or clipper_dfs is None:
             return df
@@ -384,10 +384,9 @@ class Context(TAK):
                         new_start = clipper_start + pd.Timedelta(clip_before)
                         ctx_start = max(ctx_start, new_start)
 
-                    # CORRECTED: Apply clip-after: delay context start ONLY if context start < clipper end
-                    # (after applying clip-before, ctx_start might already be >= clipper_end)
+                    # Apply clip-after: delay context start if context overlaps clipper end
                     if clip_after is not None:
-                        # Check if context STILL overlaps clipper after clip-before
+                        # Check if context still overlaps clipper after clip-before
                         if ctx_start < clipper_end:
                             delayed_start = clipper_end + pd.Timedelta(clip_after)
                             ctx_start = max(ctx_start, delayed_start)

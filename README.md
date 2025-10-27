@@ -89,6 +89,25 @@ Mediator/
 - Loader auto-selects Dask for large files (>=100 MB) if available; otherwise uses pandas chunking.
 - Loading is transactional: validations + inserts per chunk; any validation error rolls back all changes.
 
+Mediator also offers different usage options using it's CLI:
+
+```bash
+# Process all patients (default paths)
+python -m core.mediator
+
+# Process specific patients
+python -m core.mediator --patients 1,2,3,4,5
+
+# Custom concurrency
+python -m core.mediator --max-concurrent 8
+
+# Custom KB and DB paths
+python -m core.mediator --kb core/knowledge-base --db data/mediator.db
+
+# Debug logging
+python -m core.mediator --log-level DEBUG --patients 101,102,103
+```
+
 ## Programmatic usage
 ```python
 from backend.dataaccess import DataAccess

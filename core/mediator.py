@@ -1,6 +1,6 @@
 """
 TO-DO:
-- Add global clippers (ADMISSION, RELEASE, DEATH) that will clip all states/trends/patterns/contexts
+- Differentiate between repo building logs which are important vs. patient processing logs which can be verbose, and should probably be stored in a log file, and produce end-of-run stats.
 """
 
 from __future__ import annotations
@@ -9,6 +9,9 @@ from pathlib import Path
 import pandas as pd
 import asyncio
 import logging
+import json
+import sys
+import argparse
 from tqdm.asyncio import tqdm as async_tqdm
 from tqdm import tqdm
 
@@ -18,10 +21,18 @@ from .tak.event import Event
 from .tak.state import State
 from .tak.trend import Trend
 from .tak.context import Context
-# from .tak.pattern import Pattern  # TODO: Implement Pattern TAK
+from .tak.pattern import Pattern  # TODO: Implement Pattern TAK
+from .config import TAK_FOLDER
 
-# Backend imports (moved to top)
-from backend.config import INSERT_ABSTRACTED_MEASUREMENT_QUERY
+# Add parent directory to path for backend imports
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from backend.dataaccess import DataAccess 
+from backend.config import (
+    DB_PATH,
+    INSERT_ABSTRACTED_MEASUREMENT_QUERY,
+    GET_DATA_BY_PATIENT_CONCEPTS_QUERY)
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +41,15 @@ class Mediator:
     """
     Orchestrates the KBTA pipeline:
     1. Load & validate TAK repository (raw-concepts → events → states → trends → contexts → patterns)
-    2. For each patient: extract input → apply TAKs → write output to DB
+    2. For each patient, for each TAK: extract filtered input → apply TAK → write output to DB
     3. Supports async parallelism for patient-level processing
+    
+    Design: Full caching — all TAK outputs cached in memory during patient processing (~500KB per patient).
     """
     
-    def __init__(self, knowledge_base_path: Path, data_access):
+    def __init__(self, 
+                 knowledge_base_path: Path, 
+                 data_access: DataAccess):
         """
         Initialize Mediator with knowledge base and DB access.
         
@@ -46,14 +61,47 @@ class Mediator:
         self.da = data_access
         self.repo: Optional[TAKRepository] = None
         
-        # TAK execution order (dependencies resolved)
+        # TAK execution order (dependencies resolved), populated in build_repository()
+        # Defines the execution order for applying TAKs to patients, which TAKRepository does not track (key - value store only)
         self.raw_concepts: List[RawConcept] = []
         self.events: List[Event] = []
         self.states: List[State] = []
         self.trends: List[Trend] = []
         self.contexts: List[Context] = []
-        self.patterns: List = []  # TODO: Implement Pattern TAK
+        self.patterns: List[Pattern] = []  # TODO: Implement Pattern TAK
         
+        # Load global clippers (START/END events that clip all abstractions)
+        self.global_clippers = self._load_global_clippers()
+    
+    def _load_global_clippers(self) -> Dict[str, str]:
+        """
+        Load global clippers from knowledge-base/global_clippers.json.
+        Returns: {clipper_name: 'START' | 'END'}
+        """
+        clipper_path = self.kb_path / "global_clippers.json"
+        if not clipper_path.exists():
+            logger.warning(f"Global clippers file not found: {clipper_path}")
+            return {}
+        
+        try:
+            with open(clipper_path, 'r') as f:
+                data = json.load(f)
+            
+            clippers = {}
+            for c in data.get("global_clippers", []):
+                name = c["name"]
+                how = c["how"].upper()
+                if how not in ("START", "END"):
+                    raise ValueError(f"Invalid clipper 'how': {how} (must be START or END)")
+                clippers[name] = how
+            
+            logger.info(f"Loaded {len(clippers)} global clippers: {list(clippers.keys())}")
+            return clippers
+            
+        except Exception as e:
+            logger.error(f"Failed to load global clippers: {e}")
+            return {}
+    
     def build_repository(self) -> TAKRepository:
         """
         Load and validate all TAKs from knowledge base in dependency order.
@@ -107,7 +155,7 @@ class Mediator:
         set_tak_repository(repo)
         
         # Run business-logic validation on all TAKs
-        print("\n[Validation] Running business-logic checks...")
+        print("\n[Validation] Running business-logic checks on TAK repository...")
         try:
             repo.validate_all()
         except Exception as e:
@@ -122,85 +170,201 @@ class Mediator:
         print(f"  States:       {len(self.states)}")
         print(f"  Trends:       {len(self.trends)}")
         print(f"  Contexts:     {len(self.contexts)}")
-        print(f"  Patterns:     {len(self.patterns)} (TODO)")
+        print(f"  Patterns:     {len(self.patterns)}")
         print(f"  TOTAL TAKs:   {len(repo.taks)}")
         print("="*80 + "\n")
         
         self.repo = repo
         return repo
     
-    def get_patient_ids(self) -> List[int]:
-        """Retrieve all unique patient IDs from InputPatientData."""
-        query = "SELECT DISTINCT PatientId FROM InputPatientData ORDER BY PatientId;"
-        rows = self.da.fetch_records(query, ())
-        return [int(r[0]) for r in rows]
-    
-    def get_input_for_tak(self, patient_id: int, tak: TAK) -> pd.DataFrame:
+    def get_patient_ids(self, patient_subset: Optional[List[int]] = None) -> List[int]:
         """
-        Extract relevant input data for a TAK from InputPatientData or OutputPatientData.
+        Retrieve patient IDs from InputPatientData.
         
         Args:
-            patient_id: Patient ID
-            tak: TAK instance (determines which concepts to query)
+            patient_subset: Optional list of patient IDs to filter. If None, returns all patients.
         
         Returns:
-            DataFrame with columns: PatientId, ConceptName, StartDateTime, EndDateTime, Value, AbstractionType
+            List of patient IDs (sorted)
         """
-        # Determine source concepts based on TAK family
-        if isinstance(tak, RawConcept):
-            # Raw concepts query InputPatientData directly
-            concept_names = [a["name"] for a in tak.attributes]
-            table = "InputPatientData"
-        elif isinstance(tak, Event):
-            # Events query raw-concepts from InputPatientData
-            concept_names = [df["name"] for df in tak.derived_from]
-            table = "InputPatientData"
-        elif isinstance(tak, (State, Trend)):
-            # States/Trends query their parent from OutputPatientData
-            concept_names = [tak.derived_from]
-            table = "OutputPatientData"
-        elif isinstance(tak, Context):
-            # Contexts query their parent + clippers from OutputPatientData
-            concept_names = [df["name"] for df in tak.derived_from]
-            # Add clipper concept names
-            if tak.clippers:
-                concept_names.extend([c["name"] for c in tak.clippers])
-            table = "OutputPatientData"
+        if patient_subset:
+            # Validate that requested patients exist in DB
+            placeholders = ','.join('?' * len(patient_subset))
+            query = f"SELECT DISTINCT PatientId FROM InputPatientData WHERE PatientId IN ({placeholders}) ORDER BY PatientId;"
+            rows = self.da.fetch_records(query, tuple(patient_subset))
+            found_ids = [int(r[0]) for r in rows]
+            
+            # Warn about missing patients
+            missing = set(patient_subset) - set(found_ids)
+            if missing:
+                logger.warning(f"Requested patients not found in DB: {sorted(missing)}")
+            
+            return found_ids
         else:
-            raise ValueError(f"Unsupported TAK family: {tak.family}")
-        
-        # Build query with IN clause for concept names
-        placeholders = ','.join('?' * len(concept_names))
-        query = f"""
-            SELECT PatientId, ConceptName, StartDateTime, EndDateTime, Value
-            FROM {table}
-            WHERE PatientId = ? AND ConceptName IN ({placeholders})
-            ORDER BY StartDateTime ASC;
+            # Return all patients
+            query = "SELECT DISTINCT PatientId FROM InputPatientData ORDER BY PatientId;"
+            rows = self.da.fetch_records(query, ())
+            return [int(r[0]) for r in rows]
+    
+    def get_input_for_raw_concept(self, patient_id: int, raw_concept: RawConcept) -> pd.DataFrame:
         """
-        params = (patient_id, *concept_names)
+        Query InputPatientData for a RawConcept's df by its attributes.
+        Returns DataFrame with columns: PatientId, ConceptName, StartDateTime, EndDateTime, Value, AbstractionType
+        """
+        concept_names = [a["name"] for a in raw_concept.attributes]
+        table = "InputPatientData"
         
+        # Load query template and replace placeholders
+        with open(GET_DATA_BY_PATIENT_CONCEPTS_QUERY, 'r') as f:
+            query_template = f.read()
+        
+        query = query_template.replace("{table}", table)
+        placeholders = ','.join('?' * len(concept_names))
+        query = query.replace("{CONCEPT_PLACEHOLDERS}", placeholders)
+        
+        params = (patient_id, *concept_names)
         rows = self.da.fetch_records(query, params)
+        
         if not rows:
             return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
         
         df = pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
-        
-        # Add AbstractionType column (required by TAK.apply() signature)
-        if table == "InputPatientData":
-            df["AbstractionType"] = "raw-concept"  # dummy value for input data
-        else:
-            # Query AbstractionType from OutputPatientData
-            query_abs = f"""
-                SELECT ConceptName, AbstractionType
-                FROM {table}
-                WHERE PatientId = ? AND ConceptName IN ({placeholders})
-                GROUP BY ConceptName;
-            """
-            abs_rows = self.da.fetch_records(query_abs, params)
-            abs_map = {r[0]: r[1] for r in abs_rows}
-            df["AbstractionType"] = df["ConceptName"].map(abs_map).fillna("unknown")
-        
+        df["AbstractionType"] = "raw-concept"  # dummy value for input data
         return df
+    
+    def get_input_for_tak(self, patient_id: int, tak: TAK, tak_outputs: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Recursively resolve dependencies and build input DataFrame for a TAK.
+        Uses cached tak_outputs to provide TAK DataFrames to derived TAKs (avoids redundant computation).
+        
+        Args:
+            patient_id: Patient ID
+            tak: TAK instance to prepare input for
+            tak_outputs: Cache of {tak_name: DataFrame} for ALL TAK families
+        
+        Returns:
+            DataFrame ready for tak.apply()
+        """
+        # CASE 1: RawConcept → query InputPatientData (or use cache)
+        if isinstance(tak, RawConcept):
+            if tak.name in tak_outputs:
+                return tak_outputs[tak.name]
+            return self.get_input_for_raw_concept(patient_id, tak)
+        
+        # CASE 2: Event → resolve derived_from (list of raw-concepts)
+        if isinstance(tak, Event):
+            dfs = []
+            for df_spec in tak.derived_from:
+                parent_name = df_spec["name"]
+                parent_tak = self.repo.get(parent_name)
+                
+                # Get from cache or compute
+                if parent_name in tak_outputs:
+                    df_parent = tak_outputs[parent_name]
+                else:
+                    df_parent = self.get_input_for_raw_concept(patient_id, parent_tak)
+                    tak_outputs[parent_name] = df_parent
+                
+                dfs.append(df_parent)
+            
+            if not dfs:
+                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+            return pd.concat(dfs, ignore_index=True)
+        
+        # CASE 3: State → resolve single derived_from (RawConcept OR Event)
+        if isinstance(tak, State):
+            parent_name = tak.derived_from
+            parent_tak = self.repo.get(parent_name)
+            
+            if isinstance(parent_tak, RawConcept):
+                if parent_name in tak_outputs:
+                    return tak_outputs[parent_name]
+                df_parent = self.get_input_for_raw_concept(patient_id, parent_tak)
+                tak_outputs[parent_name] = df_parent
+                return df_parent
+            elif isinstance(parent_tak, Event):
+                # Check cache first (Event should already be computed)
+                if parent_name in tak_outputs:
+                    return tak_outputs[parent_name]
+                # Compute Event if not cached (shouldn't happen with correct execution order)
+                df_event_input = self.get_input_for_tak(patient_id, parent_tak, tak_outputs)
+                df_event_output = parent_tak.apply(df_event_input)
+                tak_outputs[parent_name] = df_event_output
+                return df_event_output
+            else:
+                # Never happens due to prior validation
+                raise RuntimeError(f"[{tak.name}] States can only derive from RawConcepts or Events")
+        
+        # CASE 4: Trend → resolve single derived_from (RawConcept only)
+        if isinstance(tak, Trend):
+            parent_name = tak.derived_from
+            parent_tak = self.repo.get(parent_name)
+            
+            if parent_name in tak_outputs:
+                return tak_outputs[parent_name]
+            df_parent = self.get_input_for_raw_concept(patient_id, parent_tak)
+            tak_outputs[parent_name] = df_parent
+            return df_parent
+        
+        # CASE 5: Context → resolve derived_from (list of RawConcepts only) + clippers
+        if isinstance(tak, Context):
+            dfs = []
+            
+            # Resolve parent (derived_from) — ALL must be RawConcepts
+            for df_spec in tak.derived_from:
+                parent_name = df_spec["name"]
+                parent_tak = self.repo.get(parent_name)
+                if parent_tak is None:
+                    logger.warning(f"[{tak.name}] Derived-from '{parent_name}' not found")
+                    continue
+                
+                # Get from cache or compute
+                if parent_name in tak_outputs:
+                    df_parent = tak_outputs[parent_name]
+                else:
+                    df_parent = self.get_input_for_raw_concept(patient_id, parent_tak)
+                    tak_outputs[parent_name] = df_parent
+                
+                dfs.append(df_parent)
+            
+            # Resolve clippers (also RawConcepts)
+            if tak.clippers:
+                for clipper in tak.clippers:
+                    clipper_name = clipper["name"]
+                    clipper_tak = self.repo.get(clipper_name)
+                    if clipper_tak is None:
+                        logger.warning(f"[{tak.name}] Clipper '{clipper_name}' not found")
+                        continue
+                    
+                    if clipper_name in tak_outputs:
+                        df_clipper = tak_outputs[clipper_name]
+                    else:
+                        df_clipper = self.get_input_for_raw_concept(patient_id, clipper_tak)
+                        tak_outputs[clipper_name] = df_clipper
+                    
+                    dfs.append(df_clipper)
+            
+            if not dfs:
+                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+            return pd.concat(dfs, ignore_index=True)
+        
+        # CASE 6: Pattern → resolve derived_from (Events, States, Trends, Contexts)
+        if isinstance(tak, Pattern):
+            dfs = []
+            
+            for df_spec in tak.derived_from:
+                parent_name = df_spec["name"]
+                
+                # Check cache (all dependencies should be computed by now)
+                if parent_name not in tak_outputs:
+                    logger.warning(f"[{tak.name}] Parent '{parent_name}' not found in cache (should be computed earlier)")
+                    continue
+                
+                dfs.append(tak_outputs[parent_name])
+            
+            if not dfs:
+                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+            return pd.concat(dfs, ignore_index=True)
     
     def write_output(self, df: pd.DataFrame) -> int:
         """
@@ -247,70 +411,133 @@ class Mediator:
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, self._process_patient_sync, patient_id)
     
+    def _get_global_clipper_times(self, patient_id: int) -> Optional[pd.DataFrame]:
+        """
+        Query InputPatientData for global clipper events (once per patient, before TAK processing).
+        Returns DataFrame with columns: ConceptName, StartDateTime, or None if no clippers found.
+        """
+        if not self.global_clippers:
+            return None
+        
+        clipper_names = list(self.global_clippers.keys())
+        table = "InputPatientData"
+        
+        # Load query template and replace placeholders
+        with open(GET_DATA_BY_PATIENT_CONCEPTS_QUERY, 'r') as f:
+            query_template = f.read()
+        
+        query = query_template.replace("{table}", table)
+        placeholders = ','.join('?' * len(clipper_names))
+        query = query.replace("{CONCEPT_PLACEHOLDERS}", placeholders)
+        
+        params = (patient_id, *clipper_names)
+        rows = self.da.fetch_records(query, params)
+        
+        if not rows:
+            return None
+        
+        # Return DataFrame with ConceptName and StartDateTime (clippers are point events)
+        df = pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
+        return df[["ConceptName", "StartDateTime"]]
+    
+    def _apply_global_clippers(self, df: pd.DataFrame, clipper_df: Optional[pd.DataFrame]) -> pd.DataFrame:
+        """
+        Apply global clippers to abstraction output by trimming interval boundaries.
+        - START clippers: if row.StartDateTime <= clipper_time, set StartDateTime = clipper_time + 1s
+        - END clippers: if row.EndDateTime >= clipper_time, set EndDateTime = clipper_time - 1s
+        - Drop rows where StartDateTime >= EndDateTime after clipping (invalid intervals)
+        
+        Uses vectorized operations for efficient processing.
+        
+        Args:
+            df: Abstraction output DataFrame
+            clipper_df: DataFrame with columns [ConceptName, StartDateTime] from InputPatientData
+        
+        Returns:
+            Clipped DataFrame (with adjusted boundaries)
+        """
+        if df.empty or clipper_df is None or clipper_df.empty:
+            return df
+        
+        # OPTIMIZATION 1: Convert timestamps ONCE (avoid repeated conversions)
+        df = df.copy()
+        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
+        df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
+        
+        # OPTIMIZATION 2: Extract clipper times as numpy arrays (vectorized comparisons)
+        start_clippers = clipper_df[clipper_df["ConceptName"].isin(
+            [name for name, how in self.global_clippers.items() if how == "START"]
+        )]
+        
+        end_clippers = clipper_df[clipper_df["ConceptName"].isin(
+            [name for name, how in self.global_clippers.items() if how == "END"]
+        )]
+        
+        # OPTIMIZATION 3: Compute boundaries ONCE (not per row)
+        if not start_clippers.empty:
+            min_start_time = start_clippers["StartDateTime"].min()
+            # Adjust all rows where StartDateTime <= min_start_time
+            mask = df["StartDateTime"] <= min_start_time
+            if mask.any():
+                df.loc[mask, "StartDateTime"] = min_start_time + pd.Timedelta(seconds=1)
+        
+        if not end_clippers.empty:
+            max_end_time = end_clippers["StartDateTime"].max()
+            # Vectorized: adjust all rows where EndDateTime >= max_end_time
+            mask = df["EndDateTime"] >= max_end_time
+            if mask.any():
+                df.loc[mask, "EndDateTime"] = max_end_time - pd.Timedelta(seconds=1)
+        
+        # OPTIMIZATION 4: Drop invalid intervals (StartDateTime >= EndDateTime) in one pass
+        valid_mask = df["StartDateTime"] < df["EndDateTime"]
+        dropped_count = (~valid_mask).sum()
+        if dropped_count > 0:
+            logger.info(f"[Global Clippers] Dropped {dropped_count} invalid intervals (StartDateTime >= EndDateTime after clipping)")
+        
+        return df[valid_mask]
+    
     def _process_patient_sync(self, patient_id: int) -> Dict[str, int]:
-        """Synchronous patient processing (called from async executor)."""
+        """Synchronous patient processing with full caching and global clippers."""
         stats = {}
+        tak_outputs = {}  # Cache ALL TAK outputs
         
         try:
-            # Phase 1: Apply raw-concepts (output cached in memory, not written to DB)
-            raw_outputs = {}
+            # Phase 0: Query global clipper times ONCE per patient (from InputPatientData, BEFORE any TAK processing)
+            clipper_df = self._get_global_clipper_times(patient_id)
+            
+            # Phase 1: Apply raw-concepts (cached, NOT written to DB)
+            # NOTE: Raw-concepts use different input method (query InputPatientData directly)
             for rc in self.raw_concepts:
-                df_input = self.get_input_for_tak(patient_id, rc)
+                df_input = self.get_input_for_raw_concept(patient_id, rc)
                 if df_input.empty:
                     continue
                 df_output = rc.apply(df_input)
-                raw_outputs[rc.name] = df_output
+                tak_outputs[rc.name] = df_output  # Cache
                 stats[rc.name] = len(df_output)
             
-            # Phase 2: Apply events (write to DB)
-            for event in self.events:
-                # Events query InputPatientData directly
-                df_input = self.get_input_for_tak(patient_id, event)
-                if df_input.empty:
-                    continue
-                df_output = event.apply(df_input)
-                rows_written = self.write_output(df_output)
-                stats[event.name] = rows_written
+            # Phases 2-6: Apply all other TAK families (unified loop)
+            tak_families = [
+                ("events", self.events),
+                ("states", self.states),
+                ("trends", self.trends),
+                ("contexts", self.contexts),
+                ("patterns", self.patterns),
+            ]
             
-            # Phase 3: Apply states (write to DB)
-            for state in self.states:
-                # States query parent TAK from OutputPatientData (or raw_outputs cache)
-                if state.derived_from in raw_outputs:
-                    df_input = raw_outputs[state.derived_from]
-                else:
-                    df_input = self.get_input_for_tak(patient_id, state)
-                
-                if df_input.empty:
-                    continue
-                df_output = state.apply(df_input)
-                rows_written = self.write_output(df_output)
-                stats[state.name] = rows_written
-            
-            # Phase 4: Apply trends (write to DB)
-            for trend in self.trends:
-                if trend.derived_from in raw_outputs:
-                    df_input = raw_outputs[trend.derived_from]
-                else:
-                    df_input = self.get_input_for_tak(patient_id, trend)
-                
-                if df_input.empty:
-                    continue
-                df_output = trend.apply(df_input)
-                rows_written = self.write_output(df_output)
-                stats[trend.name] = rows_written
-            
-            # Phase 5: Apply contexts (write to DB)
-            for context in self.contexts:
-                df_input = self.get_input_for_tak(patient_id, context)
-                if df_input.empty:
-                    continue
-                df_output = context.apply(df_input)
-                rows_written = self.write_output(df_output)
-                stats[context.name] = rows_written
-            
-            # Phase 6: Apply patterns (TODO)
-            # for pattern in self.patterns:
-            #     ...
+            for family_name, tak_list in tak_families:
+                for tak in tak_list:
+                    df_input = self.get_input_for_tak(patient_id, tak, tak_outputs)
+                    if df_input.empty:
+                        continue
+                    df_output = tak.apply(df_input)
+                    
+                    # Apply global clippers BEFORE caching/writing (using InputPatientData clippers)
+                    df_output = self._apply_global_clippers(df_output, clipper_df)
+                    
+                    tak_outputs[tak.name] = df_output  # Cache
+                    rows_written = self.write_output(df_output)
+                    stats[tak.name] = rows_written
             
             return stats
             
@@ -318,24 +545,27 @@ class Mediator:
             logger.error(f"[Patient {patient_id}] Processing failed: {e}", exc_info=True)
             return {"error": str(e)}
     
-    async def process_all_patients_async(self, max_concurrent: int = 4) -> Dict[int, Dict[str, int]]:
+    async def process_all_patients_async(self, max_concurrent: int = 4, patient_subset: Optional[List[int]] = None) -> Dict[int, Dict[str, int]]:
         """
         Process all patients through TAK pipeline with async parallelism.
         
         Args:
             max_concurrent: Maximum number of concurrent patient processes
+            patient_subset: Optional list of patient IDs to process. If None, processes all patients.
         
         Returns:
             Dict mapping patient_id → {tak_name: rows_written}
         """
-        patient_ids = self.get_patient_ids()
+        patient_ids = self.get_patient_ids(patient_subset=patient_subset)
         
         if not patient_ids:
-            print("[Warning] No patients found in InputPatientData.")
+            print("[Warning] No patients found (check patient_subset or InputPatientData).")
             return {}
         
         print("\n" + "="*80)
         print(f"PHASE 2: Processing {len(patient_ids)} Patients (max_concurrent={max_concurrent})")
+        if patient_subset:
+            print(f"         Patient Subset: {patient_ids}")
         print("="*80 + "\n")
         
         semaphore = asyncio.Semaphore(max_concurrent)
@@ -368,36 +598,163 @@ class Mediator:
         
         return patient_stats
     
-    def run(self, max_concurrent: int = 4):
+    def run(self, max_concurrent: int = 4, patient_subset: Optional[List[int]] = None):
         """
         Main entry point: Build repository → Process patients → Write outputs.
         
         Args:
             max_concurrent: Maximum number of concurrent patient processes
+            patient_subset: Optional list of patient IDs to process
         """
         # Phase 1: Build TAK repository
         self.build_repository()
         
-        # Phase 2: Process all patients (async)
-        patient_stats = asyncio.run(self.process_all_patients_async(max_concurrent=max_concurrent))
+        # Phase 2: Process patients (async)
+        patient_stats = asyncio.run(
+            self.process_all_patients_async(
+                max_concurrent=max_concurrent,
+                patient_subset=patient_subset
+            )
+        )
         
         return patient_stats
     
 
+def _cli_main(argv):
+    """CLI entry point for Mediator pipeline."""
+    parser = argparse.ArgumentParser(
+        prog="mediator",
+        description="Run Mediator KBTA pipeline on patient data",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Process all patients (default KB and DB paths)
+  python -m core.mediator
+
+  # Process specific patients
+  python -m core.mediator --patients 1,2,3,4,5
+
+  # Custom concurrency
+  python -m core.mediator --max-concurrent 8
+
+  # Custom KB and DB paths
+  python -m core.mediator --kb core/knowledge-base --db data/mediator.db
+
+  # Debug logging + patient subset
+  python -m core.mediator --patients 101,102,103 --log-level DEBUG
+        """
+    )
+    
+    parser.add_argument(
+        "--kb",
+        type=Path,
+        default=TAK_FOLDER,
+        help=f"Path to knowledge base folder (default: {TAK_FOLDER})"
+    )
+    
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=DB_PATH,
+        help=f"Path to database file (default: {DB_PATH})"
+    )
+    
+    parser.add_argument(
+        "--patients",
+        type=str,
+        help="Comma-separated patient IDs (e.g., '1,2,3'). If omitted, processes all patients."
+    )
+    
+    parser.add_argument(
+        "--max-concurrent",
+        type=int,
+        default=4,
+        help="Maximum concurrent patient processes (default: 4)"
+    )
+    
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level (default: INFO)"
+    )
+    
+    args = parser.parse_args(argv)
+    
+    # Setup logging
+    numeric_level = getattr(logging, args.log_level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=numeric_level,
+        format='[%(levelname)s] %(name)s: %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler('mediator_run.log', mode='a')
+        ]
+    )
+    
+    # Validate inputs
+    if not args.kb.exists():
+        print(f"[Error] Knowledge base folder not found: {args.kb}")
+        sys.exit(1)
+    
+    if not args.db.exists():
+        print(f"[Error] Database file not found: {args.db}")
+        print("Run: python -m backend.dataaccess --create_db --load_csv <file>")
+        sys.exit(1)
+    
+    # Parse patient subset
+    patient_subset = None
+    if args.patients:
+        try:
+            patient_subset = [int(p.strip()) for p in args.patients.split(',')]
+            logger.info(f"Processing patient subset: {patient_subset}")
+        except ValueError as e:
+            print(f"[Error] Invalid patient ID format: {e}")
+            sys.exit(1)
+    
+    # Initialize Mediator
+    try:
+        da = DataAccess(db_path=str(args.db))
+        mediator = Mediator(knowledge_base_path=args.kb, data_access=da)
+    except Exception as e:
+        print(f"[Error] Failed to initialize Mediator: {e}")
+        sys.exit(1)
+    
+    # Run pipeline
+    try:
+        patient_stats = mediator.run(
+            max_concurrent=args.max_concurrent,
+            patient_subset=patient_subset
+        )
+        
+        # Final summary
+        errors = sum(1 for stats in patient_stats.values() if "error" in stats)
+        total_rows = sum(
+            sum(v for k, v in stats.items() if k != "error" and isinstance(v, int))
+            for stats in patient_stats.values()
+            if "error" not in stats
+        )
+        
+        print("\n" + "="*80)
+        print("Pipeline Complete")
+        print("="*80)
+        print(f"Patients processed: {len(patient_stats)}")
+        print(f"Total rows written: {total_rows}")
+        if errors > 0:
+            print(f"Errors: {errors} patients failed")
+        print("="*80)
+        
+        sys.exit(0 if errors == 0 else 1)
+        
+    except KeyboardInterrupt:
+        print("\n[Warning] Pipeline interrupted by user (Ctrl+C)")
+        sys.exit(130)
+    except Exception as e:
+        print(f"[Error] Pipeline failed: {e}")
+        logging.exception(e)
+        sys.exit(1)
+
 
 if __name__ == "__main__":
-
-    # --- CONFIGURABLE INPUT ---
-    patient_id = "123456782"
-    snapshot_date = "2025-08-02 12:00:00"
-
-    # --- RUN MEDIATOR ---
-    engine = Mediator()
-    result_df = engine.run(patient_id=patient_id, snapshot_date=snapshot_date)
-
-    # --- DISPLAY RESULT ---
-    if result_df.empty:
-        print(f"[Info] No data available for Patient {patient_id} on snapshot {snapshot_date}")
-    else:
-        print(f"[Info] Abstracted records for Patient {patient_id} on {snapshot_date}:")
-        print(result_df.to_string(index=False))
+    _cli_main(sys.argv[1:])

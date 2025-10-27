@@ -16,11 +16,10 @@ from .event import Event
 
 class State(TAK):
     """
-    State abstraction: discretize (for numeric) + abstract (for multi-attr concepts) + merge intervals (based on same rule match).
+    State abstraction: discretize numeric values, abstract multi-attribute concepts, merge adjacent intervals.
     - Handles nominal (no discretization), numeric (single-attr), and complex (multi-attr tuples).
-    - Requires derived_from raw-concept(s) to be pre-applied (TAK object cached in TAKRepository, df calculated on demand).
-    
-    A state will only be derived from one raw concept TAK, but that TAK can produce multiple values in it's tuple.
+    - Requires derived_from to be a RawConcept or Event TAK.
+    - A state can only be derived from one TAK, but that TAK can produce multi-valued tuples.
     """
     def __init__(
         self,
@@ -196,7 +195,7 @@ class State(TAK):
                     if idx >= tuple_size:
                         raise ValueError(f"{self.name}: abstraction rule constraint idx={idx} out of bounds (tuple size={tuple_size})")
 
-        # 5) NEW: Check numeric attributes are discretized if referenced in abstraction rules
+        # 5) Check numeric attributes are discretized if referenced in abstraction rules
         if self.abstraction_rules and parent_tak.concept_type == "raw":
             referenced_indices = set()
             for rule in self.abstraction_rules:
@@ -215,7 +214,7 @@ class State(TAK):
                     raise ValueError(f"{self.name}: numeric attribute at idx={idx} ('{attr_name}') is referenced in abstraction rules "
                                    f"but has no discretization rules. Add discretization.")
 
-        # 6) WARN: discretized or nominal/boolean attributes NOT referenced in abstraction rules
+        # 6) Warn about discretized or nominal/boolean attributes NOT referenced in abstraction rules
         if self.abstraction_rules and parent_tak.concept_type == "raw":
             referenced_indices = set()
             for rule in self.abstraction_rules:
@@ -234,7 +233,7 @@ class State(TAK):
                                  f"is discretized/nominal/boolean but never referenced in abstraction rules. "
                                  f"This may be intentional (silent abstraction) or a mistake.")
 
-        # 7) Check abstraction rules cover all possible discrete values (existing code)
+        # 7) Check abstraction rules cover all possible discrete values
         if self.abstraction_rules:
             # Build set of all possible discrete values per attribute index
             possible_values_per_idx: Dict[int, set] = defaultdict(set)

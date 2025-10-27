@@ -52,7 +52,6 @@ class Event(TAK):
                 raise ValueError(f"{name}: <derived-from><attribute> must have 'name' and 'tak' attributes")
             
             tak_type = attr_el.attrib["tak"]
-            # CORRECTED: Only accept raw-concept, not state
             if tak_type != "raw-concept":
                 raise ValueError(f"{name}: <derived-from><attribute tak='{tak_type}'> invalid. Events can only be derived from 'raw-concept'.")
             
