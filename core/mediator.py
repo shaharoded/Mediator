@@ -3,237 +3,385 @@ TO-DO:
 - Add global clippers (ADMISSION, RELEASE, DEATH) that will clip all states/trends/patterns/contexts
 """
 
-from datetime import timedelta
+from __future__ import annotations
+from typing import List, Dict, Optional
+from pathlib import Path
 import pandas as pd
+import asyncio
+import logging
+from tqdm.asyncio import tqdm as async_tqdm
+from tqdm import tqdm
 
-# Local Code
-from backend.dataaccess import DataAccess
-from core.tak.tak import *
-from core.tak.utils import *
-from backend.config import * 
-from core.config import *
+from .tak.tak import TAKRepository, set_tak_repository, TAK
+from .tak.raw_concept import RawConcept
+from .tak.event import Event
+from .tak.state import State
+from .tak.trend import Trend
+from .tak.context import Context
+# from .tak.pattern import Pattern  # TODO: Implement Pattern TAK
+
+# Backend imports (moved to top)
+from backend.config import INSERT_ABSTRACTED_MEASUREMENT_QUERY
+
+logger = logging.getLogger(__name__)
 
 
 class Mediator:
     """
-    The Mediator engine orchestrates the temporal abstraction process.
-    It:
-    - Loads abstraction rules (TAK files)
-    - Retrieves raw measurement data for a patient
-    - Applies all applicable abstraction rules
-    - Merges overlapping intervals with the same label
-    - Returns both abstracted intervals and untouched raw measurements
-
-    Attributes:
-        parser (TAKParser): Loads TAK rules from XML files.
-        tak_rules (list of TAKRule): All loaded rules.
-        db (DataAccess): Database interface for patient and measurement retrieval.
+    Orchestrates the KBTA pipeline:
+    1. Load & validate TAK repository (raw-concepts → events → states → trends → contexts → patterns)
+    2. For each patient: extract input → apply TAKs → write output to DB
+    3. Supports async parallelism for patient-level processing
     """
-    def __init__(self, tak_folder=TAK_FOLDER):
-        self.parser = TAKParser(tak_folder)
-        self.tak_rules = self.parser.load_all_taks()
-        self.db = DataAccess()
     
-
-    def _get_patient_records(self, patient_id, table="InputPatientData", concepts=[]):
+    def __init__(self, knowledge_base_path: Path, data_access):
         """
-        Retrieves patient measurement records and patient-level attributes for abstraction.
+        Initialize Mediator with knowledge base and DB access.
         
         Args:
-            patient_id (int): The ID of the patient.
-            table (str): The database table to query from. Choose from 'InputPatientData' or 'OutputPatientData'.
-            concepts (list): The list of concepts to retrieve.
-
-        Returns:
-            pd.DataFrame: DataFrame of patient measurement records.
+            knowledge_base_path: Path to knowledge-base folder (contains raw-concepts/, events/, states/, trends/, contexts/)
+            data_access: DataAccess instance for DB operations
         """
-        # Construct query
-        if concepts:
-            concept_placeholders = ",".join(["?"]*len(concepts))
-            params = [patient_id, table] + concepts
-
-            with open(GET_DATA_BY_PATIENT_CONCEPTS, 'r') as f:
-                base_query = f.read()
-            base_query = base_query.replace("{CONCEPT_PLACEHOLDERS}", concept_placeholders)
-        else:
-            params = [table, patient_id]
-
-            with open(GET_DATA_BY_PATIENT, 'r') as f:
-                base_query = f.read()
-
-        # Get records as DataFrame
-        patient_records = pd.DataFrame(self.db.fetch_records(base_query, params))
-
-        return patient_records
-    
-
-    def _merge_intervals(self, df):
-        """
-        Merge/tidy intervals for a single patient's records that already include both abstracted
-        ('discretisized') and untouched ('original') rows.
-
-        Rules within each (LOINC-Code, ConceptName) group:
-        - If same Value and intervals touch/overlap -> merge by extending EndDateTime.
-        - If different Value and the next starts before current ends -> clip current EndDateTime to next StartDateTime.
-
-        Args:
-            df (pd.DataFrame): A single patient's records. Columns required:
-                ['PatientId', 'LOINC-Code', 'ConceptName', 'Value', 'StartDateTime', 'EndDateTime', 'Source'].
-
-        Returns:
-            pd.DataFrame: Cleaned intervals (no overlaps inside a group), same schema plus preserved/unioned Source.
-        """
-        # Empty in, empty out
-        if df is None or df.empty:
-            return pd.DataFrame(columns=[
-                "PatientId", "LOINC-Code", "ConceptName", "Value",
-                "StartDateTime", "EndDateTime", "Source"
-            ])
-
-        # Validate and normalize inputs
-        required = {"PatientId", "LOINC-Code", "ConceptName", "Value", "StartDateTime", "EndDateTime", "Source"}
-        missing = required - set(df.columns)
-        if missing:
-            raise ValueError(f"Missing required columns for merge: {missing}")
-
-        df = df.copy()
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"], errors="coerce")
-        df["EndDateTime"]   = pd.to_datetime(df["EndDateTime"],   errors="coerce")
-
-        # Deterministic ordering inside each group
-        df = df.sort_values(by=["LOINC-Code", "ConceptName", "StartDateTime", "Value"])
-
-        merged_rows = []
-
-        # Merge within (LOINC, ConceptName)
-        for _, g in df.groupby(["LOINC-Code","ConceptName"], sort=False):
-            current = None
-
-            for _, row in g.iterrows():
-                row = row.copy()
-
-                if current is None:
-                    current = row
-                    continue
-
-                same_value = (row["Value"] == current["Value"])
-                overlap_or_touching = row["StartDateTime"] <= current["EndDateTime"]
-
-                if same_value and overlap_or_touching:
-                    current["EndDateTime"] = max(current["EndDateTime"], row["EndDateTime"])
-                else:
-                    # Different value or disjoint: clip to avoid overlap
-                    if row["StartDateTime"] < current["EndDateTime"]:
-                        current["EndDateTime"] = row["StartDateTime"]
-
-                    # Keep only positive-length intervals
-                    if pd.notna(current["StartDateTime"]) and pd.notna(current["EndDateTime"]) \
-                    and current["EndDateTime"] >= current["StartDateTime"]:
-                        merged_rows.append(current)
-
-                    current = row
-
-            if current is not None:
-                if pd.notna(current["StartDateTime"]) and pd.notna(current["EndDateTime"]) \
-                and current["EndDateTime"] > current["StartDateTime"]:
-                    merged_rows.append(current)
-
-        out = pd.DataFrame(merged_rows, columns=[
-            "PatientId","LOINC-Code","ConceptName","Value","StartDateTime","EndDateTime","Source"
-        ])
-        return out.sort_values(by=["StartDateTime", "LOINC-Code","ConceptName"]).reset_index(drop=True)
-
-
-    def run(self, patient_id, snapshot_date, relevance=24):
-        """
-        Run the temporal abstraction engine for a single patient.
-
-        Retrieves raw measurement records, applies applicable abstraction rules,
-        merges overlapping abstracted intervals, and returns both abstracted and untouched
-        measurement records in a unified format.
-        Will set "relevance" duration of 24h for raw records as well as to abstracted records, 
-        which may have a longer duration, depends on the intervals.
-
-        Args:
-            patient_id (str or int): Patient identifier in the database.
-            snapshot_date (str): View of the DB up to this date (default: today).
-            relevance (int, optional): Number of hours each measure is relevant for (default: 24 hours).
-
-        Returns:
-            pd.DataFrame: All records in unified format:
-                ['PatientId', 'LOINC-Code', 'ConceptName', 'Value', 'StartDateTime', 'EndDateTime', 'Source']
-        """
-        # Step 1: Retrieve raw measurements + patient attributes (e.g., sex)
-        raw_rows, params = self._get_patient_records(patient_id, snapshot_date)
-        if not raw_rows:
-            return pd.DataFrame(columns=[
-                "PatientId", "LOINC-Code", "ConceptName", "Value", "StartDateTime", "EndDateTime", "Source"
-            ])
-
-        # Step 2: Convert raw rows to DataFrame + add Source column
-        raw_df = pd.DataFrame(raw_rows, columns=[
-            'LOINC-Code', 'ConceptName', 'Value', 'Unit',
-            'ValidStartTime', 'TransactionTime'
-        ])
-        # Add rows not in output
-        raw_df['PatientId'] = patient_id
-        raw_df['Source'] = "original_value"
-        required_fields = {'LOINC-Code', 'ConceptName', 'Value', 'ValidStartTime'}
-        assert required_fields.issubset(raw_df.columns), "Missing required columns in measurement data"
-
-        # Step 3: Apply each applicable abstraction rule
-        used_indices = set()
-        abstracted_records = []
-        for rule in self.tak_rules:
-            if not rule.applies_to(params):
-                continue
-
-            rule_df = raw_df[raw_df['LOINC-Code'] == rule.loinc_code]
-            if rule_df.empty:
-                continue
-
-            result = rule.apply(rule_df)
-            for row in result['abstracted']:
-                abstracted_records.append({
-                    "PatientId": patient_id,
-                    "LOINC-Code": rule.loinc_code,
-                    "ConceptName": rule.abstraction_name,
-                    "Value": row["Value"],
-                    "StartDateTime": row["StartDateTime"],
-                    "EndDateTime": row["EndDateTime"],
-                    "Source": "abstracted_value"
-                })
-            used_indices.update(result['used_indices'])
+        self.kb_path = Path(knowledge_base_path)
+        self.da = data_access
+        self.repo: Optional[TAKRepository] = None
         
-        # Step 4: Cast as df
-        if not abstracted_records:
-           abstracted_records = pd.DataFrame(columns=[
-                "PatientId", "LOINC-Code", "ConceptName", "Value", "StartDateTime", "EndDateTime", "Source"
-            ])
-        else: 
-            abstracted_records = pd.DataFrame(abstracted_records)
-            abstracted_records['StartDateTime'] = pd.to_datetime(abstracted_records['StartDateTime'], errors='coerce')
-            abstracted_records['EndDateTime'] = pd.to_datetime(abstracted_records['EndDateTime'], errors='coerce')
-
-        # Step 5: Process untouched raw records
-        untouched = raw_df[~raw_df.index.isin(used_indices)].copy()
-        untouched = untouched.rename(columns={"ValidStartTime": "StartDateTime"})
-        untouched['StartDateTime'] = pd.to_datetime(untouched['StartDateTime'], errors='coerce')
-        # Strech duration to every unabstracted record
-        untouched['EndDateTime'] = untouched['StartDateTime'] + timedelta(hours=relevance)
-        untouched['PatientId'] = patient_id
-
-        # Step 6: Combine all
-        frames = [
-            abstracted_records,
-            untouched[["PatientId", "LOINC-Code", "ConceptName", "Value", "StartDateTime", "EndDateTime", "Source"]]
+        # TAK execution order (dependencies resolved)
+        self.raw_concepts: List[RawConcept] = []
+        self.events: List[Event] = []
+        self.states: List[State] = []
+        self.trends: List[Trend] = []
+        self.contexts: List[Context] = []
+        self.patterns: List = []  # TODO: Implement Pattern TAK
+        
+    def build_repository(self) -> TAKRepository:
+        """
+        Load and validate all TAKs from knowledge base in dependency order.
+        Raises on parsing/validation errors.
+        
+        Returns:
+            TAKRepository instance (also stored in self.repo and set as global)
+        """
+        print("\n" + "="*80)
+        print("PHASE 1: Building TAK Repository")
+        print("="*80)
+        
+        repo = TAKRepository()
+        
+        # Load TAKs in dependency order with progress tracking
+        phases = [
+            ("Raw Concepts", self.kb_path / "raw-concepts", RawConcept, self.raw_concepts),
+            ("Events", self.kb_path / "events", Event, self.events),
+            ("States", self.kb_path / "states", State, self.states),
+            ("Trends", self.kb_path / "trends", Trend, self.trends),
+            ("Contexts", self.kb_path / "contexts", Context, self.contexts),
+            # ("Patterns", self.kb_path / "patterns", Pattern, self.patterns),  # TODO
         ]
-        merged_records = pd.concat([df for df in frames if not df.empty], ignore_index=True)
-
-        # Step 7: Merge intervals (safely across all LOINC codes)
-        final_df = self._merge_intervals(merged_records)
-
-        return final_df.sort_values(by=["PatientId", "StartDateTime"]).reset_index(drop=True)
+        
+        total_files = sum(len(list(path.glob("*.xml"))) for _, path, _, _ in phases if path.exists())
+        
+        with tqdm(total=total_files, desc="Loading TAKs", unit="file") as pbar:
+            for phase_name, phase_path, tak_class, storage_list in phases:
+                if not phase_path.exists():
+                    logger.warning(f"[{phase_name}] Folder not found: {phase_path}")
+                    continue
+                
+                xml_files = sorted(phase_path.glob("*.xml"))
+                for xml_path in xml_files:
+                    try:
+                        # Parse TAK (structural validation happens here)
+                        tak = tak_class.parse(xml_path)
+                        
+                        # Register in repository (detects duplicates)
+                        repo.register(tak)
+                        storage_list.append(tak)
+                        
+                        pbar.set_postfix_str(f"{phase_name}: {tak.name}")
+                        pbar.update(1)
+                        
+                    except Exception as e:
+                        pbar.close()
+                        raise RuntimeError(f"Failed to parse {xml_path.name}: {e}") from e
+        
+        # Set global repository (required for cross-TAK validation)
+        set_tak_repository(repo)
+        
+        # Run business-logic validation on all TAKs
+        print("\n[Validation] Running business-logic checks...")
+        try:
+            repo.validate_all()
+        except Exception as e:
+            raise RuntimeError(f"TAK validation failed: {e}") from e
+        
+        # Summary
+        print("\n" + "="*80)
+        print("✅ TAK Repository Built Successfully")
+        print("="*80)
+        print(f"  Raw Concepts: {len(self.raw_concepts)}")
+        print(f"  Events:       {len(self.events)}")
+        print(f"  States:       {len(self.states)}")
+        print(f"  Trends:       {len(self.trends)}")
+        print(f"  Contexts:     {len(self.contexts)}")
+        print(f"  Patterns:     {len(self.patterns)} (TODO)")
+        print(f"  TOTAL TAKs:   {len(repo.taks)}")
+        print("="*80 + "\n")
+        
+        self.repo = repo
+        return repo
+    
+    def get_patient_ids(self) -> List[int]:
+        """Retrieve all unique patient IDs from InputPatientData."""
+        query = "SELECT DISTINCT PatientId FROM InputPatientData ORDER BY PatientId;"
+        rows = self.da.fetch_records(query, ())
+        return [int(r[0]) for r in rows]
+    
+    def get_input_for_tak(self, patient_id: int, tak: TAK) -> pd.DataFrame:
+        """
+        Extract relevant input data for a TAK from InputPatientData or OutputPatientData.
+        
+        Args:
+            patient_id: Patient ID
+            tak: TAK instance (determines which concepts to query)
+        
+        Returns:
+            DataFrame with columns: PatientId, ConceptName, StartDateTime, EndDateTime, Value, AbstractionType
+        """
+        # Determine source concepts based on TAK family
+        if isinstance(tak, RawConcept):
+            # Raw concepts query InputPatientData directly
+            concept_names = [a["name"] for a in tak.attributes]
+            table = "InputPatientData"
+        elif isinstance(tak, Event):
+            # Events query raw-concepts from InputPatientData
+            concept_names = [df["name"] for df in tak.derived_from]
+            table = "InputPatientData"
+        elif isinstance(tak, (State, Trend)):
+            # States/Trends query their parent from OutputPatientData
+            concept_names = [tak.derived_from]
+            table = "OutputPatientData"
+        elif isinstance(tak, Context):
+            # Contexts query their parent + clippers from OutputPatientData
+            concept_names = [df["name"] for df in tak.derived_from]
+            # Add clipper concept names
+            if tak.clippers:
+                concept_names.extend([c["name"] for c in tak.clippers])
+            table = "OutputPatientData"
+        else:
+            raise ValueError(f"Unsupported TAK family: {tak.family}")
+        
+        # Build query with IN clause for concept names
+        placeholders = ','.join('?' * len(concept_names))
+        query = f"""
+            SELECT PatientId, ConceptName, StartDateTime, EndDateTime, Value
+            FROM {table}
+            WHERE PatientId = ? AND ConceptName IN ({placeholders})
+            ORDER BY StartDateTime ASC;
+        """
+        params = (patient_id, *concept_names)
+        
+        rows = self.da.fetch_records(query, params)
+        if not rows:
+            return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
+        
+        df = pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+        
+        # Add AbstractionType column (required by TAK.apply() signature)
+        if table == "InputPatientData":
+            df["AbstractionType"] = "raw-concept"  # dummy value for input data
+        else:
+            # Query AbstractionType from OutputPatientData
+            query_abs = f"""
+                SELECT ConceptName, AbstractionType
+                FROM {table}
+                WHERE PatientId = ? AND ConceptName IN ({placeholders})
+                GROUP BY ConceptName;
+            """
+            abs_rows = self.da.fetch_records(query_abs, params)
+            abs_map = {r[0]: r[1] for r in abs_rows}
+            df["AbstractionType"] = df["ConceptName"].map(abs_map).fillna("unknown")
+        
+        return df
+    
+    def write_output(self, df: pd.DataFrame) -> int:
+        """
+        Write TAK output to OutputPatientData.
+        
+        Args:
+            df: DataFrame with columns: PatientId, ConceptName, StartDateTime, EndDateTime, Value, AbstractionType
+        
+        Returns:
+            Number of rows inserted
+        """
+        if df.empty:
+            return 0
+        
+        # Convert to tuples for executemany
+        rows = [
+            (
+                int(row["PatientId"]),
+                str(row["ConceptName"]),
+                str(row["StartDateTime"]),
+                str(row["EndDateTime"]),
+                str(row["Value"]),
+                str(row["AbstractionType"])
+            )
+            for _, row in df.iterrows()
+        ]
+        
+        # Use INSERT OR IGNORE to skip duplicates
+        return self.da.insert_many(INSERT_ABSTRACTED_MEASUREMENT_QUERY, rows, batch_size=1000)
+    
+    async def process_patient_async(self, patient_id: int, semaphore: asyncio.Semaphore) -> Dict[str, int]:
+        """
+        Process a single patient through the entire TAK pipeline (async).
+        
+        Args:
+            patient_id: Patient ID
+            semaphore: Asyncio semaphore for concurrency control
+        
+        Returns:
+            Dict with stats: {tak_name: rows_written}
+        """
+        async with semaphore:
+            # Run synchronous TAK processing in executor (blocking operations)
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self._process_patient_sync, patient_id)
+    
+    def _process_patient_sync(self, patient_id: int) -> Dict[str, int]:
+        """Synchronous patient processing (called from async executor)."""
+        stats = {}
+        
+        try:
+            # Phase 1: Apply raw-concepts (output cached in memory, not written to DB)
+            raw_outputs = {}
+            for rc in self.raw_concepts:
+                df_input = self.get_input_for_tak(patient_id, rc)
+                if df_input.empty:
+                    continue
+                df_output = rc.apply(df_input)
+                raw_outputs[rc.name] = df_output
+                stats[rc.name] = len(df_output)
+            
+            # Phase 2: Apply events (write to DB)
+            for event in self.events:
+                # Events query InputPatientData directly
+                df_input = self.get_input_for_tak(patient_id, event)
+                if df_input.empty:
+                    continue
+                df_output = event.apply(df_input)
+                rows_written = self.write_output(df_output)
+                stats[event.name] = rows_written
+            
+            # Phase 3: Apply states (write to DB)
+            for state in self.states:
+                # States query parent TAK from OutputPatientData (or raw_outputs cache)
+                if state.derived_from in raw_outputs:
+                    df_input = raw_outputs[state.derived_from]
+                else:
+                    df_input = self.get_input_for_tak(patient_id, state)
+                
+                if df_input.empty:
+                    continue
+                df_output = state.apply(df_input)
+                rows_written = self.write_output(df_output)
+                stats[state.name] = rows_written
+            
+            # Phase 4: Apply trends (write to DB)
+            for trend in self.trends:
+                if trend.derived_from in raw_outputs:
+                    df_input = raw_outputs[trend.derived_from]
+                else:
+                    df_input = self.get_input_for_tak(patient_id, trend)
+                
+                if df_input.empty:
+                    continue
+                df_output = trend.apply(df_input)
+                rows_written = self.write_output(df_output)
+                stats[trend.name] = rows_written
+            
+            # Phase 5: Apply contexts (write to DB)
+            for context in self.contexts:
+                df_input = self.get_input_for_tak(patient_id, context)
+                if df_input.empty:
+                    continue
+                df_output = context.apply(df_input)
+                rows_written = self.write_output(df_output)
+                stats[context.name] = rows_written
+            
+            # Phase 6: Apply patterns (TODO)
+            # for pattern in self.patterns:
+            #     ...
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"[Patient {patient_id}] Processing failed: {e}", exc_info=True)
+            return {"error": str(e)}
+    
+    async def process_all_patients_async(self, max_concurrent: int = 4) -> Dict[int, Dict[str, int]]:
+        """
+        Process all patients through TAK pipeline with async parallelism.
+        
+        Args:
+            max_concurrent: Maximum number of concurrent patient processes
+        
+        Returns:
+            Dict mapping patient_id → {tak_name: rows_written}
+        """
+        patient_ids = self.get_patient_ids()
+        
+        if not patient_ids:
+            print("[Warning] No patients found in InputPatientData.")
+            return {}
+        
+        print("\n" + "="*80)
+        print(f"PHASE 2: Processing {len(patient_ids)} Patients (max_concurrent={max_concurrent})")
+        print("="*80 + "\n")
+        
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        tasks = [
+            self.process_patient_async(pid, semaphore)
+            for pid in patient_ids
+        ]
+        
+        # Process with progress bar
+        results = []
+        for coro in async_tqdm.as_completed(tasks, total=len(tasks), desc="Processing patients", unit="patient"):
+            result = await coro
+            results.append(result)
+        
+        # Map results back to patient IDs
+        patient_stats = dict(zip(patient_ids, results))
+        
+        # Summary
+        total_rows = sum(sum(stats.values()) for stats in results if "error" not in stats)
+        errors = sum(1 for stats in results if "error" in stats)
+        
+        print("\n" + "="*80)
+        print("✅ Patient Processing Complete")
+        print("="*80)
+        print(f"  Patients processed: {len(patient_ids)}")
+        print(f"  Total rows written: {total_rows}")
+        print(f"  Errors:             {errors}")
+        print("="*80 + "\n")
+        
+        return patient_stats
+    
+    def run(self, max_concurrent: int = 4):
+        """
+        Main entry point: Build repository → Process patients → Write outputs.
+        
+        Args:
+            max_concurrent: Maximum number of concurrent patient processes
+        """
+        # Phase 1: Build TAK repository
+        self.build_repository()
+        
+        # Phase 2: Process all patients (async)
+        patient_stats = asyncio.run(self.process_all_patients_async(max_concurrent=max_concurrent))
+        
+        return patient_stats
     
 
 
