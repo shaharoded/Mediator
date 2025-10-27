@@ -26,20 +26,30 @@ Mediator/
 │   │   ├── insert_raw_concept.sql
 │   │   ├── insert_abstracted_concept.sql
 │   │   ├── insert_qa_score.sql
-│   │   ├── get_input_by_patient.sql
-│   │   ├── get_input_by_patient_and_concepts.sql
-│   │   ├── get_output_by_patient.sql
-│   │   ├── get_output_by_patient_and_concepts.sql
-│   │   ├── get_qa_scores.sql
+│   │   ├── get_data_by_patient_and_concepts.sql
 │   │   └── check_table_exists.sql
-│   ├── config.py                           # Paths to DB and SQL templates
-│   ├── dataaccess.py                       # Main DB access and CLI
+│   ├── config.py                           # Local paths to DB and SQL templates
+│   └── dataaccess.py                       # Main DB access and CLI
 ├── core/
-│   ├── config.py                           # Paths to TAK files for engine
-│   ├── utils.py                            # Utility Functions
-│   ├── tak.py                              # Defines the TAK object and parser
-│   ├── mediator.py                         # Abstraction engine
-│   └── TAKs/                               # TAK/rule files (for abstraction logic)
+│   ├── knowledge-base/                     # TAK/rule definitions (XML)
+│   │   ├── raw-concepts/                   # Single\ multi-attribute raw concepts
+│   │   ├── events/                         # Point-in-time event abstractions
+│   │   ├── states/                         # Interval-based state abstractions
+│   │   ├── trends/                         # Slope-based trend abstractions
+│   │   ├── contexts/                       # Background context abstractions
+│   │   ├── patterns/                       # Temporal patterns abstractions + QA
+│   │   └── global_clippers.json            # Global START/END clippers
+│   ├── tak/                                # TAK implementation modules
+│   │   ├── tak.py                          # Base TAK class + repository + rules
+│   │   ├── raw_concept.py                  # RawConcept TAK
+│   │   ├── event.py                        # Event TAK
+│   │   ├── state.py                        # State TAK
+│   │   ├── trend.py                        # Trend TAK
+│   │   ├── context.py                      # Context TAK
+│   │   ├── pattern.py                      # Pattern TAK (TODO)
+│   │   └── utils.py                        # Shared utilities
+│   ├── config.py                           # Local paths
+│   └── mediator.py                         # Orchestration engine + CLI
 ├── images/
 ├── unittests/
 ├── README.md                               # This file
@@ -89,7 +99,7 @@ Mediator/
 - Loader auto-selects Dask for large files (>=100 MB) if available; otherwise uses pandas chunking.
 - Loading is transactional: validations + inserts per chunk; any validation error rolls back all changes.
 
-Mediator also offers different usage options using it's CLI:
+**Mediator pipeline operations:**
 
 ```bash
 # Process all patients (default paths)
