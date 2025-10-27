@@ -55,10 +55,31 @@ class State(TAK):
         cats = tuple(s.strip() for s in (root.findtext("categories") or "").split(",") if s.strip())
         desc = root.findtext("description") or ""
 
-        # --- derived-from (required) ---
-        df_el = root.find("derived-from")
-        if df_el is None or "name" not in df_el.attrib or "tak" not in df_el.attrib:
-            raise ValueError(f"{name}: missing <derived-from name='state_name' tak='raw-concept'>")
+        # --- derived-from (required, must be single attribute reference) ---
+        df_elements = root.findall("derived-from")
+        if len(df_elements) == 0:
+            raise ValueError(f"{name}: missing <derived-from name='...' tak='...'> block")
+        if len(df_elements) > 1:
+            raise ValueError(f"{name}: State can only have ONE <derived-from> block (found {len(df_elements)})")
+        
+        df_el = df_elements[0]
+        
+        # Check if <derived-from> contains <attribute> children (Event/Context pattern)
+        attr_children = df_el.findall("attribute")
+        if attr_children:
+            raise ValueError(
+                f"{name}: State's <derived-from> must reference a SINGLE TAK (format: <derived-from name='...' tak='...'/>). "
+                f"Found {len(attr_children)} <attribute> children, which is the Event/Context pattern. "
+                f"States can only derive from one RawConcept or Event TAK."
+            )
+        
+        # Validate required attributes (name, tak)
+        if "name" not in df_el.attrib or "tak" not in df_el.attrib:
+            raise ValueError(
+                f"{name}: <derived-from> must have 'name' and 'tak' attributes. "
+                f"Correct format: <derived-from name='PARENT_TAK_NAME' tak='raw-concept|event'/>"
+            )
+        
         derived_from = df_el.attrib["name"]
 
         # --- persistence (required) ---
