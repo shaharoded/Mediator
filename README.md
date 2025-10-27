@@ -152,6 +152,7 @@ python -m pytest unittests/test_event.py -v
 python -m pytest unittests/test_state.py -v
 python -m pytest unittests/test_trend.py -v -s # Added validation prints
 python -m pytest unittests/test_context.py -v
+python -m pytest unittests/test_mediator.py -v
 ```
 
 ## Git commit tips
