@@ -1,46 +1,56 @@
-# Mediator — Temporal Abstraction
+# Mediator — Knowledge-Based Temporal Abstraction
 
-## Purpose
-The Mediator converts time-stamped clinical input into interval-based abstractions for research, development and predictive models. It implements a compact Knowledge-Based Temporal Abstraction (KBTA) style pipeline locally.
+<p align="center">
+  <img src="images/mediator_architecture.png" alt="Mediator Architecture" width="800"/>
+</p>
 
-## Implemented abstractions
-- **Events** — point-in-time occurrences (e.g., medication administration, dysglycemia).
-  - Can be derived from **multiple raw-concepts** (bridging data gaps).
-  - Support flexible constraints: `equal`, `min`, `max`, or `min + max` (range).
-- **Contexts** — background facts that affect abstraction logic. Similar to `Events` but might be time bounded.
-- **States** — symbolic intervals derived from numeric concepts by discretization or from nominal concepts by equality (e.g., "high glucose").
-- **Trends** — gradients over time (e.g., increasing, decreasing).
-- **Patterns** — ordered compositions of events/intervals computed from abstractions.
-- **QA-patterns** — post-analysis scoring of detected or missing patterns.
+## Overview
 
-## Repository layout
+The **Mediator** is a Python-based implementation of Knowledge-Based Temporal Abstraction (KBTA) that converts time-stamped clinical data into interval-based symbolic abstractions for research and predictive modeling.
+
+**Key Features:**
+- ✅ **Hierarchical abstractions** — Raw Concepts → Events → States → Trends → Contexts → Patterns
+- ✅ **XSD schema validation** — Structural validation for all TAK definitions
+- ✅ **Production-ready** — SQLite backend, async processing, comprehensive tests
+- ✅ **Extensible** — XML-based TAK definitions (no code changes needed)
+
+**Theoretical Foundation:**
+
+This implementation is based on the KBTA framework:
+
+1. **Shahar, Y., & Musen, M. A. (1996).** "Knowledge-based temporal abstraction in clinical domains." *Artificial Intelligence in Medicine*, 8(3), 267-298.
+   - DOI: [10.1016/0933-3657(95)00036-4](https://doi.org/10.1016/0933-3657(95)00036-4)
+
+2. **Shalom, E., Goldstein, A., Weiss, R., Selivanova, M., Cohen, N. M., & Shahar, Y. (2024).** "Implementation and evaluation of a system for assessment of the quality of long-term management of patients at a geriatric hospital." *Journal of Biomedical Informatics*, 156, 104686.
+   - DOI: [10.1016/j.jbi.2024.104686](https://doi.org/10.1016/j.jbi.2024.104686)
+
+---
+
+## Repository Structure
+
 ```
 Mediator/
-├── backend/
+├── backend/                                # Database layer
 │   ├── data/
-│   │   ├── generate_synthetic_data.ipynb   # Notebook to generate templated data for tests
-│   │   ├── mediator.db                     # SQLite DB file (created by CLI)
-│   │   └── synthetic_input_data.csv        # Example input CSV, output from notebook
+│   │   ├── generate_synthetic_data.ipynb   # Synthetic data generator
+│   │   ├── mediator.db                     # SQLite database (auto-created)
+│   │   └── synthetic_input_data.csv        # Example input CSV
 │   ├── queries/                            # SQL templates (DDL, DML, SELECT)
-│   │   ├── create_tables.sql
-│   │   ├── insert_raw_concept.sql
-│   │   ├── insert_abstracted_concept.sql
-│   │   ├── insert_qa_score.sql
-│   │   ├── get_data_by_patient_and_concepts.sql
-│   │   └── check_table_exists.sql
-│   ├── config.py                           # Local paths to DB and SQL templates
-│   └── dataaccess.py                       # Main DB access and CLI
-├── core/
-│   ├── knowledge-base/                     # TAK/rule definitions (XML)
-│   │   ├── raw-concepts/                   # Single\ multi-attribute raw concepts
-│   │   ├── events/                         # Point-in-time event abstractions
-│   │   ├── states/                         # Interval-based state abstractions
-│   │   ├── trends/                         # Slope-based trend abstractions
-│   │   ├── contexts/                       # Background context abstractions
-│   │   ├── patterns/                       # Temporal patterns abstractions + QA
-│   │   └── global_clippers.json            # Global START/END clippers
-│   ├── tak/                                # TAK implementation modules
-│   │   ├── tak.py                          # Base TAK class + repository + rules
+│   ├── config.py                           # Database paths
+│   └── dataaccess.py                       # Database access + CLI
+├── core/                                   # TAK engine
+│   ├── knowledge-base/                     # TAK definitions (XML)
+│   │   ├── raw-concepts/                   # Single/multi-attribute concepts
+│   │   ├── events/                         # Point-in-time events
+│   │   ├── states/                         # Interval-based states
+│   │   ├── trends/                         # Slope-based trends
+│   │   ├── contexts/                       # Background contexts
+│   │   ├── patterns/                       # Temporal patterns (TODO)
+│   │   ├── global_clippers.json            # Global START/END clippers
+│   │   ├── tak_schema.xsd                  # XSD validation schema
+│   │   └── TAK_README.json                 # TAK documentation + instructions
+│   ├── tak/                                # TAK implementation
+│   │   ├── tak.py                          # Base classes + repository
 │   │   ├── raw_concept.py                  # RawConcept TAK
 │   │   ├── event.py                        # Event TAK
 │   │   ├── state.py                        # State TAK
@@ -48,69 +58,109 @@ Mediator/
 │   │   ├── context.py                      # Context TAK
 │   │   ├── pattern.py                      # Pattern TAK (TODO)
 │   │   └── utils.py                        # Shared utilities
-│   ├── config.py                           # Local paths
+│   ├── config.py                           # TAK paths
 │   └── mediator.py                         # Orchestration engine + CLI
-├── images/
-├── unittests/
+├── images/                                 # Documentation assets
+├── unittests/                              # Comprehensive test suite
 ├── README.md                               # This file
-└── requirements.txt
+└── requirements.txt                        # Python dependencies
 ```
 
-## Database summary
-- **Tables:**
-  - `InputPatientData(RowId, PatientId INTEGER, ConceptName TEXT, StartDateTime TEXT, EndDateTime TEXT, Value TEXT, Unit TEXT)`
-  - `OutputPatientData(RowId, PatientId INTEGER, ConceptName TEXT, StartDateTime TEXT, EndDateTime TEXT, Value TEXT, AbstractionType TEXT)`
-  - `PatientQAScores(RowId, PatientId INTEGER, PatternName TEXT, StartDateTime TEXT, EndDateTime TEXT, Score REAL)`
-- **Constraints / indexes:**
-  - `UNIQUE(PatientId, ConceptName, StartDateTime)` prevents duplicates.
-  - Indexes on PatientId, ConceptName, StartDateTime for efficient queries.
-  - INSERTs use `INSERT OR IGNORE` to respect uniqueness.
+---
 
-## CSV input requirements (strict)
-- **Required columns** (headers are matched heuristically; canonical names recommended):
-  - `PatientId` — integers only (all rows validated).
-  - `ConceptName` — non-empty.
-  - `StartDateTime` — parseable by pandas.to_datetime (all rows validated).
-  - `EndDateTime` — parseable by pandas.to_datetime (all rows validated).
-  - `Value` — non-empty.
-- **Optional:**
-  - `Unit` — optional text.
-- Dates are normalized to `YYYY-MM-DD HH:MM:SS` on insert.
-- **Validation policy:** loader validates every row; any failure aborts the entire load (transaction rollback).
+## Quick Start
 
-## CLI
-- **Create DB tables:**
-  ```
-  python -m backend/dataaccess --create_db
-  ```
-  - Drop existing and recreate:
-  ```
-  python -m backend.dataaccess --create_db --drop
-  ```
-- **Load CSV into InputPatientData:**
-  - Interactive (prompts if table not empty):
-    ```
-    python -m backend/dataaccess --load_csv data/my_input.csv
-    
-    # Like:
-    
-    python -m backend.dataaccess --load_csv backend/data/synthetic_input_data.csv
-    ```
-  - Replace input, clear outputs, auto-confirm:
-    ```
-    python -m backend/dataaccess --load_csv data/my_input.csv --replace-input --clear-output-qa --yes
-    ```
-- Loader auto-selects Dask for large files (>=100 MB) if available; otherwise uses pandas chunking.
-- Loading is transactional: validations + inserts per chunk; any validation error rolls back all changes.
-
-**Mediator pipeline operations:**
+### 1. Installation
 
 ```bash
-# Process all patients (default paths)
+# Clone repository
+git clone https://github.com/YOUR_USERNAME/Mediator.git
+cd Mediator
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 2. Setup Database
+
+```bash
+# Create database tables
+python -m backend.dataaccess --create_db
+
+# Load example data
+python -m backend.dataaccess --load_csv backend/data/synthetic_input_data.csv
+```
+
+### 3. Run Pipeline
+
+```bash
+# Process all patients
 python -m core.mediator
 
 # Process specific patients
-python -m core.mediator --patients 1,2,3,4,5
+python -m core.mediator --patients 1000,1001,1002
+
+# Debug mode
+python -m core.mediator --log-level DEBUG --patients 1000
+```
+
+---
+
+## Database Schema
+
+### CSV Input Requirements
+
+**Required columns:**
+- `PatientId` — Integer patient identifier
+- `ConceptName` — Concept/measurement name (matches TAK names)
+- `StartDateTime` — Timestamp (YYYY-MM-DD HH:MM:SS)
+- `EndDateTime` — Timestamp
+- `Value` — Measurement value (numeric or string)
+
+**Optional columns:**
+- `Unit` — Measurement unit
+
+**Example CSV:**
+```csv
+PatientId,ConceptName,StartDateTime,EndDateTime,Value,Unit
+1000,GLUCOSE_LAB_MEASURE,2024-01-01 08:00:00,2024-01-01 08:00:00,120,mg/dL
+1000,BASAL_DOSAGE,2024-01-01 21:00:00,2024-01-01 21:00:00,15,U
+1000,BASAL_ROUTE,2024-01-01 21:00:00,2024-01-01 21:00:00,SubCutaneous,
+```
+
+---
+
+## CLI Reference
+
+### Database Operations
+
+```bash
+# Create/recreate database
+python -m backend.dataaccess --create_db [--drop]
+
+# Load CSV
+python -m backend.dataaccess --load_csv data/input.csv
+
+# Replace existing data
+python -m backend.dataaccess --load_csv data/input.csv \
+    --replace-input --clear-output-qa --yes
+```
+
+**Features:**
+- ✅ Auto-detects large files and uses Dask if available (≥100 MB)
+- ✅ Transactional loading (all-or-nothing validation)
+- ✅ Interactive prompts (overridable with `--yes`)
+
+---
+
+### Core (Mediator Pipeline)
+
+```bash
+# Process all patients
+python -m core.mediator
+
+# Process subset
+python -m core.mediator --patients 1000,1001
 
 # Custom concurrency
 python -m core.mediator --max-concurrent 8
@@ -122,74 +172,132 @@ python -m core.mediator --kb core/knowledge-base --db data/mediator.db
 python -m core.mediator --log-level DEBUG --patients 101,102,103
 ```
 
-## Programmatic usage
+**Workflow:**
+1. **Build TAK repository** — Load and validate all TAK definitions from `knowledge-base/`
+2. **Process patients** — For each patient:
+   - Extract input data from `InputPatientData`
+   - Apply TAKs in dependency order (Raw Concepts → Events → States → Trends → Contexts)
+   - Write abstractions to `OutputPatientData`
+3. **Report stats** — Print timing and output row counts per patient
+
+---
+
+## Programmatic Usage
+
+### Database Access
+
 ```python
 from backend.dataaccess import DataAccess
+
 da = DataAccess()
+
+# Create tables
 da.create_db(drop=False)
-da.load_csv_to_input("data/my_input.csv", if_exists='append', clear_output_and_qa=False, yes=True)
-rows = da.fetch_records(GET_INPUT_BY_PATIENT, (patient_id,))
+da.load_csv_to_input("data/input.csv", if_exists='append')
+
+# Query
+rows = da.fetch_records(
+    "SELECT * FROM InputPatientData WHERE PatientId = ?",
+    (1000,)
+)
 ```
 
-## SQL templates
-- Located at `backend/queries/*.sql` and referenced from `backend/backend_config.py`.
-- Use provided templates for common operations (get by patient, get by patient+concepts, insert raw/abstracted/QA).
+### TAK Processing
 
-## Tips
-- Prefer canonical headers in CSV (`PatientId`, `ConceptName`, `StartDateTime`, `EndDateTime`, `Value`, `Unit`).
-- Back up `data/mediator.db` before destructive operations (e.g., `--create_db --drop`).
-- If you want lenient ingestion, add a preprocessing step to clean the CSV before loading.
+```python
+from pathlib import Path
+from core.mediator import Mediator
+
+mediator = Mediator(Path("core/knowledge-base"))
+repo = mediator.build_repository()
+
+# Process patients
+stats = mediator.run(max_concurrent=4, patient_subset=[1000, 1001])
+print(stats)
+```
+
+---
+
+## TAK Documentation
+
+For detailed information about TAK families, XML schema, validation rules, and examples:
+
+📖 **See:** [`core/knowledge-base/TAK_README.md`](core/knowledge-base/TAK_README.md)
+
+**Quick TAK Reference:**
+- **Raw Concepts** — Bridge InputPatientData → pipeline (multi-attr tuples, numeric ranges, nominal values)
+- **Events** — Point-in-time occurrences (multi-source, flexible constraints)
+- **States** — Interval-based symbolic states (discretization + merging)
+- **Trends** — Slope-based trends (Increasing/Decreasing/Steady)
+- **Contexts** — Background facts (windowing + clipping)
+
+---
 
 ## Testing
 
-Self contained testing modules were created under `unittests\`. You can run:
-
 ```bash
-python -m pytest -q
-```
+# Run all tests
+python -m pytest unittests/ -v
 
-OR one-by-one
-
-```bash
+# Run specific test modules
 python -m pytest unittests/test_raw_concept.py -v
 python -m pytest unittests/test_event.py -v
 python -m pytest unittests/test_state.py -v
-python -m pytest unittests/test_trend.py -v -s # Added validation prints
+python -m pytest unittests/test_trend.py -v
 python -m pytest unittests/test_context.py -v
-python -m pytest unittests/test_mediator.py -v -s # Added validation prints
+python -m pytest unittests/test_mediator.py -v
 ```
 
-## Git commit tips
+**Coverage:** 53 tests covering all TAK families + end-to-end pipeline.
 
-To initialize a git repository and publish this project on GitHub:
+---
 
-1. **Initialize the repository (if not already):**
-   ```sh
-   git init
-   ```
+## Common Issues
 
-2. **Add all files:**
-   ```sh
-   git add .
-   ```
+### Database Not Found
+**Error:** `Database file 'mediator.db' does not exist`
 
-3. **Commit your changes:**
-   ```sh
-   git commit -m "message"
-   ```
+**Fix:**
+```bash
+python -m backend.dataaccess --create_db
+```
 
-4. **Create a new repository on GitHub** (via the GitHub web UI).
+### CSV Validation Failure
+**Error:** `Missing required columns: PatientId`
 
-5. **Add the remote and push:**
-   ```sh
-   git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
-   git branch -M main
-   git push -u origin main
-   ```
+**Fix:** Rename CSV headers to match canonical names (`PatientId`, `ConceptName`, etc.)
 
-6. **After publishing:**
-   - Use `git add`, `git commit`, and `git push` to update your repository as you develop.
-   - Write clear commit messages describing your changes.
+### TAK Validation Error
+**Error:** `Element 'tuple-order': This element is not expected`
+
+**Fix:** Check XML element order matches schema (see [`TAK_README.md`](core/knowledge-base/TAK_README.md#critical-element-order-rules))
+
+---
 
 ## Citation
-This code is a research tool. Track provenance and cite relevant KBTA literature when used in publications.
+
+```bibtex
+@article{shahar1996knowledge,
+  title={Knowledge-based temporal abstraction in clinical domains},
+  author={Shahar, Yuval and Musen, Mark A},
+  journal={Artificial Intelligence in Medicine},
+  volume={8},
+  number={3},
+  pages={267--298},
+  year={1996},
+  publisher={Elsevier}
+}
+
+@article{shalom2024implementation,
+  title={Implementation and evaluation of a system for assessment of the quality of long-term management of patients at a geriatric hospital},
+  author={Shalom, Erez and Goldstein, Avraham and Weiss, Robert and Selivanova, Marina and Cohen, Nir Menachemi and Shahar, Yuval},
+  journal={Journal of Biomedical Informatics},
+  volume={156},
+  pages={104686},
+  year={2024},
+  publisher={Elsevier}
+}
+```
+---
+
+**Maintained by:** Shahar Oded
