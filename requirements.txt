@@ -3,6 +3,7 @@ pandas
 dask
 python-dateutil
 tqdm
+lxml>=4.9.0
 
 # For testing
 pytest

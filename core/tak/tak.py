@@ -1,9 +1,16 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, Literal, Union, Dict, List, Any
-from pathlib import Path
 import pandas as pd
 from abc import ABC, abstractmethod
+from lxml import etree as lxml_etree
+from pathlib import Path
+
+import logging
+logger = logging.getLogger(__name__)
+
+# Import schema path from config
+from ..config import TAK_SCHEMA_PATH
 
 # Global singleton TAKRepository instance (set by mediator at startup)
 _GLOBAL_TAK_REPO: Optional["TAKRepository"] = None
@@ -225,5 +232,44 @@ class EventAbstractionRule(TAKRule):
         elif self.operator == "or":
             return any(results)
         return False
+
+
+# NEW: Schema validation helper
+def validate_xml_against_schema(xml_path: Path, schema_path: Optional[Path] = None) -> None:
+    """
+    Validate XML file against XSD schema.
+    
+    Args:
+        xml_path: Path to XML file
+        schema_path: Path to XSD schema file (if None, auto-detects from knowledge-base folder)
+    
+    Raises:
+        ValueError: If validation fails
+    """
+    if schema_path is None:
+        schema_path = Path(TAK_SCHEMA_PATH)
+    
+    if not schema_path.exists():
+        # Schema file not found → skip validation (warn, don't fail)
+        logger.warning(f"XSD schema not found: {schema_path}. Skipping structural validation.")
+        return
+    
+    try:
+        # Load schema
+        with open(schema_path, 'rb') as f:
+            schema_doc = lxml_etree.parse(f)
+        schema = lxml_etree.XMLSchema(schema_doc)
+        
+        # Load XML
+        with open(xml_path, 'rb') as f:
+            xml_doc = lxml_etree.parse(f)
+        
+        # Validate
+        if not schema.validate(xml_doc):
+            error_log = schema.error_log
+            raise ValueError(f"XML validation failed:\n{error_log}")
+            
+    except lxml_etree.XMLSyntaxError as e:
+        raise ValueError(f"XML syntax error: {e}")
 
 

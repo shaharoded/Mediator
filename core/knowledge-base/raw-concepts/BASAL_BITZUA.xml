@@ -16,12 +16,12 @@
         </attribute>
     </attributes>
 
-    <!-- Merge dosage+route if observed together; each is optional -->
-    <merge require-all="false"/>
-    
-    <!-- Emit value as (dosage, route); if route missing -> (dosage, None) -->
+    <!-- Tuple-order BEFORE merge -->
     <tuple-order>
         <attribute name="BASAL_DOSAGE"/>
         <attribute name="BASAL_ROUTE"/>
     </tuple-order>
+
+    <!-- Merge dosage+route if observed together; each is optional -->
+    <merge require-all="false"/>
 </raw-concept>

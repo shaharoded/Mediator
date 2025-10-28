@@ -5,8 +5,4 @@
     <attributes>
         <attribute name="ADMISSION" type="boolean"/>
     </attributes>
-    <merge/>
-    
-    <!-- Emit value as ("True",) -->
-    <tuple/>
 </raw-concept>

@@ -19,11 +19,4 @@
             </numeric-allowed-values>
         </attribute>
     </attributes>
-
-    <!-- Don't merge records (creating a tuple with a few values), treat all instances separately under one Concept-->
-    <merge/>
-    
-    <!-- Emit value as (measure,) -->
-    <tuple/>
-
 </raw-concept>

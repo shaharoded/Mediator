@@ -5,7 +5,4 @@
     <derived-from>
         <attribute name="MEAL" tak="raw-concept" idx="0"/>
     </derived-from>
-
-    <!-- Invocation rules -> values on the raw concept -->
-    <abstraction-rules/>
 </event>

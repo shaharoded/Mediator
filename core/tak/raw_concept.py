@@ -9,7 +9,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .utils import parse_duration  # "8h" -> timedelta(hours=8)
-from .tak import TAK
+from .tak import TAK, validate_xml_against_schema
 
 
 class RawConcept(TAK):
@@ -43,6 +43,11 @@ class RawConcept(TAK):
     @classmethod
     def parse(cls, xml_path: Union[str, Path]) -> "RawConcept":
         """Parse a <raw-concept> XML definition file."""
+        xml_path = Path(xml_path)
+        
+        # Validate against XSD schema (graceful if lxml not available)
+        validate_xml_against_schema(xml_path)
+        
         root = ET.parse(xml_path).getroot()
         if root.tag != "raw-concept":
             raise ValueError(f"{xml_path} is not a raw-concept file")

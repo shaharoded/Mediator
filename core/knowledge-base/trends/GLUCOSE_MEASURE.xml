@@ -8,6 +8,6 @@
     <time-steady value="12h"/>
 
     <!-- maximum difference between consecutive points to merge if both has the same classification -->
-    <persistence good-before="0h" good-after="24h"/>
+    <persistence good-after="24h"/>
 
 </trend>

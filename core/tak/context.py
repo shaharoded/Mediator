@@ -7,7 +7,7 @@ import pandas as pd
 import logging
 logger = logging.getLogger(__name__)
 
-from .tak import TAK, get_tak_repository, EventAbstractionRule
+from .tak import TAK, get_tak_repository, EventAbstractionRule, validate_xml_against_schema
 from .raw_concept import RawConcept
 from .utils import parse_duration
 
@@ -39,6 +39,11 @@ class Context(TAK):
     @classmethod
     def parse(cls, xml_path: Union[str, Path]) -> "Context":
         """Parse <context> XML with structural validation."""
+        xml_path = Path(xml_path)
+        
+        # NEW: Validate against XSD schema (graceful if lxml not available)
+        validate_xml_against_schema(xml_path)
+        
         root = ET.parse(xml_path).getroot()
         if root.tag != "context":
             raise ValueError(f"{xml_path} is not a context file")

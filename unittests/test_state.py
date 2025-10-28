@@ -65,7 +65,7 @@ RAW_BASAL_XML = """\
     <attribute name="BASAL_DOSAGE"/>
     <attribute name="BASAL_ROUTE"/>
   </tuple-order>
-  <merge tolerance="15m" require-all="false"/>
+  <merge require-all="false"/>
 </raw-concept>
 """
 

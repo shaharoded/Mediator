@@ -12,8 +12,4 @@
             </nominal-allowed-values>
         </attribute>
     </attributes>
-    <merge/>
-    
-    <!-- Emit value as (True,) -->
-    <tuple/>
 </raw-concept>

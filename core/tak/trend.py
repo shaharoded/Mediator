@@ -9,7 +9,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .utils import parse_duration
-from .tak import TAK, get_tak_repository
+from .tak import TAK, get_tak_repository, validate_xml_against_schema
 from .raw_concept import RawConcept
 
 
@@ -42,6 +42,11 @@ class Trend(TAK):
     @classmethod
     def parse(cls, xml_path: Union[str, Path]) -> "Trend":
         """Parse <trend> XML with structural validation."""
+        xml_path = Path(xml_path)
+        
+        # NEW: Validate against XSD schema (graceful if lxml not available)
+        validate_xml_against_schema(xml_path)
+        
         root = ET.parse(xml_path).getroot()
         if root.tag != "trend":
             raise ValueError(f"{xml_path} is not a trend file")

@@ -20,8 +20,4 @@
         </attribute>
         <!-- idx="1" (route) is nominal; no discretization needed -->
     </discretization-rules>
-
-    <!-- Once all values are discrete, they can be abstracted -->
-    <!-- If no abstraction rules are defined, the abstraction will default to the original values -->
-    <abstraction-rules/>
 </state>

@@ -16,7 +16,7 @@
         </attribute>
     </attributes>
 
-    <!-- Emit value as (dosage, route); if route missing -> (dosage, None) -->
+    <!-- Tuple-order BEFORE merge -->
     <tuple-order>
         <attribute name="BOLUS_DOSAGE"/>
         <attribute name="BOLUS_ROUTE"/>

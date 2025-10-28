@@ -5,9 +5,6 @@
     <derived-from>
         <attribute name="DIABETES_DIAGNOSYS" tak="raw-concept" idx="0"/>
     </derived-from>
-
-    <!-- Use this to define different context windows based on value -->
-    <abstraction-rules/>
     
     <context-windows>
         <!-- A DD diagnosis is relevant from the beginning of the hospitalization -->

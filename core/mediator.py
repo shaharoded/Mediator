@@ -1,6 +1,5 @@
 """
 TO-DO:
-- Differentiate between repo building logs which are important vs. patient processing logs which can be verbose, and should probably be stored in a log file, and produce end-of-run stats.
 - Add XML schema object (and validation) 
 - Add TAK documentation readme: usage, schema, parameters. 
 """

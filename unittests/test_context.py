@@ -13,6 +13,8 @@ import pandas as pd
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path
+import pandas as pd
+import pytest
 
 from core.tak.context import Context
 from core.tak.raw_concept import RawConcept
@@ -58,7 +60,7 @@ RAW_ADMISSION_XML = """\
 </raw-concept>
 """
 
-# UPDATED: XML Fixtures with new schema
+# CORRECTED ORDER: abstraction-rules → context-windows
 CONTEXT_HYPOGLYCEMIA_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <context name="HYPOGLYCEMIA_CONTEXT">
@@ -68,10 +70,6 @@ CONTEXT_HYPOGLYCEMIA_XML = """\
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
     </derived-from>
     
-    <context-windows>
-        <persistence good-before="1h" good-after="2h"/>
-    </context-windows>
-    
     <abstraction-rules>
         <rule value="Hypoglycemia" operator="or">
             <attribute name="GLUCOSE_MEASURE" idx="0">
@@ -79,10 +77,14 @@ CONTEXT_HYPOGLYCEMIA_XML = """\
             </attribute>
         </rule>
     </abstraction-rules>
+    
+    <context-windows>
+        <persistence good-before="1h" good-after="2h"/>
+    </context-windows>
 </context>
 """
 
-# Updated XML with clip-before and clip-after
+# CORRECTED ORDER: no abstraction-rules → context-windows → clippers
 CONTEXT_WITH_CLIPPER_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <context name="CLIPPED_CONTEXT">
@@ -102,6 +104,7 @@ CONTEXT_WITH_CLIPPER_XML = """\
 </context>
 """
 
+# CORRECTED ORDER: no abstraction-rules → context-windows
 CONTEXT_NO_RULES_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <context name="NO_RULES_CONTEXT">
@@ -110,13 +113,14 @@ CONTEXT_NO_RULES_XML = """\
     <derived-from>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
     </derived-from>
+    
     <context-windows>
         <persistence good-before="30m" good-after="30m"/>
     </context-windows>
 </context>
 """
 
-# Updated XML with value-specific windows
+# CORRECTED ORDER: abstraction-rules → context-windows → clippers
 CONTEXT_VALUE_SPECIFIC_WINDOW_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <context name="BASAL_CONTEXT">

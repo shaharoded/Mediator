@@ -5,5 +5,4 @@
     <derived-from>
         <attribute name="DEATH" tak="raw-concept" idx="0"/>
     </derived-from>
-    <abstraction-rules/>
 </event>

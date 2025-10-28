@@ -5,8 +5,4 @@
     <attributes>
         <attribute name="HYPERGLYCEMIA" type="boolean"/>
     </attributes>
-    <merge/>
-    
-    <!-- Emit value as ("True",) -->
-    <tuple/>
 </raw-concept>
