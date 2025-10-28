@@ -1,9 +1,3 @@
-"""
-TO-DO:
-- Add XML schema object (and validation) 
-- Add TAK documentation readme: usage, schema, parameters. 
-"""
-
 from __future__ import annotations
 from typing import List, Dict, Optional
 from pathlib import Path
