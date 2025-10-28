@@ -15,7 +15,7 @@ from .tak import TAK
 class RawConcept(TAK):
     """
     Raw Concept TAK — parsed from <raw-concept> XML.
-    - 'raw': multi-attr; requires <tuple-order> and <merge tolerance require-all>
+    - 'raw': multi-attr; requires <tuple-order> and <merge require-all>
     - 'raw-numeric': one or more numeric attrs; ranges kept per-attr (min/max)
     - 'raw-nominal': one or more nominal attrs; each must have allowed values
     - 'raw-boolean': one or more boolean attrs
@@ -28,7 +28,6 @@ class RawConcept(TAK):
         concept_type: Literal["raw","raw-numeric","raw-nominal","raw-boolean"],
         attributes: List[Dict[str, Any]],
         tuple_order: Tuple[str, ...],
-        merge_tolerance: Optional[timedelta],
         merge_require_all: bool = False,
     ):
         super().__init__(name=name, categories=categories, description=description, family="raw-concept")
@@ -36,7 +35,6 @@ class RawConcept(TAK):
         self.concept_type = concept_type
         self.attributes = attributes                    # [{name, type, min, max, allowed}]
         self.tuple_order = tuple_order                   # declared attribute order
-        self.merge_tolerance = merge_tolerance
         self.merge_require_all = merge_require_all      # for 'raw' concepts: whether to require all attrs in merge
 
         # Runtime patient-level dataframe (filled in apply())
@@ -96,13 +94,9 @@ class RawConcept(TAK):
 
         # --- Merge (raw only) ---
         merge_el = root.find("merge")
-        tol: Optional[timedelta] = None
         require_all: bool = False
         # Collect only if concept_type is "raw"
         if merge_el is not None and concept_type == "raw":
-            tol_val = merge_el.attrib.get("tolerance")
-            if tol_val:
-                tol = parse_duration(tol_val)
             require_all = (merge_el.attrib.get("require-all", "false").lower() == "true")
         
         # --- Type-specific structural checks ---
@@ -111,8 +105,8 @@ class RawConcept(TAK):
                 raise ValueError(f"{name}: raw concept must define ≥2 attributes")
             if tuple_el is None or not tuple_order:
                 raise ValueError(f"{name}: raw concept must define <tuple-order> block")
-            if merge_el is None or tol is None or require_all is None:
-                raise ValueError(f"{name}: raw concept must define <merge tolerance=... require-all=...> block")
+            if merge_el is None:
+                raise ValueError(f"{name}: raw concept must define <merge require-all=...> block")
         
         elif concept_type == "raw-boolean":
             if not attributes or any(a["type"] != "boolean" for a in attributes):
@@ -134,7 +128,6 @@ class RawConcept(TAK):
             concept_type=concept_type,
             attributes=attributes,
             tuple_order=tuple_order,
-            merge_tolerance=tol,
             merge_require_all=require_all
         )
 
@@ -173,64 +166,6 @@ class RawConcept(TAK):
 
         # --- All good ---
         return None
-
-    def _finalize_tuple(self, pid: int, block: pd.DataFrame) -> Optional[dict]:
-        """
-        Build a single merged tuple from a time-tolerance block.
-        - Uses the last value per ConceptName within the block
-        - Respects require-all setting
-        - Skips tuples that are entirely None
-        - Emits warnings when block composition is suspicious
-        """
-        # Last observed value per concept in the block
-        last_vals = (
-            block.sort_values("StartDateTime")
-                .groupby("ConceptName", as_index=False)
-                .last()
-        )
-        mapping = dict(zip(last_vals["ConceptName"].to_numpy(),
-                        last_vals["Value"].to_numpy()))
-
-        # Raw: sanity log if block composition != tuple order size
-        uniq_concepts_in_block = set(last_vals["ConceptName"].to_numpy())
-        if self.concept_type == "raw" and len(uniq_concepts_in_block) != len(self.tuple_order):
-            logger.warning(
-                "[RAW][%s] Window mismatch: uniq_concepts=%d, tuple_order=%d, require_all=%s",
-                self.name, len(uniq_concepts_in_block), len(self.tuple_order), self.merge_require_all
-            )
-
-        # require-all enforcement (skip partials)
-        if self.concept_type == "raw" and self.merge_require_all:
-            if not all(name in mapping for name in self.tuple_order):
-                logger.warning("[RAW][%s] Dropping partial tuple (require_all=True). Missing=%s",
-                            self.name, [n for n in self.tuple_order if n not in mapping])
-                return None
-
-        # Build ordered tuple (None for missing if require_all=False)
-        ordered = tuple(mapping.get(name) for name in self.tuple_order)
-
-        # Skip tuple if it’s entirely None (no real data)
-        if all(v is None for v in ordered):
-            logger.warning("[RAW][%s] Dropping all-None tuple (likely misaligned inputs).", self.name)
-            return None
-
-        # If we allow partials and some entries are None → log for visibility
-        if self.concept_type == "raw" and not self.merge_require_all:
-            if any(v is None for v in ordered):
-                logger.info("[RAW][%s] Emitting partial tuple (require_all=False). Missing=%s",
-                            self.name, [n for n, v in zip(self.tuple_order, ordered) if v is None])
-
-        start = block["StartDateTime"].min()
-        end   = block["EndDateTime"].max()
-
-        return {
-            "PatientId": pid,
-            "ConceptName": self.name,
-            "StartDateTime": start,
-            "EndDateTime": end,
-            "Value": ordered,
-            "AbstractionType": self.family,
-        }
 
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -314,38 +249,58 @@ class RawConcept(TAK):
 
             return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
 
-        # 3) raw → tolerance-window merge
-        df.sort_values(["StartDateTime","ConceptName"], inplace=True)
-        tol_s = self.merge_tolerance.total_seconds() if self.merge_tolerance is not None else 0.0
-
+        # 3) raw → EXACT TIMESTAMP GROUPING (NO TOLERANCE)
+        df = df.copy()
+        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
+        
+        # Group by exact timestamp (rounded to nearest microsecond to handle floating-point errors)
+        df["timestamp_key"] = df["StartDateTime"].dt.round("us")
+        
         merged: List[dict] = []
-        start_idx = 0
-        n = len(df)
-        # Use numpy datetime array for efficient time delta computations
-        times = df["StartDateTime"].to_numpy(dtype='datetime64[ns]')
-
-        windows = 0
-        for i in range(1, n + 1):
-            # OPTIMIZATION: Compute time delta in seconds using numpy
-            if i == n or (times[i] - times[i-1]).astype('timedelta64[s]').astype(float) > tol_s:
-                block = df.iloc[start_idx:i]
-                block = block[block["ConceptName"].isin(self.tuple_order)]
-                if not block.empty:
-                    windows += 1
-                    row = self._finalize_tuple(pid, block)
-                    if row is not None:
-                        merged.append(row)
-                start_idx = i
-
-        out = (pd.DataFrame.from_records(merged)
-            if merged else
-            pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]))
-
-        # Log I/O sizes (raw)
-        logger.info("[%s][RAW] windows=%d | emitted_tuples=%d | input_rows=%d",
-                    self.name, windows, len(out), n)
-
-        # Additional consistency check: if windows produced where block size != len(tuple_order)
-        # is handled inside _finalize_tuple via warnings.
-
+        
+        for ts, group in df.groupby("timestamp_key"):
+            # Build tuple from all attributes at this exact timestamp
+            tuple_vals = []
+            
+            for attr_name in self.tuple_order:
+                attr_rows = group[group["ConceptName"] == attr_name]
+                if attr_rows.empty:
+                    tuple_vals.append(None)
+                else:
+                    # Take last value if multiple rows for same attribute at same timestamp
+                    tuple_vals.append(attr_rows.iloc[-1]["Value"])
+            
+            # Apply validation rules
+            if all(v is None for v in tuple_vals):
+                logger.debug("[RAW][%s] Dropping all-None tuple at %s", self.name, ts)
+                continue
+            
+            if self.merge_require_all and any(v is None for v in tuple_vals):
+                logger.debug("[RAW][%s] Dropping partial tuple (require_all=True) at %s", self.name, ts)
+                continue
+            
+            # Use first non-None attribute's timestamps
+            first_non_none_idx = next((i for i, v in enumerate(tuple_vals) if v is not None), None)
+            if first_non_none_idx is not None:
+                attr_name = self.tuple_order[first_non_none_idx]
+                source_row = group[group["ConceptName"] == attr_name].iloc[-1]
+                start_dt = source_row["StartDateTime"]
+                end_dt = source_row["EndDateTime"]
+            else:
+                start_dt = pd.Timestamp(ts)
+                end_dt = pd.Timestamp(ts)
+            
+            merged.append({
+                "PatientId": pid,
+                "ConceptName": self.name,
+                "StartDateTime": start_dt,
+                "EndDateTime": end_dt,
+                "Value": tuple(tuple_vals),
+                "AbstractionType": self.family,
+            })
+        
+        out = pd.DataFrame.from_records(merged) if merged else pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+        
+        logger.info("[%s][RAW] emitted_tuples=%d | input_rows=%d", self.name, len(out), total_in)
+        
         return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]

@@ -16,8 +16,8 @@
         </attribute>
     </attributes>
 
-    <!-- Merge dosage+route if observed within ±1 min; route is optional -->
-    <merge tolerance="60s" require-all="false"/>
+    <!-- Merge dosage+route if observed together; each is optional -->
+    <merge require-all="false"/>
     
     <!-- Emit value as (dosage, route); if route missing -> (dosage, None) -->
     <tuple-order>

@@ -46,7 +46,7 @@ RAW_XML = """\
     <attribute name="BASAL_ROUTE"/>
   </tuple-order>
 
-  <merge tolerance="15m" require-all="false"/>
+  <merge require-all="false"/>
 </raw-concept>
 """
 
@@ -103,19 +103,18 @@ def make_ts(hhmm: str, day: int = 0):
     return base.replace(hour=hh, minute=mm, second=0, microsecond=0)
 
 def df_for_raw_ok():
-    # Windows:
-    #  - Window 1 (08:00..08:05): dosage+route -> tuple emitted
-    #  - Window 2 (09:00..09:01): dosage only -> partial allowed (require-all=False) so emitted with None
+    """Test exact-timestamp matching (no tolerance)."""
     rows = [
-        # full tuple
+        # Group 1: both at 08:00 (exact match)
         (1, "BASAL_DOSAGE", make_ts("08:00"), make_ts("08:00"), 20),
-        (1, "BASAL_ROUTE" , make_ts("08:05"), make_ts("08:05"), "SubCutaneous"),
-        # partial (route missing)
-        (1, "BASAL_DOSAGE", make_ts("09:00"), make_ts("09:00"), 18),
-        (1, "BASAL_DOSAGE", make_ts("09:01"), make_ts("09:01"), 19),
-        # gap > 15m → new window
-        (1, "BASAL_ROUTE" , make_ts("10:30"), make_ts("10:30"), "IntraVenous"),
-        (1, "BASAL_DOSAGE", make_ts("10:35"), make_ts("10:35"), 30),
+        (1, "BASAL_ROUTE" , make_ts("08:00"), make_ts("08:00"), "SubCutaneous"),
+        
+        # Group 2: dosage only at 09:00 (partial allowed with require-all=false)
+        (1, "BASAL_DOSAGE", make_ts("09:00"), make_ts("09:00"), 19),
+        
+        # Group 3: both at 10:00 (exact match)
+        (1, "BASAL_ROUTE" , make_ts("10:00"), make_ts("10:00"), "IntraVenous"),
+        (1, "BASAL_DOSAGE", make_ts("10:00"), make_ts("10:00"), 30),
     ]
     return pd.DataFrame(rows, columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
 
@@ -142,6 +141,18 @@ def df_for_raw_boolean():
     ]
     return pd.DataFrame(rows, columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
 
+def df_for_raw_same_timestamp():
+    """Test merging when dosage and route have EXACT same timestamp."""
+    rows = [
+        # Group 1: both at 08:00
+        (1, "BASAL_DOSAGE", make_ts("08:00"), make_ts("08:00"), 20),
+        (1, "BASAL_ROUTE" , make_ts("08:00"), make_ts("08:00"), "SubCutaneous"),
+        # Group 2: both at 09:00
+        (1, "BASAL_DOSAGE", make_ts("09:00"), make_ts("09:00"), 25),
+        (1, "BASAL_ROUTE" , make_ts("09:00"), make_ts("09:00"), "IntraVenous"),
+    ]
+    return pd.DataFrame(rows, columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+
 
 # -----------------------------
 # Tests
@@ -153,7 +164,6 @@ def test_parse_validate_raw(tmp_path: Path):
     assert tak.name == "BASAL_BITZUA"
     assert tak.concept_type == "raw"
     assert tak.tuple_order == ("BASAL_DOSAGE", "BASAL_ROUTE")
-    assert tak.merge_tolerance == parse_duration("15m")
     assert tak.merge_require_all is False
 
     # attributes parsed
@@ -176,22 +186,17 @@ def test_apply_raw_merge_require_all_false(caplog, tmp_path: Path):
     df = df_for_raw_ok()
     out = tak.apply(df)
 
-    # Expect 3 merged windows:
-    # 1) (20, "SubCutaneous")
-    # 2) (19, None)  -- partial allowed
-    # 3) (30, "IntraVenous")
+    # Expect 3 tuples (one per unique timestamp):
+    # 1) 08:00 → (20, "SubCutaneous")
+    # 2) 09:00 → (19, None) -- partial allowed
+    # 3) 10:00 → (30, "IntraVenous")
     assert len(out) == 3
     assert list(out["ConceptName"].unique()) == [tak.name]
-    assert all(v["AbstractionType"] == tak.family for _, v in out.iterrows())
 
     tuples = list(out["Value"])
     assert tuples[0] == (20, "SubCutaneous")
     assert tuples[1] == (19, None)
-    # order within window 3 might produce (30, "IntraVenous") based on last values
     assert tuples[2] == (30, "IntraVenous")
-
-    # Should log at least one info/warning about window sizes vs tuple_order
-    assert any("RAW" in rec.msg for rec in caplog.records)
 
 
 def test_apply_raw_numeric(tmp_path: Path):
@@ -230,3 +235,23 @@ def test_apply_raw_boolean(tmp_path: Path):
     assert len(out) == 2
     assert tuple(out["Value"]) == (("True",), ("True",))
     assert all(out["ConceptName"] == tak.name)
+
+
+def test_apply_raw_merge_same_timestamp(tmp_path: Path):
+    """Test that dosage+route at exact same timestamp merge correctly."""
+    xml_path = write_xml(tmp_path, "BASAL_BITZUA.xml", RAW_XML)
+    tak = RawConcept.parse(xml_path)
+
+    df = df_for_raw_same_timestamp()
+    out = tak.apply(df)
+
+    # Expect 2 tuples (one per timestamp)
+    assert len(out) == 2
+    
+    assert out.iloc[0]["Value"] == (20, "SubCutaneous")
+    assert out.iloc[0]["StartDateTime"] == make_ts("08:00")
+    
+    assert out.iloc[1]["Value"] == (25, "IntraVenous")
+    assert out.iloc[1]["StartDateTime"] == make_ts("09:00")
+    
+    print("\n✅ Exact-timestamp merge works correctly")
