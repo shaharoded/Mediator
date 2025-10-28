@@ -899,16 +899,45 @@ Examples:
     
     args = parser.parse_args(argv)
     
+    # Setup dual logging (console shows ERRORS only, file shows all)
+    log_file = Path(args.db).parent / "mediator_run.log"  # backend/data/mediator_run.log
+    
+    # Remove existing log file (restart fresh each run)
+    if log_file.exists():
+        log_file.unlink()
+    
     # Setup logging
     numeric_level = getattr(logging, args.log_level.upper(), logging.INFO)
-    logging.basicConfig(
-        level=numeric_level,
-        format='[%(levelname)s] %(name)s: %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler('mediator_run.log', mode='a')
-        ]
+    
+    # Create formatters
+    console_formatter = logging.Formatter('[%(levelname)s] %(message)s')  # Minimal for console
+    file_formatter = logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
     )
+    
+    # Console handler: ERROR and above only (no warnings/info in terminal)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.ERROR)  # CORRECTED: Only show errors in console
+    console_handler.setFormatter(console_formatter)
+    
+    # File handler: ALL levels (verbose logs)
+    file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+    file_handler.setLevel(numeric_level)  # Respect --log-level flag
+    file_handler.setFormatter(file_formatter)
+    
+    # Configure root logger
+    logging.basicConfig(
+        level=logging.DEBUG,  # Capture everything
+        handlers=[console_handler, file_handler]
+    )
+    
+    logger.info("="*80)
+    logger.info(f"Mediator Run Started | Log Level: {args.log_level}")
+    logger.info(f"Knowledge Base: {args.kb}")
+    logger.info(f"Database: {args.db}")
+    logger.info(f"Log File: {log_file}")
+    logger.info("="*80)
     
     # Validate inputs
     if not args.kb.exists():
@@ -961,6 +990,10 @@ Examples:
         if errors > 0:
             print(f"Errors: {errors} patients failed")
         print("="*80)
+        
+        logger.info("="*80)
+        logger.info("Pipeline Complete Successfully")
+        logger.info("="*80)
         
         sys.exit(0 if errors == 0 else 1)
         

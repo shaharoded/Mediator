@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import pandas as pd
+import logging
 
 # optional dask import: prefer it but fall back gracefully
 try:
@@ -19,6 +20,8 @@ DASK_FILESIZE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
 
 # Local Code
 from .config import *
+
+logger = logging.getLogger(__name__)
 
 class DataAccess:
     def __init__(self, db_path=DB_PATH):
@@ -40,7 +43,9 @@ class DataAccess:
         # Allow SQLite connection to be used across threads (for asyncio)
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
-        print(f"[DEBUG] Connected to SQLite: {self.db_path}")
+        
+        # Log to file instead of printing to stdout
+        logger.debug(f"Connected to SQLite: {self.db_path}")
 
         # Ensure tables exist (create if missing)
         if not self.__check_tables_exist():
