@@ -1,14 +1,11 @@
 from __future__ import annotations
-from typing import Optional, Tuple, List, Dict, Any, Literal, Union
-from datetime import timedelta
+from typing import Optional, Tuple, List, Dict, Any, Union
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import pandas as pd
-import numpy as np
 import logging
 logger = logging.getLogger(__name__)
 
-from .utils import parse_duration  # "8h" -> timedelta(hours=8)
 from .tak import TAK, validate_xml_against_schema
 
 
@@ -25,7 +22,7 @@ class RawConcept(TAK):
         name: str,
         categories: Tuple[str, ...],
         description: str,
-        concept_type: Literal["raw","raw-numeric","raw-nominal","raw-boolean"],
+        concept_type: str,  # "raw","raw-numeric","raw-nominal","raw-boolean"
         attributes: List[Dict[str, Any]],
         tuple_order: Tuple[str, ...],
         merge_require_all: bool = False,

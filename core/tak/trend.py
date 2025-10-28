@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, List, Dict, Any, Literal, Union
+from typing import Optional, Tuple, List, Dict, Any, Union
 from datetime import timedelta
 from pathlib import Path
 import xml.etree.ElementTree as ET

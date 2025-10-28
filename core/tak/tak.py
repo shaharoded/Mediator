@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, Literal, Union, Dict, List, Any
+from typing import Optional, Tuple, Union, Dict, List, Any
 import pandas as pd
 from abc import ABC, abstractmethod
 from lxml import etree as lxml_etree
@@ -33,7 +33,7 @@ class TAK:
     name: str
     categories: Tuple[str, ...] = ()
     description: str = ""
-    family: Optional[Literal["raw-concept","state","trend","context","event","pattern"]] = None
+    family: Optional[str] = None # One of: "raw-concept", "state", "trend", "context", "event", "pattern"
     df: Optional[pd.DataFrame] = field(default=None, repr=False)
 
     @classmethod
@@ -122,9 +122,9 @@ class StateAbstractionRule(TAKRule):
     
     Rule matches if ALL specified constraints are satisfied (tuple can have additional unreferenced attributes).
     """
-    def __init__(self, value: str, operator: Literal["and","or"], constraints: Dict[int, List[str]]):
+    def __init__(self, value: str, operator: str, constraints: Dict[int, List[str]]):
         self.value = value
-        self.operator = operator.lower()
+        self.operator = operator.lower() # One of "and", "or"
         self.constraints = constraints  # {attr_idx: [allowed_discrete_values]}
 
     def matches(self, discrete_tuple: Tuple[Any, ...]) -> bool:
@@ -157,9 +157,9 @@ class EventAbstractionRule(TAKRule):
     Unlike AbstractionRule (which matches tuple indices), EventAbstractionRule matches
     by raw-concept name and supports flexible numeric constraints (min/max/range/equal).
     """
-    def __init__(self, value: str, operator: Literal["and","or"], constraints: Dict[str, List[Dict[str, Any]]]):
+    def __init__(self, value: str, operator: str, constraints: Dict[str, List[Dict[str, Any]]]):
         self.value = value
-        self.operator = operator.lower()
+        self.operator = operator.lower() # One of "and", "or"
         self.constraints = constraints  # {attr_name: [{constraint_spec}]}
 
     def matches(self, row: pd.Series, derived_from: List[Dict[str, Any]]) -> bool:

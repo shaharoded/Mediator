@@ -1,12 +1,13 @@
 from __future__ import annotations
-from typing import List, Dict, Optional
+from typing import Optional, List, Dict, Any
 from pathlib import Path
-import pandas as pd
 import asyncio
-import logging
 import json
+import logging
 import sys
 import argparse
+
+import pandas as pd
 from tqdm.asyncio import tqdm as async_tqdm
 from tqdm import tqdm
 
@@ -18,8 +19,6 @@ from .tak.trend import Trend
 from .tak.context import Context
 from .tak.pattern import Pattern  # TODO: Implement Pattern TAK
 from .config import TAK_FOLDER
-from backend.dataaccess import DataAccess
-
 
 # Add parent directory to path for backend imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -44,9 +43,11 @@ class Mediator:
     Design: Full caching — all TAK outputs cached in memory during patient processing (~500KB per patient).
     """
     
-    def __init__(self, 
-                 knowledge_base_path: Path, 
-                 data_access: DataAccess):
+    def __init__(
+        self, 
+        knowledge_base_path: Path, 
+        data_access: Optional[DataAccess] = None
+    ):
         """
         Initialize Mediator with knowledge base and DB access.
         
@@ -755,7 +756,11 @@ class Mediator:
         
         return da.insert_many(INSERT_ABSTRACTED_MEASUREMENT_QUERY, rows, batch_size=1000)
 
-    async def process_all_patients_async(self, max_concurrent: int = 4, patient_subset: Optional[List[int]] = None) -> Dict[int, Dict[str, int]]:
+    async def process_all_patients_async(
+        self,
+        max_concurrent: int = 4,
+        patient_subset: Optional[List[int]] = None
+    ) -> Dict[int, Dict[str, Any]]:
         """
         Process all patients through TAK pipeline with async parallelism.
         
@@ -808,7 +813,11 @@ class Mediator:
         
         return patient_stats
     
-    def run(self, max_concurrent: int = 4, patient_subset: Optional[List[int]] = None):
+    def run(
+        self,
+        max_concurrent: int = 4,
+        patient_subset: Optional[List[int]] = None
+    ) -> Dict[int, Dict[str, Any]]:
         """
         Main entry point: Build repository → Process patients → Write outputs.
         
@@ -825,6 +834,32 @@ class Mediator:
                 max_concurrent=max_concurrent,
                 patient_subset=patient_subset
             )
+        )
+        
+        return patient_stats
+    
+    async def run_async(
+        self,
+        max_concurrent: int = 4,
+        patient_subset: Optional[List[int]] = None
+    ) -> Dict[int, Dict[str, Any]]:
+        """
+        Jupyter-friendly version: Build repository → Process patients (already in event loop).
+        
+        Usage in Jupyter:
+            patient_stats = await mediator.run_async(patient_subset=[1000, 1001])
+        
+        Args:
+            max_concurrent: Maximum number of concurrent patient processes
+            patient_subset: Optional list of patient IDs to process
+        """
+        # Phase 1: Build TAK repository (sync)
+        self.build_repository()
+        
+        # Phase 2: Process patients (async, reuses existing event loop)
+        patient_stats = await self.process_all_patients_async(
+            max_concurrent=max_concurrent,
+            patient_subset=patient_subset
         )
         
         return patient_stats

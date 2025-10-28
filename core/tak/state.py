@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, List, Dict, Any, Literal, Union
+from typing import Optional, Tuple, List, Dict, Any, Union
 from datetime import timedelta
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -32,7 +32,7 @@ class State(TAK):
         max_skip: int,
         discretization_rules: List[StateDiscretizationRule],
         abstraction_rules: List[StateAbstractionRule],
-        abstraction_order: Literal["first","all"] = "first",
+        abstraction_order: str = "first",  # "first" or "all"
     ):
         super().__init__(name=name, categories=categories, description=description, family="state")
         self.derived_from = derived_from
@@ -111,7 +111,7 @@ class State(TAK):
         # --- abstraction-rules (optional, for 'raw') ---
         abs_rules: List[StateAbstractionRule] = []
         abs_el = root.find("abstraction-rules")
-        abs_order: Literal["first","all"] = "first"
+        abs_order: str = "first" # "first" or "all"
         if abs_el is not None:
             abs_order = abs_el.attrib.get("order", "first")
             for rule_el in abs_el.findall("rule"):

@@ -35,7 +35,7 @@ Mediator/
 │   │   ├── generate_synthetic_data.ipynb   # Synthetic data generator
 │   │   ├── mediator.db                     # SQLite database (auto-created)
 │   │   └── synthetic_input_data.csv        # Example input CSV
-│   ├── queries/                            # SQL templates (DDL, DML, SELECT)
+│   ├── queries/                            # SQL templates
 │   ├── config.py                           # Database paths
 │   └── dataaccess.py                       # Database access + CLI
 ├── core/                                   # TAK engine
@@ -60,6 +60,7 @@ Mediator/
 │   │   └── utils.py                        # Shared utilities
 │   ├── config.py                           # TAK paths
 │   └── mediator.py                         # Orchestration engine + CLI
+├── run_mediator.ipynb                      # Example flow for deployment option 2
 ├── images/                                 # Documentation assets
 ├── unittests/                              # Comprehensive test suite
 ├── setup.py                                # Package definition (for pip install -e)
@@ -68,6 +69,7 @@ Mediator/
 ├── .dockerignore                           # Files excluded from Docker build
 ├── MANIFEST.in                             # Package data files
 ├── requirements.txt                        # Python dependencies
+├── requirements-py37.txt                   # Python dependencies (for older envs)
 ├── LICENSE                                 # MIT License
 └── README.md                               # This file
 ```
@@ -242,10 +244,13 @@ python -m pytest unittests/ --cov=core --cov=backend --cov-report=html
 
 ## Option 2: Jupyter Notebook (Package)
 
-**Best for:** Research workflows, interactive analysis, visualization, Python API usage
+**Best for:** Research workflows, interactive analysis, visualization, Python API usage.
+This method is designed to be deployed on an older version of python as found in my research env. The idea is to use this as a code repository with a main.ipynb file that can import and use the pythonic functions offered here.
+
+**Note:** Python 3.7 support uses older dependency versions (pandas 1.3.5, numpy 1.21.6) which are no longer maintained. For production use, Python 3.9+ is strongly recommended.
 
 ### Requirements
-- Python 3.9+
+- Python 3.7+ (requirements are adapted to older version for my research env)
 - Jupyter Notebook
 
 ---
@@ -272,19 +277,79 @@ pip install jupyter notebook
 
 ### 2.2 Load in Target Machine
 
-**Transfer code to remote server:**
-```bash
-# LOCAL:
-zip -r mediator-jupyter.zip . -x "*.pyc" "__pycache__/*" ".venv/*" ".git/*" "*.db"
-scp mediator-jupyter.zip user@remote-server:/home/user/
+**Package code for manual transfer:**
 
-# REMOTE:
-ssh user@remote-server
-cd /home/user/
-unzip mediator-jupyter.zip
+```powershell
+# Windows PowerShell (native commands, no zip required)
+# Navigate to project root
+cd Mediator
+
+# Create deployment package
+Compress-Archive -Path `
+    core, `
+    backend, `
+    setup.py, `
+    MANIFEST.in, `
+    requirements-py37.txt, `
+    README.md, `
+    LICENSE `
+    -DestinationPath mediator-deploy.zip -Force
+
+# Verify package contents (PowerShell)
+Expand-Archive -Path mediator-deploy.zip -DestinationPath temp-verify -Force
+Get-ChildItem -Path temp-verify -Recurse | Select-Object -First 20 FullName
+Remove-Item -Recurse -Force temp-verify
+```
+
+**Alternative: Using 7-Zip (if installed):**
+```powershell
+# If you have 7-Zip installed (https://www.7-zip.org/)
+7z a -tzip mediator-deploy.zip core backend setup.py MANIFEST.in requirements-py37.txt README.md LICENSE -xr!*.pyc -xr!__pycache__ -xr!*.db -xr!*.log -xr!*.ipynb_checkpoints
+
+# Verify contents
+7z l mediator-deploy.zip
+```
+
+**Transfer to target machine:**
+1. Upload `mediator-deploy.zip` to your remote server using:
+   - File transfer tool (FileZilla, WinSCP, Cyberduck)
+   - Web upload interface (JupyterHub, cloud platform)
+   - Manual USB transfer (air-gapped environments)
+
+**Setup on target machine:**
+
+```bash
+# Linux/Mac (remote server)
+cd /path/to/upload/location
+unzip mediator-deploy.zip -d Mediator/
 cd Mediator/
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt && pip install -e . && pip install jupyter notebook
+
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Install dependencies (use requirements-py37.txt if Python 3.7)
+pip install --upgrade pip
+pip install -r requirements-py37.txt
+pip install -e .
+pip install jupyter notebook
+```
+
+```powershell
+# Windows (if target is also Windows)
+cd C:\path\to\upload\location
+Expand-Archive -Path mediator-deploy.zip -DestinationPath Mediator -Force
+cd Mediator
+
+# Create virtual environment
+python -m venv .venv
+.venv\Scripts\activate
+
+# Install dependencies
+pip install --upgrade pip
+pip install -r requirements-py37.txt
+pip install -e .
+pip install jupyter notebook
 ```
 
 ---
@@ -309,18 +374,9 @@ source .venv/bin/activate
 
 # Start Jupyter server
 jupyter notebook
-
-# Or specify port + disable browser
-jupyter notebook --no-browser --port=8888
 ```
 
-**Access from local machine (if remote):**
-```bash
-# SSH tunnel (on your local machine)
-ssh -L 8888:localhost:8888 user@remote-server
-
-# Open browser: http://localhost:8888
-```
+Now navigate to `run_mediator.ipynb` and continue there.
 
 ---
 
@@ -370,7 +426,7 @@ print(f"Loaded {total_rows} rows")
 **Cell 4: Build TAK Repository**
 ```python
 # Initialize mediator
-mediator = Mediator(kb_path=KB_PATH, data_access=da)
+mediator = Mediator(knowledge_base_path=KB_PATH, data_access=da)
 
 # Build TAK repository
 repo = mediator.build_repository()
@@ -392,7 +448,7 @@ for tak_name in sorted(repo.taks.keys()):
 ```python
 # Process specific patients
 patient_ids = [1000, 1001, 1002]
-patient_stats = mediator.run(
+patient_stats = await mediator.run_async(
     max_concurrent=4,
     patient_subset=patient_ids
 )
@@ -405,6 +461,7 @@ for pid, stats in patient_stats.items():
         total = sum(v for k, v in stats.items() if isinstance(v, int))
         print(f"✅ Patient {pid}: {total} output rows")
 ```
+>> Jupyter notebook already run async so the cell must run with await, unlike the regular mediator.run from terminal.
 
 **Cell 6: Query Results**
 ```python

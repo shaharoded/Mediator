@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Tuple, List, Dict, Any, Union
+from typing import Tuple, List, Dict, Any, Union
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import pandas as pd
