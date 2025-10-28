@@ -4,6 +4,7 @@ dask
 python-dateutil
 tqdm
 lxml>=4.9.0
+setuptools
 
 # For testing
 pytest

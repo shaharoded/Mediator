@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  mediator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mediator:latest
+    container_name: mediator
+    volumes:
+      # Mount data directory (persistent DB + logs)
+      - ./backend/data:/app/backend/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python -m core.mediator --help
+    # Override command at runtime:
+    # docker-compose run mediator python -m core.mediator --patients 1000,1001

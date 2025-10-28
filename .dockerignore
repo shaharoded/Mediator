@@ -1,0 +1,34 @@
+# Python caches
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Data files (exclude from image, mount as volumes)
+*.db
+*.log
+backend/data/*.csv
+backend/data/*.ipynb
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Tests
+.pytest_cache/
+unittests/
+
+# Other
+images/
+
+# OS
+.DS_Store
+Thumbs.db

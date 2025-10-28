@@ -1,7 +1,7 @@
 # Mediator — Knowledge-Based Temporal Abstraction
 
 <p align="center">
-  <img src="images/mediator_architecture.png" alt="Mediator Architecture" width="800"/>
+  <img src="images/temporal_abstractions.png" alt="Temporal Abstractions" width="800"/>
 </p>
 
 ## Overview
@@ -48,7 +48,7 @@ Mediator/
 │   │   ├── patterns/                       # Temporal patterns (TODO)
 │   │   ├── global_clippers.json            # Global START/END clippers
 │   │   ├── tak_schema.xsd                  # XSD validation schema
-│   │   └── TAK_README.json                 # TAK documentation + instructions
+│   │   └── TAK_README.md                   # TAK documentation
 │   ├── tak/                                # TAK implementation
 │   │   ├── tak.py                          # Base classes + repository
 │   │   ├── raw_concept.py                  # RawConcept TAK
@@ -62,158 +62,615 @@ Mediator/
 │   └── mediator.py                         # Orchestration engine + CLI
 ├── images/                                 # Documentation assets
 ├── unittests/                              # Comprehensive test suite
-├── README.md                               # This file
-└── requirements.txt                        # Python dependencies
+├── setup.py                                # Package definition (for pip install -e)
+├── Dockerfile                              # Docker image definition
+├── docker-compose.yml                      # Docker Compose configuration
+├── .dockerignore                           # Files excluded from Docker build
+├── MANIFEST.in                             # Package data files
+├── requirements.txt                        # Python dependencies
+├── LICENSE                                 # MIT License
+└── README.md                               # This file
 ```
 
 ---
 
-## Quick Start
+## Deployment Options
 
-### 1. Installation
+**Choose the deployment method that fits your use case:**
+
+| **Scenario** | **Recommended Method** | **Section** |
+|--------------|------------------------|-------------|
+| 💻 **Local development (IDE)** | [**Option 1**](#option-1-local-development-ide) | Code editing, testing, CLI debugging |
+| 📊 **Research workflows (Jupyter)** | [**Option 2**](#option-2-jupyter-notebook-package) | Interactive analysis, Python API |
+| 🐳 **Remote/Production (Docker)** | [**Option 3**](#option-3-docker-deployment) | Reproducible, isolated, Python 3.7 compatible |
+
+---
+
+## Option 1: Local Development (IDE)
+
+**Best for:** Code editing, testing, debugging, TAK development with full IDE support
+
+### Requirements
+- Python 3.9+ (check: `python3 --version`)
+- IDE (VS Code, PyCharm, etc.)
+- Git
+
+---
+
+### 1.1 Package & Deploy
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/Mediator.git
+git clone https://github.com/shaharoded/Mediator.git
 cd Mediator
 
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
 # Install dependencies
+pip install --upgrade pip
 pip install -r requirements.txt
+
+# Install as editable package (enables imports from anywhere)
+pip install -e .
 ```
 
-### 2. Setup Database
+---
+
+### 1.2 Load in Target Machine
+
+**If deploying to a different machine:**
 
 ```bash
-# Create database tables
+# Option A: Git clone (recommended)
+git clone https://github.com/YOUR_USERNAME/Mediator.git
+cd Mediator
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt && pip install -e .
+
+# Option B: Transfer ZIP archive
+# LOCAL:
+zip -r mediator-src.zip . -x "*.pyc" "__pycache__/*" ".venv/*" ".git/*" "*.db" "*.log"
+scp mediator-src.zip user@remote-server:/home/user/
+
+# REMOTE:
+ssh user@remote-server
+cd /home/user/
+unzip mediator-src.zip
+cd Mediator/
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt && pip install -e .
+```
+
+---
+
+### 1.3 Initialize Database & Load CSV
+
+**Create database tables:**
+```bash
 python -m backend.dataaccess --create_db
-
-# Load example data
-python -m backend.dataaccess --load_csv backend/data/synthetic_input_data.csv
 ```
 
-### 3. Run Pipeline
-
+**Load CSV (Option A: Place in `backend/data/`):**
 ```bash
-# Process all patients
-python -m core.mediator
+# Copy your CSV to data folder
+cp /path/to/your/input_data.csv backend/data/
 
-# Process specific patients
+# Load into database
+python -m backend.dataaccess --load_csv backend/data/input_data.csv --yes
+```
+
+**Load CSV (Option B: Pass absolute path):**
+```bash
+# Load from any location
+python -m backend.dataaccess --load_csv /absolute/path/to/input_data.csv --yes
+```
+
+**CSV Requirements:**
+- **Required columns:** `PatientId`, `ConceptName`, `StartDateTime`, `EndDateTime`, `Value`
+- **Optional columns:** `Unit`
+- **Format:** `YYYY-MM-DD HH:MM:SS` timestamps
+
+---
+
+### 1.4 Upload New TAKs
+
+**Extract TAK ZIP to knowledge-base folder:**
+```bash
+# Extract new TAKs (maintains folder structure)
+unzip new_taks.zip -d core/knowledge-base/
+
+# Verify extraction
+ls core/knowledge-base/raw-concepts/
+ls core/knowledge-base/states/
+
+# Validate all TAKs against schema
+find core/knowledge-base -name "*.xml" -exec \
+    xmllint --schema core/knowledge-base/tak_schema.xsd {} \;
+```
+
+---
+
+### 1.5 Run Mediator (CLI)
+
+**Process all patients:**
+```bash
+python -m core.mediator
+```
+
+**Process specific patients:**
+```bash
 python -m core.mediator --patients 1000,1001,1002
+```
 
-# Debug mode
-python -m core.mediator --log-level DEBUG --patients 1000
+**Debug mode:**
+```bash
+python -m core.mediator --patients 1000 --log-level DEBUG
+```
+
+**Custom settings:**
+```bash
+python -m core.mediator \
+    --kb core/knowledge-base \
+    --db backend/data/mediator.db \
+    --max-concurrent 8 \
+    --log-level INFO
 ```
 
 ---
 
-## Database Schema
-
-### CSV Input Requirements
-
-**Required columns:**
-- `PatientId` — Integer patient identifier
-- `ConceptName` — Concept/measurement name (matches TAK names)
-- `StartDateTime` — Timestamp (YYYY-MM-DD HH:MM:SS)
-- `EndDateTime` — Timestamp
-- `Value` — Measurement value (numeric or string)
-
-**Optional columns:**
-- `Unit` — Measurement unit
-
-**Example CSV:**
-```csv
-PatientId,ConceptName,StartDateTime,EndDateTime,Value,Unit
-1000,GLUCOSE_LAB_MEASURE,2024-01-01 08:00:00,2024-01-01 08:00:00,120,mg/dL
-1000,BASAL_DOSAGE,2024-01-01 21:00:00,2024-01-01 21:00:00,15,U
-1000,BASAL_ROUTE,2024-01-01 21:00:00,2024-01-01 21:00:00,SubCutaneous,
-```
-
----
-
-## CLI Reference
-
-### Database Operations
+### 1.6 Run Tests
 
 ```bash
-# Create/recreate database
-python -m backend.dataaccess --create_db [--drop]
+# Run all tests (53 tests)
+python -m pytest unittests/ -v
 
-# Load CSV
-python -m backend.dataaccess --load_csv data/input.csv
+# Run specific test modules
+python -m pytest unittests/test_raw_concept.py -v
+python -m pytest unittests/test_event.py -v
+python -m pytest unittests/test_state.py -v
+python -m pytest unittests/test_trend.py -v
+python -m pytest unittests/test_context.py -v
+python -m pytest unittests/test_mediator.py -v
 
-# Replace existing data
-python -m backend.dataaccess --load_csv data/input.csv \
-    --replace-input --clear-output-qa --yes
+# With coverage report
+python -m pytest unittests/ --cov=core --cov=backend --cov-report=html
 ```
-
-**Features:**
-- ✅ Auto-detects large files and uses Dask if available (≥100 MB)
-- ✅ Transactional loading (all-or-nothing validation)
-- ✅ Interactive prompts (overridable with `--yes`)
 
 ---
 
-### Core (Mediator Pipeline)
+## Option 2: Jupyter Notebook (Package)
+
+**Best for:** Research workflows, interactive analysis, visualization, Python API usage
+
+### Requirements
+- Python 3.9+
+- Jupyter Notebook
+
+---
+
+### 2.1 Package & Deploy
 
 ```bash
-# Process all patients
-python -m core.mediator
+# Clone repository
+git clone https://github.com/shaharoded/Mediator.git
+cd Mediator
 
-# Process subset
-python -m core.mediator --patients 1000,1001
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
 
-# Custom concurrency
-python -m core.mediator --max-concurrent 8
-
-# Custom KB and DB paths
-python -m core.mediator --kb core/knowledge-base --db data/mediator.db
-
-# Debug logging
-python -m core.mediator --log-level DEBUG --patients 101,102,103
+# Install package + Jupyter
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install -e .
+pip install jupyter notebook
 ```
-
-**Workflow:**
-1. **Build TAK repository** — Load and validate all TAK definitions from `knowledge-base/`
-2. **Process patients** — For each patient:
-   - Extract input data from `InputPatientData`
-   - Apply TAKs in dependency order (Raw Concepts → Events → States → Trends → Contexts)
-   - Write abstractions to `OutputPatientData`
-3. **Report stats** — Print timing and output row counts per patient
 
 ---
 
-## Programmatic Usage
+### 2.2 Load in Target Machine
 
-### Database Access
+**Transfer code to remote server:**
+```bash
+# LOCAL:
+zip -r mediator-jupyter.zip . -x "*.pyc" "__pycache__/*" ".venv/*" ".git/*" "*.db"
+scp mediator-jupyter.zip user@remote-server:/home/user/
 
-```python
-from backend.dataaccess import DataAccess
-
-da = DataAccess()
-
-# Create tables
-da.create_db(drop=False)
-da.load_csv_to_input("data/input.csv", if_exists='append')
-
-# Query
-rows = da.fetch_records(
-    "SELECT * FROM InputPatientData WHERE PatientId = ?",
-    (1000,)
-)
+# REMOTE:
+ssh user@remote-server
+cd /home/user/
+unzip mediator-jupyter.zip
+cd Mediator/
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt && pip install -e . && pip install jupyter notebook
 ```
 
-### TAK Processing
+---
 
+### 2.3 Initialize Database & Load CSV
+
+**Place CSV in `backend/data/` folder:**
+```bash
+# Copy your CSV
+cp /path/to/input_data.csv backend/data/
+```
+
+**Or use arbitrary location (reference by absolute path in notebook)**
+
+---
+
+### 2.4 Start Jupyter
+
+```bash
+# Activate virtual environment
+source .venv/bin/activate
+
+# Start Jupyter server
+jupyter notebook
+
+# Or specify port + disable browser
+jupyter notebook --no-browser --port=8888
+```
+
+**Access from local machine (if remote):**
+```bash
+# SSH tunnel (on your local machine)
+ssh -L 8888:localhost:8888 user@remote-server
+
+# Open browser: http://localhost:8888
+```
+
+---
+
+### 2.5 Create Notebook in Root
+
+**Create new notebook: `run_mediator.ipynb` in project root**
+
+**Cell 1: Setup**
 ```python
 from pathlib import Path
+from backend.dataaccess import DataAccess
 from core.mediator import Mediator
+import pandas as pd
 
-mediator = Mediator(Path("core/knowledge-base"))
+# Paths
+KB_PATH = Path("core/knowledge-base")
+DB_PATH = Path("backend/data/mediator.db")
+CSV_PATH = Path("backend/data/input_data_file.csv")  # Your input CSV
+```
+
+**Cell 2: Initialize Database**
+```python
+# Initialize connection
+da = DataAccess(db_path=str(DB_PATH))
+
+# Create tables (if not exists)
+da.create_db(drop=False)  # Set drop=True to recreate tables
+
+# Check stats
+stats = da.get_table_stats()
+for table, info in stats.items():
+    print(f"{table}: {info['rows']} rows, {info['n_patients']} patients")
+```
+
+**Cell 3: Load CSV**
+```python
+# Load CSV into InputPatientData
+total_rows = da.load_csv_to_input(
+    csv_path=str(CSV_PATH),
+    if_exists='append',           # 'append' or 'replace'
+    clear_output_and_qa=False,    # Set True to clear outputs
+    yes=True                      # Auto-confirm
+)
+print(f"Loaded {total_rows} rows")
+```
+
+**Cell 4: Build TAK Repository**
+```python
+# Initialize mediator
+mediator = Mediator(kb_path=KB_PATH, data_access=da)
+
+# Build TAK repository
 repo = mediator.build_repository()
 
-# Process patients
-stats = mediator.run(max_concurrent=4, patient_subset=[1000, 1001])
-print(stats)
+print(f"✅ Loaded {len(repo.taks)} TAKs:")
+print(f"  - Raw Concepts: {len(mediator.raw_concepts)}")
+print(f"  - Events:       {len(mediator.events)}")
+print(f"  - States:       {len(mediator.states)}")
+print(f"  - Trends:       {len(mediator.trends)}")
+print(f"  - Contexts:     {len(mediator.contexts)}")
+print(f"  - Patterns:     {len(mediator.patterns)}")
+
+# List all TAK names
+print("\nTAK Names:")
+for tak_name in sorted(repo.taks.keys()):
+    print(f"  - {tak_name}")
+```
+**Cell 5: Process Patients**
+```python
+# Process specific patients
+patient_ids = [1000, 1001, 1002]
+patient_stats = mediator.run(
+    max_concurrent=4,
+    patient_subset=patient_ids
+)
+
+# Print results
+for pid, stats in patient_stats.items():
+    if "error" in stats:
+        print(f"❌ Patient {pid}: {stats['error']}")
+    else:
+        total = sum(v for k, v in stats.items() if isinstance(v, int))
+        print(f"✅ Patient {pid}: {total} output rows")
+```
+
+**Cell 6: Query Results**
+```python
+# Query OutputPatientData
+query = """
+SELECT PatientId, ConceptName, Value, COUNT(*) as count
+FROM OutputPatientData
+WHERE PatientId IN (1000, 1001, 1002)
+GROUP BY PatientId, ConceptName, Value
+ORDER BY PatientId, count DESC
+"""
+df_results = pd.read_sql_query(query, da.conn)
+df_results.head(20)
+```
+
+---
+
+### 2.6 Upload New TAKs (from Notebook)
+
+**Cell: Extract and reload TAKs**
+```python
+import zipfile
+
+# Extract zipped TAKs
+with zipfile.ZipFile("new_taks.zip", "r") as zip_ref:
+    zip_ref.extractall("core/knowledge-base/")
+
+print("✅ TAKs extracted")
+
+# Rebuild repository (reloads all TAKs)
+mediator = Mediator(kb_path=KB_PATH, data_access=da)
+repo = mediator.build_repository()
+print(f"✅ Reloaded {len(repo.taks)} TAKs")
+```
+
+---
+
+## Option 3: Docker Deployment
+
+**Best for:** Production servers, old Python versions (3.7), reproducible environments, cloud deployment
+
+### Requirements
+- Docker installed (check: `docker --version`)
+- 2 GB free disk space
+
+---
+
+### 3.1 Package & Build Image
+
+**Build from source (LOCAL machine):**
+
+```bash
+# Clone repository
+git clone https://github.com/shaharoded/Mediator.git
+cd Mediator
+
+# Build Docker image
+docker build -t mediator:latest .
+
+# Save image to tar.gz (for transfer)
+docker save mediator:latest | gzip > mediator-v1.0.tar.gz
+```
+
+---
+
+### 3.2 Deploy to Target Machine
+
+**Transfer image:**
+
+```bash
+# Transfer tar.gz to remote server
+scp mediator-v1.0.tar.gz user@remote-server:/home/user/
+
+# Or manually upload via SFTP/SCP
+```
+
+**Load image on target machine:**
+```bash
+# SSH to remote server
+ssh user@remote-server
+
+# Load Docker image
+docker load < /home/user/mediator-v1.0.tar.gz
+
+# Verify image loaded
+docker images | grep mediator
+```
+
+---
+
+### 3.3 Initialize Database & Load CSV
+
+**Create data directory on host:**
+```bash
+# Create folder for persistent data (DB + logs)
+mkdir -p /home/user/mediator_data
+cd /home/user/mediator_data
+```
+
+**Create database (one-time):**
+```bash
+# Create database tables
+docker run --rm -v $(pwd):/app/backend/data \
+    mediator:latest python -m backend.dataaccess --create_db
+```
+
+**Place CSV in data folder:**
+```bash
+# Copy your CSV to data folder
+cp /path/to/input_data_file.csv /home/user/mediator_data/
+```
+
+**Load CSV into database:**
+```bash
+# Load CSV from mounted data folder
+docker run --rm -v /home/user/mediator_data:/app/backend/data \
+    mediator:latest python -m backend.dataaccess \
+    --load_csv /app/backend/data/input_data_file.csv --yes
+```
+
+**Alternative: Load CSV from arbitrary location:**
+```bash
+# Mount CSV from custom location
+docker run --rm \
+    -v /home/user/mediator_data:/app/backend/data \
+    -v /custom/path/to/input.csv:/app/input.csv \
+    mediator:latest python -m backend.dataaccess \
+    --load_csv /app/input.csv --yes
+```
+
+---
+
+### 3.4 Upload New TAKs
+
+**Option A: Rebuild image with new TAKs (recommended):**
+```bash
+# LOCAL: Extract TAKs to knowledge-base folder
+cd Mediator/
+unzip new_taks.zip -d core/knowledge-base/
+
+# Verify extraction
+ls core/knowledge-base/raw-concepts/
+ls core/knowledge-base/states/
+
+# Rebuild Docker image
+docker build -t mediator:v1.1 .
+
+# Save and transfer
+docker save mediator:v1.1 | gzip > mediator-v1.1.tar.gz
+scp mediator-v1.1.tar.gz user@remote-server:/home/user/
+
+# REMOTE: Load new image
+ssh user@remote-server
+docker load < /home/user/mediator-v1.1.tar.gz
+```
+
+**Option B: Mount TAK folder at runtime (no rebuild needed):**
+```bash
+# Extract TAKs on host machine (outside container)
+unzip new_taks.zip -d /home/user/custom_knowledge_base/
+
+# Verify extraction
+ls /home/user/custom_knowledge_base/raw-concepts/
+ls /home/user/custom_knowledge_base/states/
+
+# Run with custom KB path
+docker run --rm \
+    -v /home/user/mediator_data:/app/backend/data \
+    -v /home/user/custom_knowledge_base:/app/custom-kb \
+    mediator:latest python -m core.mediator --kb /app/custom-kb
+```
+
+---
+
+### 3.5 Run Mediator (Docker CLI)
+
+**Process all patients:**
+```bash
+docker run --rm -v /home/user/mediator_data:/app/backend/data \
+    mediator:latest python -m core.mediator
+```
+
+**Process specific patients:**
+```bash
+docker run --rm -v /home/user/mediator_data:/app/backend/data \
+    mediator:latest python -m core.mediator --patients 1000,1001,1002
+```
+
+**Debug mode:**
+```bash
+docker run --rm -v /home/user/mediator_data:/app/backend/data \
+    mediator:latest python -m core.mediator --patients 1000 --log-level DEBUG
+```
+
+**Custom settings:**
+```bash
+docker run --rm \
+    -v /home/user/mediator_data:/app/backend/data \
+    mediator:latest python -m core.mediator \
+    --max-concurrent 8 \
+    --log-level INFO
+```
+
+**Interactive shell (debugging):**
+```bash
+# Enter container shell
+docker run --rm -it -v /home/user/mediator_data:/app/backend/data \
+    mediator:latest /bin/bash
+
+# Inside container:
+python -m core.mediator --patients 1000 --log-level DEBUG
+python -m pytest unittests/ -v
+```
+
+---
+
+### 3.6 Docker Compose (Simplified)
+
+**Alternative workflow using docker-compose:**
+```bash
+# Navigate to project root
+cd Mediator/
+
+# Build image
+docker-compose build
+
+# Create database
+docker-compose run mediator python -m backend.dataaccess --create_db
+
+# Load CSV
+docker-compose run mediator python -m backend.dataaccess \
+    --load_csv /app/backend/data/input_data_file.csv --yes
+
+# Run pipeline
+docker-compose run mediator python -m core.mediator --patients 1000,1001
+```
+
+---
+
+### 3.7 Common Docker Workflows
+
+**Update database with new CSV:**
+```bash
+# Replace existing data
+docker run --rm \
+    -v /home/user/mediator_data:/app/backend/data \
+    -v /path/to/new_data.csv:/app/new_data.csv \
+    mediator:latest python -m backend.dataaccess \
+    --load_csv /app/new_data.csv --replace-input --clear-output-qa --yes
+```
+
+**Query results after processing:**
+```bash
+# Access database using SQLite CLI
+docker run --rm -it -v /home/user/mediator_data:/app/backend/data \
+    mediator:latest sqlite3 /app/backend/data/mediator.db
+
+# Inside SQLite:
+# SELECT ConceptName, COUNT(*) FROM OutputPatientData GROUP BY ConceptName;
+```
+
+**Check logs:**
+```bash
+# View mediator run logs
+docker run --rm -v /home/user/mediator_data:/app/backend/data \
+    mediator:latest cat /app/backend/data/mediator_run.log
 ```
 
 ---
@@ -230,47 +687,6 @@ For detailed information about TAK families, XML schema, validation rules, and e
 - **States** — Interval-based symbolic states (discretization + merging)
 - **Trends** — Slope-based trends (Increasing/Decreasing/Steady)
 - **Contexts** — Background facts (windowing + clipping)
-
----
-
-## Testing
-
-```bash
-# Run all tests
-python -m pytest unittests/ -v
-
-# Run specific test modules
-python -m pytest unittests/test_raw_concept.py -v
-python -m pytest unittests/test_event.py -v
-python -m pytest unittests/test_state.py -v
-python -m pytest unittests/test_trend.py -v
-python -m pytest unittests/test_context.py -v
-python -m pytest unittests/test_mediator.py -v
-```
-
-**Coverage:** 53 tests covering all TAK families + end-to-end pipeline.
-
----
-
-## Common Issues
-
-### Database Not Found
-**Error:** `Database file 'mediator.db' does not exist`
-
-**Fix:**
-```bash
-python -m backend.dataaccess --create_db
-```
-
-### CSV Validation Failure
-**Error:** `Missing required columns: PatientId`
-
-**Fix:** Rename CSV headers to match canonical names (`PatientId`, `ConceptName`, etc.)
-
-### TAK Validation Error
-**Error:** `Element 'tuple-order': This element is not expected`
-
-**Fix:** Check XML element order matches schema (see [`TAK_README.md`](core/knowledge-base/TAK_README.md#critical-element-order-rules))
 
 ---
 
@@ -298,6 +714,7 @@ python -m backend.dataaccess --create_db
   publisher={Elsevier}
 }
 ```
+
 ---
 
 **Maintained by:** Shahar Oded

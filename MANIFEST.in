@@ -1,0 +1,5 @@
+# Include data files in package distribution
+include README.md
+include requirements.txt
+recursive-include core/knowledge-base *.xml *.xsd *.json
+recursive-include backend/queries *.sql
