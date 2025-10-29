@@ -275,7 +275,7 @@ cd Mediator
   "-xr!backend\data*"
 ```
 
->> I used 7z for it's exclusion patterns. Other ways to do this as well.
+>> I used 7z for it's exclusion patterns. Other ways to do this will work as well.
 
 ---
 
