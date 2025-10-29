@@ -272,7 +272,7 @@ cd Mediator
 ```powershell
 & "C:\Program Files\7-Zip\7z.exe" a -tzip mediator-deploy.zip `
   core backend run_mediator.ipynb setup.py MANIFEST.in requirements-py37.txt README.md LICENSE `
-  "-xr!backend\data*"
+  "-xr!backend\data\*"
 ```
 
 >> I used 7z for it's exclusion patterns. Other ways to do this will work as well.
