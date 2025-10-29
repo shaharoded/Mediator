@@ -24,33 +24,51 @@ from .config import *
 logger = logging.getLogger(__name__)
 
 class DataAccess:
-    def __init__(self, db_path=DB_PATH):
-        '''
-        Initialize the DataAccess class, connect to SQLite DB and ensure required tables exist.
-        No automatic data import on init.
-        '''
+    def __init__(self, db_path=DB_PATH, auto_create=False):
+        """
+        Initialize the DataAccess class, connect to SQLite DB, and optionally create tables.
+
+        Args:
+            db_path (str): Path to SQLite database file.
+            auto_create (bool): If True, create or reinitialize the database automatically.
+                                If the file exists and contains tables, user will be prompted for confirmation.
+        """
         db_dir = os.path.dirname(db_path)
         if not os.path.exists(db_dir):
             print(f"[Info] Database folder '{db_dir}' does not exist. Creating it...")
             os.makedirs(db_dir, exist_ok=True)
-        # --- GUARD: If DB file does not exist, suggest create_db ---
-        if not os.path.exists(db_path) and not self._is_create_db_call():
-            print(f"[Error] Database file '{db_path}' does not exist.")
-            print("Please run: python backend/dataaccess.py --create_db")
-            raise SystemExit(1)
 
+        db_missing = not os.path.exists(db_path)
         self.db_path = db_path
-        # Allow SQLite connection to be used across threads (for asyncio)
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
-        
-        # Log to file instead of printing to stdout
-        logger.debug(f"Connected to SQLite: {self.db_path}")
 
-        # Ensure tables exist (create if missing)
-        if not self.__check_tables_exist():
-            print('[Info]: Creating DB tables...')
-            self.__execute_script(INITIALIZE_TABLES_DDL)
+        if auto_create:
+            if not db_missing and self.__check_tables_exist():
+                # Safe prompt if existing DB has tables
+                resp = input(f"[Warning] Database '{db_path}' already exists and has tables. Recreate it? (y/N): ").strip().lower()
+                if resp != "y":
+                    print("[Info] Keeping existing database structure.")
+                else:
+                    print(f"[Info]: Reinitializing database at {db_path}")
+                    self.create_db(drop=True)
+            else:
+                print(f"[Info]: Initializing new database at {db_path}")
+                self.create_db(drop=True)
+
+        elif db_missing:
+            raise FileNotFoundError(
+                f"Database '{db_path}' does not exist. "
+                "Run with auto_create=True or use --create_db."
+            )
+        else:
+            if not self.__check_tables_exist():
+                raise RuntimeError(
+                    f"Database '{db_path}' exists but has no tables. "
+                    "Run DataAccess(auto_create=True) or use --create_db."
+                )
+
+        logger.debug(f"Connected to SQLite: {self.db_path}")
 
     def check_record(self, query_or_path, params):
         """
@@ -184,7 +202,7 @@ class DataAccess:
         result = self.fetch_records(CHECK_TABLE_EXISTS_QUERY, ())
         return bool(result)
 
-    # new: drop tables (used by create_db --drop)
+    # Drop tables (used by create_db --drop)
     def drop_tables(self):
         """
         Drop the main tables if they exist.
@@ -414,32 +432,25 @@ class DataAccess:
             count = self.fetch_records(f"SELECT COUNT(*) FROM {table_name};", ())[0][0]
             print(f"[Info]: Table '{table_name}' - Rows: {count}")
 
-    def _is_create_db_call(self):
-        # Helper: detect if --create_db is in sys.argv to allow DB creation
-        return any(arg in ("--create_db", "--drop") for arg in sys.argv)
-
-
 # CLI entrypoint
 def _cli_main(argv):
     parser = argparse.ArgumentParser(prog="dataaccess", description="DB operations for Mediator")
-    parser.add_argument("--create_db", action="store_true", help="Create DB tables")
-    parser.add_argument("--drop", action="store_true", help="With --create_db: drop existing tables first")
+    parser.add_argument("--create_db", action="store_true", help="Create or recreate the database")
     parser.add_argument("--load_csv", metavar="CSV_PATH", help="Load CSV into InputPatientData")
     parser.add_argument("--replace-input", action="store_true", help="With --load_csv: clear InputPatientData before load")
     parser.add_argument("--clear-output-qa", action="store_true", help="With --load_csv: clear OutputPatientData and PatientQAScores before load")
     parser.add_argument("--yes", action="store_true", help="Auto-confirm prompts")
     args = parser.parse_args(argv)
 
-    da = DataAccess()
-
-    if args.create_db:
-        da.create_db(drop=args.drop)
+    da = DataAccess(auto_create=args.create_db)
 
     if args.load_csv:
-        da.load_csv_to_input(args.load_csv,
-                             if_exists='replace' if args.replace_input else 'append',
-                             clear_output_and_qa=args.clear_output_qa,
-                             yes=args.yes)
+        da.load_csv_to_input(
+            args.load_csv,
+            if_exists='replace' if args.replace_input else 'append',
+            clear_output_and_qa=args.clear_output_qa,
+            yes=args.yes
+        )
 
 if __name__ == "__main__":
     _cli_main(sys.argv[1:])
