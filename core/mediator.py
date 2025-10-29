@@ -513,7 +513,6 @@ class Mediator:
         Creates per-thread DB connection for thread safety.
         """
         # Create new DB connection for this thread (SQLite thread safety)
-        from backend.dataaccess import DataAccess
         thread_da = DataAccess(db_path=self.db_path)
         
         stats = {}

@@ -36,15 +36,3 @@ CREATE TABLE IF NOT EXISTS PatientQAScores (
     Score REAL,
     UNIQUE (PatientId, PatternName, StartDateTime)
 );
-
--- Indexes to keep SELECT/WHERE operations efficient for typical access patterns
-CREATE INDEX IF NOT EXISTS idx_input_patientid ON InputPatientData (PatientId);
-CREATE INDEX IF NOT EXISTS idx_input_concept ON InputPatientData (ConceptName);
-CREATE INDEX IF NOT EXISTS idx_input_starttime ON InputPatientData (StartDateTime);
-
-CREATE INDEX IF NOT EXISTS idx_output_patientid ON OutputPatientData (PatientId);
-CREATE INDEX IF NOT EXISTS idx_output_concept ON OutputPatientData (ConceptName);
-CREATE INDEX IF NOT EXISTS idx_output_starttime ON OutputPatientData (StartDateTime);
-
-CREATE INDEX IF NOT EXISTS idx_qa_patientid ON PatientQAScores (PatientId);
-CREATE INDEX IF NOT EXISTS idx_qa_pattern ON PatientQAScores (PatternName);

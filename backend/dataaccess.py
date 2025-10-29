@@ -2,6 +2,7 @@ import sqlite3
 import os
 import pandas as pd
 import logging
+from contextlib import contextmanager
 
 # optional dask import: prefer it but fall back gracefully
 try:
@@ -22,6 +23,7 @@ DASK_FILESIZE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
 from .config import *
 
 logger = logging.getLogger(__name__)
+
 
 class DataAccess:
     def __init__(self, db_path=DB_PATH, auto_create=False):
@@ -69,6 +71,21 @@ class DataAccess:
                 )
 
         logger.debug(f"Connected to SQLite: {self.db_path}")
+
+    @contextmanager
+    def fast_load(self):
+        self.drop_input_indexes()
+        self.conn.execute("PRAGMA journal_mode=WAL;")
+        self.conn.execute("PRAGMA synchronous=OFF;")
+        self.conn.execute("PRAGMA temp_store=MEMORY;")
+        self.conn.execute("PRAGMA cache_size=-100000;")
+        self.conn.execute("PRAGMA foreign_keys=OFF;")
+        try:
+            yield
+        finally:
+            self.create_input_indexes()
+            self.conn.execute("PRAGMA foreign_keys=ON;")
+            self.conn.execute("PRAGMA synchronous=NORMAL;")
 
     def check_record(self, query_or_path, params):
         """
@@ -128,16 +145,19 @@ class DataAccess:
     # Helper for batch inserts using a query file path and list of tuples
     def insert_many(self, query_path, rows, batch_size=1000):
         """
-        Insert many rows using executemany in batches.
-        Returns the number of rows actually inserted (respects INSERT OR IGNORE).
-        
+        Bulk-insert rows using `executemany` in large batches.
+
+        Notes:
+        • This function DOES NOT commit; the caller is responsible for wrapping the operation in a transaction.
+        • Returns a precise count of newly inserted rows using `total_changes` (works with INSERT OR IGNORE).
+
         Args:
-            query_path: path to .sql insert template (with ? placeholders)
-            rows: iterable of tuples
-            batch_size: number of rows per batch
-        
+        query_path (str): Path to a .sql INSERT template with ? placeholders.
+        rows (Iterable[Tuple]): Row tuples matching the INSERT template.
+        batch_size (int): Rows per executemany call.
+
         Returns:
-            Total number of rows actually inserted (excluding duplicates)
+        int: Number of rows inserted (excluding ignored duplicates).
         """
         if not os.path.isfile(query_path):
             raise FileNotFoundError(f"Query file not found: {query_path}")
@@ -146,21 +166,17 @@ class DataAccess:
 
         batch = []
         total_inserted = 0
-        
         for r in rows:
             batch.append(r)
             if len(batch) >= batch_size:
+                before = self.conn.total_changes
                 self.cursor.executemany(query, batch)
-                total_inserted += self.cursor.rowcount  # Count actual inserts (respects OR IGNORE)
-                self.conn.commit()
+                total_inserted += (self.conn.total_changes - before)
                 batch = []
-        
-        # Final batch
         if batch:
+            before = self.conn.total_changes
             self.cursor.executemany(query, batch)
-            total_inserted += self.cursor.rowcount
-            self.conn.commit()
-        
+            total_inserted += (self.conn.total_changes - before)
         return total_inserted
 
     def fetch_records(self, query_or_path, params=()):
@@ -222,6 +238,39 @@ class DataAccess:
         print("[Info] Creating tables from DDL...")
         self.__execute_script(INITIALIZE_TABLES_DDL)
         self.__print_db_info()
+    
+    # Index creation and deletion helpers to avoid insert overhead
+    def drop_input_indexes(self):
+        self.cursor.executescript("""
+        DROP INDEX IF EXISTS idx_input_patientid;
+        DROP INDEX IF EXISTS idx_input_concept;
+        DROP INDEX IF EXISTS idx_input_starttime;
+        """)
+        self.conn.commit()
+
+    def create_input_indexes(self):
+        self.cursor.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_input_patientid ON InputPatientData (PatientId);
+        CREATE INDEX IF NOT EXISTS idx_input_concept ON InputPatientData (ConceptName);
+        CREATE INDEX IF NOT EXISTS idx_input_starttime ON InputPatientData (StartDateTime);
+        """)
+        self.conn.commit()
+
+    def drop_output_indexes(self):
+        self.cursor.executescript("""
+        DROP INDEX IF EXISTS idx_output_patientid;
+        DROP INDEX IF EXISTS idx_output_concept;
+        DROP INDEX IF EXISTS idx_output_starttime;
+        """)
+        self.conn.commit()
+
+    def create_output_indexes(self):
+        self.cursor.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_output_patientid ON OutputPatientData (PatientId);
+        CREATE INDEX IF NOT EXISTS idx_output_concept ON OutputPatientData (ConceptName);
+        CREATE INDEX IF NOT EXISTS idx_output_starttime ON OutputPatientData (StartDateTime);
+        """)
+        self.conn.commit()
 
     # Table stats helper
     def get_table_stats(self):
@@ -241,17 +290,27 @@ class DataAccess:
     # Load CSV to input table with prompt, tqdm, auto dask heuristic
     def load_csv_to_input(self, csv_path, if_exists='append', clear_output_and_qa=False, yes=False, batch_size=2000):
         """
-        Load CSV into InputPatientData. Strict validation-first semantics preserved — if any row fails validation,
-        no rows are committed. Implementation does single-pass over data inside a DB transaction to avoid double-read.
-        Required fields: PatientId (integer), ConceptName, StartDateTime (parseable), EndDateTime (parseable), Value.
-        Unit is optional.
+        Load a CSV into InputPatientData with strict validation and fast bulk insert.
+
+        Behavior:
+        • Validates each chunk first; if any chunk fails, the entire load aborts and no rows are committed.
+        • Disables indexes and (optionally) foreign key checks during the load, then recreates indexes afterwards.
+        • Runs the whole operation in a single transaction for performance.
+        • Uses pandas (or Dask for large files) to stream chunks.
+
+        Required CSV columns:
+        PatientId (int), ConceptName (str), StartDateTime (datetime), EndDateTime (datetime), Value (str)
+        Optional: Unit
 
         Args:
-            csv_path (str): Path to input CSV file
-            if_exists (str): Behavior when the table already contains data. One of 'append', 'replace'.
-            clear_output_and_qa (bool): Whether to clear OutputPatientData and PatientQAScores before loading.
-            yes (bool): Whether to auto-confirm prompts.
-            batch_size (int): Number of rows to process in each batch.
+        csv_path (str): Path to input CSV file.
+        if_exists (str): 'append' or 'replace'. With 'replace', InputPatientData is cleared before load.
+        clear_output_and_qa (bool): If True, clears OutputPatientData and PatientQAScores before load.
+        yes (bool): Auto-confirm prompts if tables are non-empty.
+        batch_size (int): Number of rows per executemany batch (affects DB roundtrips).
+
+        Returns:
+        int: Number of rows actually inserted (excludes INSERT OR IGNORE duplicates).
         """
         if not os.path.exists(csv_path):
             raise FileNotFoundError(f"CSV not found: {csv_path}")
@@ -380,38 +439,41 @@ class DataAccess:
 
         # single-pass transactional processing
         total_inserted = 0
+        
         try:
-            self.conn.execute("BEGIN")
-            if use_dask_effective:
-                print("[Info] Large file detected and Dask available — validating+inserting partitions...")
-                ddf = dd.read_csv(csv_path, assume_missing=True, blocksize="64MB")
-                delayed_parts = ddf.to_delayed()
-                with tqdm(total=len(delayed_parts), desc="dask partitions") as pbar:
-                    for d in delayed_parts:
-                        part_df = d.compute()
-                        validate_chunk_strict(part_df, indices)
-                        part_df = normalize_chunk_for_insert(part_df, indices)
-                        rows_iter = rows_from_df_for_insert(part_df, indices)
-                        inserted = self.insert_many(INSERT_PATIENT_QUERY, rows_iter, batch_size=batch_size)
-                        total_inserted += inserted
-                        pbar.update(1)
-            else:
-                print("[Info] Validating+inserting CSV in chunks (pandas)...")
-                chunksize = max(batch_size * 10, 10000)
-                reader = pd.read_csv(csv_path, dtype=str, chunksize=chunksize)
-                with tqdm(unit="chunk", desc="CSV chunks") as pbar:
-                    for chunk in reader:
-                        validate_chunk_strict(chunk, indices)
-                        chunk = normalize_chunk_for_insert(chunk, indices)
-                        rows_iter = rows_from_df_for_insert(chunk, indices)
-                        inserted = self.insert_many(INSERT_PATIENT_QUERY, rows_iter, batch_size=batch_size)
-                        total_inserted += inserted
-                        pbar.update(1)
-            self.conn.commit()
+            with self.fast_load():
+                self.conn.execute("BEGIN")
+                if use_dask_effective:
+                    print("[Info] Large file detected and Dask available — validating+inserting partitions...")
+                    ddf = dd.read_csv(csv_path, assume_missing=True, blocksize="64MB")
+                    delayed_parts = ddf.to_delayed()
+                    with tqdm(total=len(delayed_parts), desc="dask partitions") as pbar:
+                        for d in delayed_parts:
+                            part_df = d.compute()
+                            validate_chunk_strict(part_df, indices)
+                            part_df = normalize_chunk_for_insert(part_df, indices)
+                            rows_iter = rows_from_df_for_insert(part_df, indices)
+                            inserted = self.insert_many(INSERT_PATIENT_QUERY, rows_iter, batch_size=batch_size)
+                            total_inserted += inserted
+                            pbar.update(1)
+                else:
+                    print("[Info] Validating+inserting CSV in chunks (pandas)...")
+                    chunksize = max(batch_size * 10, 100_000)
+                    reader = pd.read_csv(csv_path, dtype=str, chunksize=chunksize)
+                    with tqdm(unit="chunk", desc="CSV chunks") as pbar:
+                        for chunk in reader:
+                            validate_chunk_strict(chunk, indices)
+                            chunk = normalize_chunk_for_insert(chunk, indices)
+                            rows_iter = rows_from_df_for_insert(chunk, indices)
+                            inserted = self.insert_many(INSERT_PATIENT_QUERY, rows_iter, batch_size=batch_size)
+                            total_inserted += inserted
+                            pbar.update(1)
+                self.conn.commit()
         except Exception:
             self.conn.rollback()
             print("[Error] Load aborted; no data was committed.")
             raise
+
 
         print(f"[Info] Finished loading. Inserted {total_inserted} rows.")
         self.__print_db_info()
