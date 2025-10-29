@@ -57,6 +57,23 @@ RAW_HYPOGLYCEMIA_XML = """\
 </raw-concept>
 """
 
+RAW_MEAL_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="MEAL" concept-type="raw-nominal">
+  <categories>Events</categories>
+  <description>Meal type</description>
+  <attributes>
+    <attribute name="MEAL_TYPE" type="nominal">
+      <nominal-allowed-values>
+        <allowed-value value="Breakfast"/>
+        <allowed-value value="Lunch"/>
+        <allowed-value value="Dinner"/>
+      </nominal-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+
 EVENT_DISGLYCEMIA_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <event name="DISGLYCEMIA_EVENT">
@@ -91,7 +108,7 @@ EVENT_NO_RULES_XML = """\
     <categories>Events</categories>
     <description>Meal event</description>
     <derived-from>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
+        <attribute name="MEAL" tak="raw-concept" idx="0"/>
     </derived-from>
 </event>
 """
@@ -124,25 +141,25 @@ def test_parse_event_validates_structure(repo_with_disglycemia):
 
 def test_event_apply_no_rules(tmp_path: Path):
     """Event with no rules emits raw values as-is."""
-    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    meal_path = write_xml(tmp_path, "MEAL.xml", RAW_MEAL_XML)
     event_path = write_xml(tmp_path, "MEAL_EVENT.xml", EVENT_NO_RULES_XML)
     
     repo = TAKRepository()
-    repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(meal_path))
     set_tak_repository(repo)
     event = Event.parse(event_path)
     repo.register(event)
     
     df_in = pd.DataFrame([
-        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (120,), "raw-concept"),
-        (1, "GLUCOSE_MEASURE", make_ts("12:00"), make_ts("12:00"), (80,), "raw-concept"),
+        (1, "MEAL", make_ts("08:00"), make_ts("08:00"), ("Breakfast",), "raw-concept"),
+        (1, "MEAL", make_ts("12:00"), make_ts("12:00"), ("Lunch",), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     
     df_out = event.apply(df_in)
     assert len(df_out) == 2
     assert all(df_out["ConceptName"] == "MEAL_EVENT")
     assert all(df_out["StartDateTime"] == df_out["EndDateTime"])  # point-in-time
-    assert list(df_out["Value"]) == [(120,), (80,)]
+    assert list(df_out["Value"]) == ["Breakfast", "Lunch"]
 
 
 def test_event_apply_with_rules_or_operator(repo_with_disglycemia):
@@ -249,3 +266,93 @@ def test_event_parses_range_constraint(tmp_path: Path):
     df_out = event.apply(df_in)
     assert len(df_out) == 1  # Only the 100 value matches
     assert df_out.iloc[0]["Value"] == "Normal Range"
+
+
+def test_event_validation_requires_rules_for_multiple_attributes(tmp_path: Path):
+    """Validation fails if multiple attributes and no abstraction rules."""
+    event_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="MULTI_ATTR_EVENT">
+    <categories>Events</categories>
+    <description>Multi-attribute event</description>
+    <derived-from>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
+        <attribute name="HYPOGLYCEMIA" tak="raw-concept" idx="0"/>
+    </derived-from>
+</event>
+"""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    hypo_path = write_xml(tmp_path, "HYPOGLYCEMIA.xml", RAW_HYPOGLYCEMIA_XML)
+    event_path = write_xml(tmp_path, "MULTI_ATTR_EVENT.xml", event_xml)
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(hypo_path))
+    set_tak_repository(repo)
+    with pytest.raises(ValueError, match="must define abstraction rules"):
+        Event.parse(event_path)
+
+
+def test_event_validation_requires_rules_for_numeric(tmp_path: Path):
+    """Validation fails if single numeric attribute and no abstraction rules."""
+    event_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="NUMERIC_EVENT">
+    <categories>Events</categories>
+    <description>Numeric event</description>
+    <derived-from>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
+    </derived-from>
+</event>
+"""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    event_path = write_xml(tmp_path, "NUMERIC_EVENT.xml", event_xml)
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(glucose_path))
+    set_tak_repository(repo)
+    with pytest.raises(ValueError, match="must define abstraction rules"):
+        Event.parse(event_path)
+
+
+def test_event_apply_extracts_value_by_idx(tmp_path: Path):
+    """Event with no abstraction rules emits correct value (not tuple) using idx."""
+    event_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="MEAL_EVENT">
+    <categories>Events</categories>
+    <description>Meal event</description>
+    <derived-from>
+        <attribute name="MEAL" tak="raw-concept" idx="0"/>
+    </derived-from>
+</event>
+"""
+    raw_meal_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="MEAL" concept-type="raw-nominal">
+    <categories>Events</categories>
+    <description>Raw concept to manage the assessed meal events in hospitalization</description>
+    <attributes>
+        <attribute name="MEAL" type="nominal">
+            <nominal-allowed-values>
+                <allowed-value value="Breakfast"/>
+                <allowed-value value="Lunch"/>
+                <allowed-value value="Dinner"/>
+                <allowed-value value="Night"/>
+            </nominal-allowed-values>
+        </attribute>
+    </attributes>
+</raw-concept>
+"""
+    meal_path = write_xml(tmp_path, "MEAL.xml", raw_meal_xml)
+    event_path = write_xml(tmp_path, "MEAL_EVENT.xml", event_xml)
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(meal_path))
+    set_tak_repository(repo)
+    event = Event.parse(event_path)
+    repo.register(event)
+    df_in = pd.DataFrame([
+        (1, "MEAL", make_ts("08:00"), make_ts("08:00"), ("Breakfast",), "raw-concept"),
+        (1, "MEAL", make_ts("12:00"), make_ts("12:00"), ("Lunch",), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    df_out = event.apply(df_in)
+    assert list(df_out["Value"]) == ["Breakfast", "Lunch"]
+    assert all(not isinstance(v, tuple) for v in df_out["Value"])

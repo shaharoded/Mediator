@@ -245,7 +245,7 @@ python -m pytest unittests/ --cov=core --cov=backend --cov-report=html
 ## Option 2: Jupyter Notebook (Package)
 
 **Best for:** Research workflows, interactive analysis, visualization, Python API usage.
-This method is designed to be deployed on an older version of python as found in my research env. The idea is to use this as a code repository with a main.ipynb file that can import and use the pythonic functions offered here.
+This method is designed to be deployed on an older version of python as found in my remote computer research env. The idea is to use this as a code repository with a main.ipynb file that can import and use the pythonic functions offered here.
 
 **Note:** Python 3.7 support uses older dependency versions (pandas 1.3.5, numpy 1.21.6) which are no longer maintained. For production use, Python 3.9+ is strongly recommended.
 
@@ -261,16 +261,6 @@ This method is designed to be deployed on an older version of python as found in
 # Clone repository
 git clone https://github.com/shaharoded/Mediator.git
 cd Mediator
-
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install package + Jupyter
-pip install --upgrade pip
-pip install -r requirements.txt
-pip install -e .
-pip install jupyter notebook
 ```
 
 ---
@@ -280,77 +270,12 @@ pip install jupyter notebook
 **Package code for manual transfer:**
 
 ```powershell
-# Windows PowerShell (native commands, no zip required)
-# Navigate to project root
-cd Mediator
-
-# Create deployment package
-Compress-Archive -Path `
-    core, `
-    backend, `
-    setup.py, `
-    MANIFEST.in, `
-    requirements-py37.txt, `
-    README.md, `
-    LICENSE `
-    -DestinationPath mediator-deploy.zip -Force
-
-# Verify package contents (PowerShell)
-Expand-Archive -Path mediator-deploy.zip -DestinationPath temp-verify -Force
-Get-ChildItem -Path temp-verify -Recurse | Select-Object -First 20 FullName
-Remove-Item -Recurse -Force temp-verify
+& "C:\Program Files\7-Zip\7z.exe" a -tzip mediator-deploy.zip `
+  core backend run_mediator.ipynb setup.py MANIFEST.in requirements-py37.txt README.md LICENSE `
+  "-xr!backend\data*"
 ```
 
-**Alternative: Using 7-Zip (if installed):**
-```powershell
-# If you have 7-Zip installed (https://www.7-zip.org/)
-7z a -tzip mediator-deploy.zip core backend setup.py MANIFEST.in requirements-py37.txt README.md LICENSE -xr!*.pyc -xr!__pycache__ -xr!*.db -xr!*.log -xr!*.ipynb_checkpoints
-
-# Verify contents
-7z l mediator-deploy.zip
-```
-
-**Transfer to target machine:**
-1. Upload `mediator-deploy.zip` to your remote server using:
-   - File transfer tool (FileZilla, WinSCP, Cyberduck)
-   - Web upload interface (JupyterHub, cloud platform)
-   - Manual USB transfer (air-gapped environments)
-
-**Setup on target machine:**
-
-```bash
-# Linux/Mac (remote server)
-cd /path/to/upload/location
-unzip mediator-deploy.zip -d Mediator/
-cd Mediator/
-
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-
-# Install dependencies (use requirements-py37.txt if Python 3.7)
-pip install --upgrade pip
-pip install -r requirements-py37.txt
-pip install -e .
-pip install jupyter notebook
-```
-
-```powershell
-# Windows (if target is also Windows)
-cd C:\path\to\upload\location
-Expand-Archive -Path mediator-deploy.zip -DestinationPath Mediator -Force
-cd Mediator
-
-# Create virtual environment
-python -m venv .venv
-.venv\Scripts\activate
-
-# Install dependencies
-pip install --upgrade pip
-pip install -r requirements-py37.txt
-pip install -e .
-pip install jupyter notebook
-```
+>> I used 7z for it's exclusion patterns. Other ways to do this as well.
 
 ---
 
@@ -377,131 +302,14 @@ jupyter notebook
 ```
 
 Now navigate to `run_mediator.ipynb` and continue there.
-
----
-
-### 2.5 Create Notebook in Root
-
-**Create new notebook: `run_mediator.ipynb` in project root**
-
-**Cell 1: Setup**
-```python
-from pathlib import Path
-from backend.dataaccess import DataAccess
-from core.mediator import Mediator
-import pandas as pd
-
-# Paths
-KB_PATH = Path("core/knowledge-base")
-DB_PATH = Path("backend/data/mediator.db")
-CSV_PATH = Path("backend/data/input_data_file.csv")  # Your input CSV
-```
-
-**Cell 2: Initialize Database**
-```python
-# Initialize connection
-da = DataAccess(db_path=str(DB_PATH))
-
-# Create tables (if not exists)
-da.create_db(drop=False)  # Set drop=True to recreate tables
-
-# Check stats
-stats = da.get_table_stats()
-for table, info in stats.items():
-    print(f"{table}: {info['rows']} rows, {info['n_patients']} patients")
-```
-
-**Cell 3: Load CSV**
-```python
-# Load CSV into InputPatientData
-total_rows = da.load_csv_to_input(
-    csv_path=str(CSV_PATH),
-    if_exists='append',           # 'append' or 'replace'
-    clear_output_and_qa=False,    # Set True to clear outputs
-    yes=True                      # Auto-confirm
-)
-print(f"Loaded {total_rows} rows")
-```
-
-**Cell 4: Build TAK Repository**
-```python
-# Initialize mediator
-mediator = Mediator(knowledge_base_path=KB_PATH, data_access=da)
-
-# Build TAK repository
-repo = mediator.build_repository()
-
-print(f"✅ Loaded {len(repo.taks)} TAKs:")
-print(f"  - Raw Concepts: {len(mediator.raw_concepts)}")
-print(f"  - Events:       {len(mediator.events)}")
-print(f"  - States:       {len(mediator.states)}")
-print(f"  - Trends:       {len(mediator.trends)}")
-print(f"  - Contexts:     {len(mediator.contexts)}")
-print(f"  - Patterns:     {len(mediator.patterns)}")
-
-# List all TAK names
-print("\nTAK Names:")
-for tak_name in sorted(repo.taks.keys()):
-    print(f"  - {tak_name}")
-```
-**Cell 5: Process Patients**
-```python
-# Process specific patients
-patient_ids = [1000, 1001, 1002]
-patient_stats = await mediator.run_async(
-    max_concurrent=4,
-    patient_subset=patient_ids
-)
-
-# Print results
-for pid, stats in patient_stats.items():
-    if "error" in stats:
-        print(f"❌ Patient {pid}: {stats['error']}")
-    else:
-        total = sum(v for k, v in stats.items() if isinstance(v, int))
-        print(f"✅ Patient {pid}: {total} output rows")
-```
->> Jupyter notebook already run async so the cell must run with await, unlike the regular mediator.run from terminal.
-
-**Cell 6: Query Results**
-```python
-# Query OutputPatientData
-query = """
-SELECT PatientId, ConceptName, Value, COUNT(*) as count
-FROM OutputPatientData
-WHERE PatientId IN (1000, 1001, 1002)
-GROUP BY PatientId, ConceptName, Value
-ORDER BY PatientId, count DESC
-"""
-df_results = pd.read_sql_query(query, da.conn)
-df_results.head(20)
-```
-
----
-
-### 2.6 Upload New TAKs (from Notebook)
-
-**Cell: Extract and reload TAKs**
-```python
-import zipfile
-
-# Extract zipped TAKs
-with zipfile.ZipFile("new_taks.zip", "r") as zip_ref:
-    zip_ref.extractall("core/knowledge-base/")
-
-print("✅ TAKs extracted")
-
-# Rebuild repository (reloads all TAKs)
-mediator = Mediator(kb_path=KB_PATH, data_access=da)
-repo = mediator.build_repository()
-print(f"✅ Reloaded {len(repo.taks)} TAKs")
-```
+The notebook containes pythonic usage example to use this package as an API.
+In case you need to change the KB TAKs, simply keep in the KB folder only the files you want to keep / update their content etc.
 
 ---
 
 ## Option 3: Docker Deployment
 
-**Best for:** Production servers, old Python versions (3.7), reproducible environments, cloud deployment
+**Best for:** Production servers, old Python versions (<3.7), reproducible environments, cloud deployment
 
 ### Requirements
 - Docker installed (check: `docker --version`)

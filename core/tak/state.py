@@ -120,7 +120,7 @@ class State(TAK):
                 constraints: Dict[int, List[str]] = {}
                 for attr_el in rule_el.findall("attribute"):
                     idx = int(attr_el.attrib["idx"])
-                    allowed = [av.attrib["value"] for av in attr_el.findall("allowed-value")]
+                    allowed = [av.attrib["equal"] for av in attr_el.findall("allowed-value")]
                     constraints[idx] = allowed
                 abs_rules.append(StateAbstractionRule(val, op, constraints))
 
@@ -291,6 +291,15 @@ class State(TAK):
                         logger.warning(f"{self.name}: abstraction rules do not cover all discrete values at idx={idx}. "
                                      f"Uncovered: {uncovered}. Rows with these values will be filtered out.")
 
+        # If parent is raw-concept with concept_type "raw", abstraction_rules must be defined
+        parent_tak = repo.get(self.derived_from)
+        if isinstance(parent_tak, RawConcept) and parent_tak.concept_type == "raw":
+            if not self.abstraction_rules:
+                raise ValueError(
+                    f"{self.name}: State derived from a multi-attribute raw-concept ('{parent_tak.name}') "
+                    "must define abstraction rules to map tuples to state labels."
+                )
+
         # All checks passed
         return None
 
@@ -362,8 +371,9 @@ class State(TAK):
     def _abstract(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply abstraction rules to discrete tuples → final state labels."""
         if not self.abstraction_rules:
-            # No abstraction rules → use discrete tuple as-is (convert to string)
-            df["Value"] = df["Value"].apply(lambda t: str(t) if isinstance(t, tuple) else t)
+            # No abstraction rules → use discrete tuple as-is (for single-attribute states)
+            # Always emit the first element as string
+            df["Value"] = df["Value"].apply(lambda t: str(t[0]) if isinstance(t, tuple) else str(t))
             return df
 
         def apply_rules_to_tuple(discrete_tup: Tuple[str, ...]) -> Optional[Union[str, List[str]]]:

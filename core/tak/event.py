@@ -191,6 +191,32 @@ class Event(TAK):
                                     if c["type"] == "equal" and c["value"] != "True":
                                         raise ValueError(f"{self.name}: boolean constraint must be 'True'")
 
+        # If multiple attributes, or any attribute is numeric, or any raw concept idx points to numeric, abstraction_rules must be defined
+        num_attrs = len(self.derived_from)
+        must_have_rules = False
+        for df in self.derived_from:
+            parent_tak = repo.get(df["name"])
+            idx = df.get("idx", 0)
+            if isinstance(parent_tak, RawConcept):
+                if parent_tak.concept_type == "raw":
+                    # Check if idx points to a numeric attribute
+                    if idx < len(parent_tak.tuple_order):
+                        attr_name = parent_tak.tuple_order[idx]
+                        parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name), None)
+                        if parent_attr and parent_attr["type"] == "numeric":
+                            must_have_rules = True
+                else:
+                    # raw-numeric/nominal/boolean: single attribute
+                    parent_attr = parent_tak.attributes[0] if parent_tak.attributes else None
+                    if parent_attr and parent_attr["type"] == "numeric":
+                        must_have_rules = True
+        if num_attrs > 1 or must_have_rules:
+            if not self.abstraction_rules:
+                raise ValueError(
+                    f"{self.name}: Event derived from multiple attributes or with numeric attribute(s) "
+                    "must define abstraction rules."
+                )
+
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Apply event abstraction to input data (from one or more derived-from raw-concepts).
@@ -209,11 +235,20 @@ class Event(TAK):
             logger.info("[%s] apply() end | post-filter=0 rows", self.name)
             return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
 
-        # If no abstraction rules: emit raw values as-is
+        # If no abstraction rules: emit raw values as-is, but always extract the value using idx
         if not self.abstraction_rules:
             df["ConceptName"] = self.name
-            # Keep input EndDateTime (preserve time range)
             df["AbstractionType"] = self.family
+            # Extract value using idx for each row
+            def extract_value(row):
+                # Find the derived_from spec for this ConceptName
+                df_spec = next((d for d in self.derived_from if d["name"] == row["ConceptName"]), None)
+                idx = df_spec.get("idx", 0) if df_spec else 0
+                val = row["Value"]
+                if isinstance(val, tuple):
+                    return val[idx] if idx < len(val) else None
+                return val
+            df["Value"] = df.apply(extract_value, axis=1)
             logger.info("[%s] apply() end (no rules) | output_rows=%d", self.name, len(df))
             return df[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
 

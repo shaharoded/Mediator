@@ -60,6 +60,23 @@ RAW_ADMISSION_XML = """\
 </raw-concept>
 """
 
+RAW_MEAL_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="MEAL" concept-type="raw-nominal">
+  <categories>Events</categories>
+  <description>Meal type</description>
+  <attributes>
+    <attribute name="MEAL_TYPE" type="nominal">
+      <nominal-allowed-values>
+        <allowed-value value="Breakfast"/>
+        <allowed-value value="Lunch"/>
+        <allowed-value value="Dinner"/>
+      </nominal-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+
 # CORRECTED ORDER: abstraction-rules → context-windows
 CONTEXT_HYPOGLYCEMIA_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -91,7 +108,7 @@ CONTEXT_WITH_CLIPPER_XML = """\
     <categories>Contexts</categories>
     <description>Context with clipping</description>
     <derived-from>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
+        <attribute name="MEAL" tak="raw-concept" idx="0"/>
     </derived-from>
     
     <context-windows>
@@ -169,12 +186,12 @@ def repo_with_hypoglycemia_context(tmp_path: Path) -> TAKRepository:
 
 @pytest.fixture
 def repo_with_clipped_context(tmp_path: Path) -> TAKRepository:
-    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    meal_path = write_xml(tmp_path, "MEAL.xml", RAW_MEAL_XML)
     admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
     context_path = write_xml(tmp_path, "CLIPPED_CONTEXT.xml", CONTEXT_WITH_CLIPPER_XML)
     
     repo = TAKRepository()
-    repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(meal_path))
     repo.register(RawConcept.parse(admission_path))
     set_tak_repository(repo)
     repo.register(Context.parse(context_path))
@@ -219,7 +236,7 @@ def test_context_with_clippers(repo_with_clipped_context):
     
     # CORRECTED TEST CASE: Input glucose @ 05:00 (earlier, so windowed interval extends beyond clipper)
     df_in = pd.DataFrame([
-        (1, "GLUCOSE_MEASURE", make_ts("05:00"), make_ts("05:00"), (100,), "raw-concept"),
+        (1, "MEAL", make_ts("05:00"), make_ts("05:00"), ("Breakfast",), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     
     # Clipper: admission interval [06:30 - 08:00]
@@ -253,7 +270,7 @@ def test_context_clipping_valid_output(repo_with_clipped_context):
     
     # Input glucose @ 04:00 (early start, long window)
     df_in = pd.DataFrame([
-        (1, "GLUCOSE_MEASURE", make_ts("04:00"), make_ts("04:00"), (100,), "raw-concept"),
+        (1, "MEAL", make_ts("04:00"), make_ts("04:00"), ("Breakfast",), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     
     # Clipper: admission interval [05:30 - 06:00] (short clipper)
@@ -279,7 +296,7 @@ def test_context_clipping_really_valid_output(repo_with_clipped_context):
     
     # Input glucose @ 10:00
     df_in = pd.DataFrame([
-        (1, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), (100,), "raw-concept"),
+        (1, "MEAL", make_ts("10:00"), make_ts("10:00"), ("Breakfast",), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     
     # Clipper: admission interval [08:00 - 08:30] (early clipper, no overlap)
@@ -304,7 +321,7 @@ def test_context_multiple_clippers_applied(repo_with_clipped_context):
     
     # Input glucose @ 05:00
     df_in = pd.DataFrame([
-        (1, "GLUCOSE_MEASURE", make_ts("05:00"), make_ts("05:00"), (100,), "raw-concept"),
+        (1, "MEAL", make_ts("05:00"), make_ts("05:00"), ("Breakfast",), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     
     # Two admission clippers
@@ -325,3 +342,101 @@ def test_context_multiple_clippers_applied(repo_with_clipped_context):
     row = df_out.iloc[0]
     assert row["StartDateTime"] == make_ts("06:30")
     assert row["EndDateTime"] == make_ts("07:00")
+
+
+def test_context_validation_requires_rules_for_multiple_attributes(tmp_path: Path):
+    """Validation fails if multiple attributes and no abstraction rules."""
+    context_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="MULTI_ATTR_CONTEXT">
+    <categories>Contexts</categories>
+    <description>Multi-attribute context</description>
+    <derived-from>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
+        <attribute name="ADMISSION" tak="raw-concept" idx="0"/>
+    </derived-from>
+    <context-windows>
+        <persistence good-before="1h" good-after="2h"/>
+    </context-windows>
+</context>
+"""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
+    context_path = write_xml(tmp_path, "MULTI_ATTR_CONTEXT.xml", context_xml)
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(admission_path))
+    set_tak_repository(repo)
+    with pytest.raises(ValueError, match="must define abstraction rules"):
+        Context.parse(context_path)
+
+
+def test_context_validation_requires_rules_for_numeric(tmp_path: Path):
+    """Validation fails if single numeric attribute and no abstraction rules."""
+    context_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="NUMERIC_CONTEXT">
+    <categories>Contexts</categories>
+    <description>Numeric context</description>
+    <derived-from>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
+    </derived-from>
+    <context-windows>
+        <persistence good-before="1h" good-after="2h"/>
+    </context-windows>
+</context>
+"""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    context_path = write_xml(tmp_path, "NUMERIC_CONTEXT.xml", context_xml)
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(glucose_path))
+    set_tak_repository(repo)
+    with pytest.raises(ValueError, match="must define abstraction rules"):
+        Context.parse(context_path)
+
+
+def test_context_apply_extracts_value_by_idx(tmp_path: Path):
+    """Context with no abstraction rules emits correct value (not tuple) using idx."""
+    context_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="MEAL_CONTEXT">
+    <categories>Contexts</categories>
+    <description>Meal context</description>
+    <derived-from>
+        <attribute name="MEAL" tak="raw-concept" idx="0"/>
+    </derived-from>
+    <context-windows>
+        <persistence good-before="1h" good-after="2h"/>
+    </context-windows>
+</context>
+"""
+    raw_meal_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="MEAL" concept-type="raw-nominal">
+  <categories>Events</categories>
+  <description>Meal type</description>
+  <attributes>
+    <attribute name="MEAL_TYPE" type="nominal">
+      <nominal-allowed-values>
+        <allowed-value value="Breakfast"/>
+        <allowed-value value="Lunch"/>
+        <allowed-value value="Dinner"/>
+      </nominal-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+    meal_path = write_xml(tmp_path, "MEAL.xml", raw_meal_xml)
+    context_path = write_xml(tmp_path, "MEAL_CONTEXT.xml", context_xml)
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(meal_path))
+    set_tak_repository(repo)
+    context = Context.parse(context_path)
+    repo.register(context)
+    df_in = pd.DataFrame([
+        (1, "MEAL", make_ts("08:00"), make_ts("08:00"), ("Breakfast",), "raw-concept"),
+        (1, "MEAL", make_ts("12:00"), make_ts("12:00"), ("Lunch",), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    df_out = context.apply(df_in)
+    assert list(df_out["Value"]) == ["Breakfast", "Lunch"]
+    assert all(not isinstance(v, tuple) for v in df_out["Value"])

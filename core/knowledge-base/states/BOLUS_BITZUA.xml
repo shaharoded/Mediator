@@ -24,71 +24,71 @@
     <abstraction-rules order="first">
         <rule value="SubCutaneous Low" operator="and">
             <attribute idx="0">
-                <allowed-value value="Very Low"/>
-                <allowed-value value="Low"/>
+                <allowed-value equal="Very Low"/>
+                <allowed-value equal="Low"/>
             </attribute>
             <attribute idx="1">
-                <allowed-value value="SubCutaneous"/>
+                <allowed-value equal="SubCutaneous"/>
             </attribute>
         </rule>
         <rule value="IntraVenous Low" operator="and">
             <attribute idx="0">
-                <allowed-value value="Very Low"/>
-                <allowed-value value="Low"/>
+                <allowed-value equal="Very Low"/>
+                <allowed-value equal="Low"/>
             </attribute>
             <attribute idx="1">
-                <allowed-value value="IntraVenous"/>
+                <allowed-value equal="IntraVenous"/>
             </attribute>
         </rule>
         <rule value="SubCutaneous Medium" operator="and">
             <attribute idx="0">
-                <allowed-value value="Medium"/>
+                <allowed-value equal="Medium"/>
             </attribute>
             <attribute idx="1">
-                <allowed-value value="SubCutaneous"/>
+                <allowed-value equal="SubCutaneous"/>
             </attribute>
         </rule>
         <rule value="IntraVenous Medium" operator="and">
             <attribute idx="0">
-                <allowed-value value="Medium"/>
+                <allowed-value equal="Medium"/>
             </attribute>
             <attribute idx="1">
-                <allowed-value value="IntraVenous"/>
+                <allowed-value equal="IntraVenous"/>
             </attribute>
         </rule>
         <rule value="SubCutaneous High" operator="and">
             <attribute idx="0">
-                <allowed-value value="High"/>
-                <allowed-value value="Very High"/>
+                <allowed-value equal="High"/>
+                <allowed-value equal="Very High"/>
             </attribute>
             <attribute idx="1">
-                <allowed-value value="SubCutaneous"/>
+                <allowed-value equal="SubCutaneous"/>
             </attribute>
         </rule>
         <rule value="IntraVenous High" operator="and">
             <attribute idx="0">
-                <allowed-value value="High"/>
-                <allowed-value value="Very High"/>
+                <allowed-value equal="High"/>
+                <allowed-value equal="Very High"/>
             </attribute>
             <attribute idx="1">
-                <allowed-value value="IntraVenous"/>
+                <allowed-value equal="IntraVenous"/>
             </attribute>
         </rule>
         <rule value="Low" operator="and">
             <attribute idx="0">
-                <allowed-value value="Very Low"/>
-                <allowed-value value="Low"/>
+                <allowed-value equal="Very Low"/>
+                <allowed-value equal="Low"/>
             </attribute>
         </rule>
         <rule value="Medium" operator="and">
             <attribute idx="0">
-                <allowed-value value="Medium"/>
+                <allowed-value equal="Medium"/>
             </attribute>
         </rule>
         <rule value="High" operator="and">
             <attribute idx="0">
-                <allowed-value value="High"/>
-                <allowed-value value="Very High"/>
+                <allowed-value equal="High"/>
+                <allowed-value equal="Very High"/>
             </attribute>
         </rule>
     </abstraction-rules>

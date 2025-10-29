@@ -231,6 +231,32 @@ class Context(TAK):
                                     if c["type"] == "equal" and c["value"] not in ("True", "False"):
                                         raise ValueError(f"{self.name}: boolean constraint must be 'True' or 'False'")
 
+        # If multiple attributes, or any attribute is numeric, or any raw concept idx points to numeric, abstraction_rules must be defined
+        num_attrs = len(self.derived_from)
+        must_have_rules = False
+        for df in self.derived_from:
+            parent_tak = repo.get(df["name"])
+            idx = df.get("idx", 0)
+            if isinstance(parent_tak, RawConcept):
+                if parent_tak.concept_type == "raw":
+                    # Check if idx points to a numeric attribute
+                    if idx < len(parent_tak.tuple_order):
+                        attr_name = parent_tak.tuple_order[idx]
+                        parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name), None)
+                        if parent_attr and parent_attr["type"] == "numeric":
+                            must_have_rules = True
+                else:
+                    # raw-numeric/nominal/boolean: single attribute
+                    parent_attr = parent_tak.attributes[0] if parent_tak.attributes else None
+                    if parent_attr and parent_attr["type"] == "numeric":
+                        must_have_rules = True
+        if num_attrs > 1 or must_have_rules:
+            if not self.abstraction_rules:
+                raise ValueError(
+                    f"{self.name}: Context derived from multiple attributes or with numeric attribute(s) "
+                    "must define abstraction rules."
+                )
+
         # Validate context windows vs abstraction rules (bidirectional)
         if self.abstraction_rules:
             rule_values = {rule.value for rule in self.abstraction_rules}
@@ -271,6 +297,15 @@ class Context(TAK):
 
         # If no abstraction rules: emit raw values as-is (with windowing using default window)
         if not self.abstraction_rules:
+            # Extract value using idx for each row
+            def extract_value(row):
+                df_spec = next((d for d in self.derived_from if d["name"] == row["ConceptName"]), None)
+                idx = df_spec.get("idx", 0) if df_spec else 0
+                val = row["Value"]
+                if isinstance(val, tuple):
+                    return val[idx] if idx < len(val) else None
+                return val
+            df["Value"] = df.apply(extract_value, axis=1)
             df = self._apply_context_window(df)
             df = self._apply_clippers(df, clipper_dfs)
             df["ConceptName"] = self.name

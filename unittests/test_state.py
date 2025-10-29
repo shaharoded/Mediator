@@ -89,71 +89,71 @@ STATE_BASAL_XML = """\
     <abstraction-rules order="first">
         <rule value="SubCutaneous Low" operator="and">
             <attribute idx="0">
-                <allowed-value value="Very Low"/>
-                <allowed-value value="Low"/>
+                <allowed-value equal="Very Low"/>
+                <allowed-value equal="Low"/>
             </attribute>
             <attribute idx="1">
-                <allowed-value value="SubCutaneous"/>
+                <allowed-value equal="SubCutaneous"/>
             </attribute>
         </rule>
         <rule value="IntraVenous Low" operator="and">
             <attribute idx="0">
-                <allowed-value value="Very Low"/>
-                <allowed-value value="Low"/>
+                <allowed-value equal="Very Low"/>
+                <allowed-value equal="Low"/>
             </attribute>
             <attribute idx="1">
-                <allowed-value value="IntraVenous"/>
+                <allowed-value equal="IntraVenous"/>
             </attribute>
         </rule>
         <rule value="SubCutaneous Medium" operator="and">
             <attribute idx="0">
-                <allowed-value value="Medium"/>
+                <allowed-value equal="Medium"/>
             </attribute>
             <attribute idx="1">
-                <allowed-value value="SubCutaneous"/>
+                <allowed-value equal="SubCutaneous"/>
             </attribute>
         </rule>
         <rule value="IntraVenous Medium" operator="and">
             <attribute idx="0">
-                <allowed-value value="Medium"/>
+                <allowed-value equal="Medium"/>
             </attribute>
             <attribute idx="1">
-                <allowed-value value="IntraVenous"/>
+                <allowed-value equal="IntraVenous"/>
             </attribute>
         </rule>
         <rule value="SubCutaneous High" operator="and">
             <attribute idx="0">
-                <allowed-value value="High"/>
-                <allowed-value value="Very High"/>
+                <allowed-value equal="High"/>
+                <allowed-value equal="Very High"/>
             </attribute>
             <attribute idx="1">
-                <allowed-value value="SubCutaneous"/>
+                <allowed-value equal="SubCutaneous"/>
             </attribute>
         </rule>
         <rule value="IntraVenous High" operator="and">
             <attribute idx="0">
-                <allowed-value value="High"/>
-                <allowed-value value="Very High"/>
+                <allowed-value equal="High"/>
+                <allowed-value equal="Very High"/>
             </attribute>
             <attribute idx="1">
-                <allowed-value value="IntraVenous"/>
+                <allowed-value equal="IntraVenous"/>
             </attribute>
         </rule>
         <rule value="Low" operator="and">
             <attribute idx="0">
-                <allowed-value value="Very Low"/>
-                <allowed-value value="Low"/>
+                <allowed-value equal="Very Low"/>
+                <allowed-value equal="Low"/>
             </attribute>
         </rule>
         <rule value="Medium" operator="and">
             <attribute idx="0">
-                <allowed-value value="Medium"/>
+                <allowed-value equal="Medium"/>
             </attribute>
         </rule>
         <rule value="High" operator="and">
             <attribute idx="0">
-                <allowed-value value="High"/>
-                <allowed-value value="Very High"/>
+                <allowed-value equal="High"/>
+                <allowed-value equal="Very High"/>
             </attribute>
         </rule>
     </abstraction-rules>
@@ -177,12 +177,12 @@ STATE_BASAL_ALL_XML = """\
   <abstraction-rules order="all">
     <rule value="SubCutaneous" operator="and">
       <attribute idx="1">
-        <allowed-value value="SubCutaneous"/>
+        <allowed-value equal="SubCutaneous"/>
       </attribute>
     </rule>
     <rule value="Low Dose" operator="and">
       <attribute idx="0">
-        <allowed-value value="Low"/>
+        <allowed-value equal="Low"/>
       </attribute>
     </rule>
   </abstraction-rules>
@@ -206,15 +206,15 @@ STATE_BASAL_PERMISSIVE_XML = """\
   <abstraction-rules order="all">
     <rule value="SubCutaneous Low" operator="and">
       <attribute idx="0">
-        <allowed-value value="Low"/>
+        <allowed-value equal="Low"/>
       </attribute>
       <attribute idx="1">
-        <allowed-value value="SubCutaneous"/>
+        <allowed-value equal="SubCutaneous"/>
       </attribute>
     </rule>
     <rule value="Low Dose" operator="and">
       <attribute idx="0">
-        <allowed-value value="Low"/>
+        <allowed-value equal="Low"/>
       </attribute>
     </rule>
   </abstraction-rules>
@@ -514,7 +514,7 @@ def test_discretize_filters_out_of_range(repo_with_glucose):
     # Now apply state (should only see value=80)
     df_state_output = state_tak.apply(df_raw_output)
     assert len(df_state_output) == 1
-    assert df_state_output.iloc[0]["Value"] == "('Low glucose',)"
+    assert df_state_output.iloc[0]["Value"] == 'Low glucose'
 
 
 # -----------------------------
@@ -690,9 +690,9 @@ def test_no_abstraction_rules_emits_discrete_string(repo_with_glucose):
     # Expected: 3 separate intervals (no merging)
     assert len(df_out) == 3
     values = list(df_out["Value"])
-    assert values[0] == "('Low glucose',)"
-    assert values[1] == "('Normal glucose',)"
-    assert values[2] == "('Hyperglycemia',)"
+    assert values[0] == 'Low glucose'
+    assert values[1] == 'Normal glucose'
+    assert values[2] == 'Hyperglycemia'
 
 
 def test_empty_input_returns_empty(repo_with_basal):
@@ -725,7 +725,7 @@ def test_state_from_event(repo_with_meal_event_state):
     df_event_out = event_tak.apply(df_raw_out)
     assert len(df_event_out) == 3
     assert all(df_event_out["ConceptName"] == "MEAL_EVENT")
-    assert list(df_event_out["Value"]) == [("Breakfast",), ("Lunch",), ("Dinner",)]
+    assert list(df_event_out["Value"]) == ["Breakfast", "Lunch", "Dinner"]
     # CORRECTED: Events preserve input EndDateTime
     assert all(df_event_out["StartDateTime"] == df_event_out["EndDateTime"])
     
@@ -733,9 +733,9 @@ def test_state_from_event(repo_with_meal_event_state):
     df_state_out = state_tak.apply(df_event_out)
     
     # Expected: 3 intervals (no merging since gaps > 3h)
-    # - [08:00 → 11:00] (8h + 3h) "('Breakfast',)"
-    # - [12:00 → 15:00] (12h + 3h) "('Lunch',)"
-    # - [18:00 → 21:00] (18h + 3h) "('Dinner',)"
+    # - [08:00 → 11:00] (8h + 3h) 'Breakfast'
+    # - [12:00 → 15:00] (12h + 3h) 'Lunch'
+    # - [18:00 → 21:00] (18h + 3h) 'Dinner'
     assert len(df_state_out) == 3
     assert all(df_state_out["ConceptName"] == "MEAL_STATE")
     
@@ -745,6 +745,20 @@ def test_state_from_event(repo_with_meal_event_state):
     assert df_state_out.iloc[2]["EndDateTime"] == make_ts("21:00")  # 18h + 3h
     
     # Values remain as string-ified tuples (no abstraction rules)
-    assert df_state_out.iloc[0]["Value"] == "('Breakfast',)"
-    assert df_state_out.iloc[1]["Value"] == "('Lunch',)"
-    assert df_state_out.iloc[2]["Value"] == "('Dinner',)"
+    assert df_state_out.iloc[0]["Value"] == 'Breakfast'
+    assert df_state_out.iloc[1]["Value"] == 'Lunch'
+    assert df_state_out.iloc[2]["Value"] == 'Dinner'
+
+
+def test_state_apply_extracts_value_for_single_attribute_no_rules(repo_with_glucose):
+    """State with no abstraction rules emits first element as string (not tuple)."""
+    state_tak = repo_with_glucose.get("GLUCOSE_MEASURE_STATE")
+    df_in = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("00:00"), make_ts("00:00"), (80,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("06:00"), make_ts("06:00"), (150,), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    df_out = state_tak.apply(df_in)
+    # Should emit string values, not tuples
+    assert all(isinstance(v, str) for v in df_out["Value"])
+    # Should look like 'Low glucose' etc.
+    assert df_out.iloc[0]["Value"] == 'Low glucose'
