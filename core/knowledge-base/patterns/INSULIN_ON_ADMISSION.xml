@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="INSULIN_ON_ADMISSION" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Captures if INSULIN (BASAL/BOLUS) was performed within reasonable time of admission</description>
+    <derived-from>
+        <attribute name="ADMISSION_EVENT" tak="event"/>
+        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context"/>
+        <attribute name="BASAL_BITZUA" tak="raw-concept"/>
+        <attribute name="BOLUS_BITZUA" tak="raw-concept"/>
+    </derived-from>
+ 
+    <!-- Patterns can have unique or shared values -->
+    <abstraction-rules order="first">
+        <rule operator="and">
+            <temporal-relation how='overlap'>
+                <attribute name="DIABETES_DIAGNOSIS_CONTEXT">
+                    <allowed-value equal="True"/>
+                </attribute>
+                <attribute name="ADMISSION_EVENT">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </temporal-relation>
+            <temporal-relation how='before' max-distance='48h'>
+                <attribute name="ADMISSION_EVENT">
+                    <allowed-value equal="True"/>
+                </attribute>
+                <attribute name="BASAL_BITZUA" idx="0">
+                    <allowed-value min="0"/>
+                </attribute>
+                <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+                <compliance-function>
+                    <time-constraint-compliance trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                </compliance-function>
+            </temporal-relation>
+        </rule>
+        <rule operator="and">
+            <temporal-relation how='overlap'>
+                <attribute name="DIABETES_DIAGNOSIS_CONTEXT">
+                    <allowed-value equal="True"/>
+                </attribute>
+                <attribute name="ADMISSION_EVENT">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </temporal-relation>
+            <temporal-relation how='before' max-distance='48h'>
+                <attribute name="ADMISSION_EVENT">
+                    <allowed-value equal="True"/>
+                </attribute>
+                <attribute name="BOLUS_BITZUA" idx="0">
+                    <allowed-value min="0"/>
+                </attribute>
+                <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+                <compliance-function>
+                    <time-constraint-compliance trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                </compliance-function>
+            </temporal-relation>
+        </rule>
+    </abstraction-rules>
+</pattern>

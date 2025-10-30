@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="CREATININE_MEASURE_ON_ADMISSION" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Captures if CREATININE (Serum) was performed within reasonable time of admission</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context"/>
+        <attribute name="CREATININE_MEASURE" tak="raw-concept"/>
+        <attribute name="ADMISSION_EVENT" tak="event"/>
+    </derived-from>
+ 
+    <!-- Patterns can have unique or shared values -->
+    <abstraction-rules order="first">
+        <rule operator="and">
+            <temporal-relation how='overlap'>
+                <attribute name="DIABETES_DIAGNOSIS_CONTEXT">
+                    <allowed-value equal="True"/>
+                </attribute>
+                <attribute name="ADMISSION_EVENT">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </temporal-relation>
+            <temporal-relation how='before' max-distance='48h'>
+                <attribute name="ADMISSION_EVENT">
+                    <allowed-value equal="True"/>
+                </attribute>
+                <attribute name="CREATININE_MEASURE" idx="0">
+                    <allowed-value min="0"/>
+                </attribute>
+                <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+                <compliance-function>
+                    <time-constraint-compliance trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                </compliance-function>
+            </temporal-relation>
+        </rule>
+    </abstraction-rules>
+</pattern>

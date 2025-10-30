@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<context name="DIABETES_DIAGNOSYS_CONTEXT">
+<context name="DIABETES_DIAGNOSIS_CONTEXT">
     <categories>Medicine</categories>
     <description>DIABETES context</description>
     <derived-from>
-        <attribute name="DIABETES_DIAGNOSYS" tak="raw-concept" idx="0"/>
+        <attribute name="DIABETES_DIAGNOSIS" tak="raw-concept" idx="0"/>
     </derived-from>
     
     <context-windows>
