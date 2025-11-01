@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS PatientQAScores (
     PatternName TEXT NOT NULL,
     StartDateTime TEXT NOT NULL,
     EndDateTime TEXT,
-    Score REAL,
+    ComplianceType TEXT,
+    ComplianceScore REAL,
     UNIQUE (PatientId, PatternName, StartDateTime)
 );
