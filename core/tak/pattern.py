@@ -11,6 +11,7 @@ from .tak import TAK, get_tak_repository, validate_xml_against_schema
 from .raw_concept import RawConcept
 from .event import Event
 from .context import Context
+from .external_functions import *
 
 
 class Pattern(TAK):

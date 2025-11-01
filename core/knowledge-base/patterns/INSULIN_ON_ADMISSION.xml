@@ -3,57 +3,58 @@
     <categories>Admission</categories>
     <description>Captures if INSULIN (BASAL/BOLUS) was performed within reasonable time of admission</description>
     <derived-from>
-        <attribute name="ADMISSION_EVENT" tak="event"/>
         <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context"/>
+        <attribute name="ADMISSION_EVENT" tak="event"/>
         <attribute name="BASAL_BITZUA" tak="raw-concept"/>
         <attribute name="BOLUS_BITZUA" tak="raw-concept"/>
     </derived-from>
- 
-    <!-- Patterns can have unique or shared values -->
-    <abstraction-rules order="first">
-        <rule operator="and">
-            <temporal-relation how='overlap'>
+
+    <!-- Will use the closest instance to the beginning of the pattern -->
+    <parameters>
+        <parameter name="WEIGHT_MEASURE" tak="raw-concept" idx="0" ref="P1" default="72"/>
+    </parameters>
+
+    <!-- max-distance is the maximum distance between rule 1 end and rule 2 start, for operator='and' only -->
+    <abstraction-rules operator="or">
+        <rule>
+            <!-- OPTIONAL: Contextual Information relevant if begins at / before the last event of the pattern starts-->
+            <context>
                 <attribute name="DIABETES_DIAGNOSIS_CONTEXT">
                     <allowed-value equal="True"/>
                 </attribute>
-                <attribute name="ADMISSION_EVENT">
-                    <allowed-value equal="True"/>
-                </attribute>
-            </temporal-relation>
+            </context>
+
+            <!-- Relation between 2 KBTA objects -->
             <temporal-relation how='before' max-distance='48h'>
-                <attribute name="ADMISSION_EVENT">
-                    <allowed-value equal="True"/>
-                </attribute>
-                <attribute name="BASAL_BITZUA" idx="0">
-                    <allowed-value min="0"/>
-                </attribute>
-                <!-- OPTIONAL: Compliance function to define fuzzy time window -->
-                <compliance-function>
-                    <time-constraint-compliance trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
-                </compliance-function>
+                <anchor>
+                    <attribute name="ADMISSION_EVENT">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute name="BASAL_BITZUA" idx="0">
+                        <allowed-value min="0"/>
+                    </attribute>
+                    <attribute name="BOLUS_BITZUA" idx="0">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
             </temporal-relation>
-        </rule>
-        <rule operator="and">
-            <temporal-relation how='overlap'>
-                <attribute name="DIABETES_DIAGNOSIS_CONTEXT">
-                    <allowed-value equal="True"/>
-                </attribute>
-                <attribute name="ADMISSION_EVENT">
-                    <allowed-value equal="True"/>
-                </attribute>
-            </temporal-relation>
-            <temporal-relation how='before' max-distance='48h'>
-                <attribute name="ADMISSION_EVENT">
-                    <allowed-value equal="True"/>
-                </attribute>
-                <attribute name="BOLUS_BITZUA" idx="0">
-                    <allowed-value min="0"/>
-                </attribute>
-                <!-- OPTIONAL: Compliance function to define fuzzy time window -->
-                <compliance-function>
-                    <time-constraint-compliance trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
-                </compliance-function>
-            </temporal-relation>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                    </function>
+                </time-constraint-compliance>
+                <value-constraint-compliance>
+                    <function name="mul">
+                        <parameter ref="P1"/>
+                        <trapeze trapezeA="0" trapezeB="0.2" trapezeC="0.6" trapezeD="1"/>
+                    </function>
+                </value-constraint-compliance>
+            </compliance-function>
         </rule>
     </abstraction-rules>
 </pattern>

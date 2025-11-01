@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+from .external_functions import REPO
+
 
 def parse_duration(duration_str):
     """
@@ -49,3 +51,42 @@ def parse_duration(duration_str):
         return timedelta(days=value * 365)  # approximate year as 365 days
     else:
         raise ValueError(f"Unsupported duration unit: '{unit}'. Use s, m, h, d, w, M, or y.")
+    
+
+def apply_external_function(func_name: str, trapez: tuple, type: str, *args):
+    """
+    Apply an external function by name to each value in the trapez tuple, passing any additional *args.
+    For time-constraint, values are parsed as durations and converted to seconds before applying the function.
+
+    Args:
+        func_name (str): The name of the external function to apply.
+        trapez (tuple): Tuple of values to apply the function to.
+        type (str): "time-constraint" or "value-constraint".
+        *args: Additional arguments to pass to the function.
+
+    Returns:
+        tuple: Ordered tuple of results from applying the function to each trapez value.
+
+    Raises:
+        ValueError: If the function name is not recognized or wrong number of parameters.
+    """
+    func = REPO.get(func_name)
+    if func is None:
+        raise ValueError(f"External function '{func_name}' not found in repository.")
+
+    # Preprocess all values based on type
+    if type == "time-constraint":
+        # Parse all as durations and convert to seconds
+        processed = [int(parse_duration(val).total_seconds()) for val in trapez]
+    else:
+        processed = list(trapez)
+    results = []
+    for val in processed:
+        try:
+            res = func(val, *args)
+            results.append(res)
+        except TypeError as e:
+            raise ValueError(f"Function '{func_name}' called with wrong number of parameters: {e}")
+        except Exception as e:
+            raise ValueError(f"Error applying function '{func_name}' to value '{val}': {e}")
+    return tuple(results)

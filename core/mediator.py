@@ -1,3 +1,9 @@
+"""
+TO-DO:
+- Operator='and' can only work in events/contexts within the same raw concept, not between different taks (that's a pattern already).
+"""
+
+
 from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from pathlib import Path
