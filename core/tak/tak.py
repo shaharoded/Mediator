@@ -234,7 +234,60 @@ class EventAbstractionRule(TAKRule):
         return False
 
 
-# NEW: Schema validation helper
+class TemporalRelationRule(TAKRule):
+    """
+    Rule for matching temporal relations in patterns: anchor + event within constraints.
+    """
+    def __init__(self, anchor_spec: Dict[str, Any], event_spec: Dict[str, Any], how: str, max_distance: Optional[str]):
+        self.anchor_spec = anchor_spec
+        self.event_spec = event_spec
+        self.how = how
+        self.max_distance = max_distance
+
+    def matches(self, anchor_df: pd.DataFrame, event_df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """
+        Find all anchor-event pairs that satisfy the temporal relation.
+        Returns list of {'anchor_row': row, 'event_row': row, 'start': dt, 'end': dt}
+        """
+        matches = []
+        for _, anchor_row in anchor_df.iterrows():
+            for _, event_row in event_df.iterrows():
+                if self._satisfies_temporal(anchor_row, event_row):
+                    start = anchor_row['StartDateTime']
+                    end = event_row['EndDateTime']
+                    matches.append({
+                        'anchor_row': anchor_row,
+                        'event_row': event_row,
+                        'start': start,
+                        'end': end
+                    })
+        return matches
+
+    def _satisfies_temporal(self, anchor_row: pd.Series, event_row: pd.Series) -> bool:
+        # Implement temporal logic based on how and max_distance
+        # Use parse_duration for max_distance
+        # For 'before': anchor before event, within max_distance
+        # For 'overlap': overlap in time
+        pass  # Implement based on schema
+
+
+class QATPRule(TAKRule):
+    """
+    Rule for QA compliance rating using trapezoid functions.
+    """
+    def __init__(self, compliance_spec: Dict[str, Any]):
+        self.compliance_spec = compliance_spec
+
+    def matches(self, pattern_instance: Dict[str, Any]) -> str:
+        """
+        Rate compliance: True, Partial, False.
+        Apply external function on trapez if present.
+        """
+        # Implement compliance logic
+        # Use apply_external_function
+        pass  # Implement
+
+
 def validate_xml_against_schema(xml_path: Path, schema_path: Optional[Path] = None) -> None:
     """
     Validate XML file against XSD schema.
