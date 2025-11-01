@@ -205,7 +205,7 @@ class Context(TAK):
                             raise ValueError(f"{self.name}: rule references unknown attribute '{attr_name}'")
                         attr_sources.add(matching_df["name"])
                     if len(attr_sources) > 1:
-                        raise ValueError(f"{self.name}: operator='and' requires all attributes from same source (found: {attr_sources})")
+                        raise ValueError(f"{self.name}: operator='and' requires all attributes from same raw-concept source (found: {attr_sources})")
 
                 for attr_name, constraints in rule.constraints.items():
                     matching_df = next((df for df in self.derived_from if df["name"] == attr_name), None)

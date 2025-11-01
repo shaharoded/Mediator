@@ -157,7 +157,7 @@ class Event(TAK):
                         attr_sources.add(matching_df["name"])
                     
                     if len(attr_sources) > 1:
-                        raise ValueError(f"{self.name}: operator='and' requires all attributes from same source (found: {attr_sources})")
+                        raise ValueError(f"{self.name}: operator='and' requires all attributes from same raw-concept source (found: {attr_sources})")
 
                 # Check allowed values are valid for the attribute
                 for attr_name, constraints in rule.constraints.items():
