@@ -5,5 +5,6 @@ INSERT OR IGNORE INTO PatientQAScores (
     PatternName,
     StartDateTime,
     EndDateTime,
-    Score
-) VALUES (?, ?, ?, ?, ?);
+    ComplianceType,
+    ComplianceScore
+) VALUES (?, ?, ?, ?, ?, ?);
