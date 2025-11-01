@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<pattern name="INSULIN_ON_ADMISSION" concept-type="local-pattern">
+<pattern name="INSULIN_ON_ADMISSION_PATTERN" concept-type="local-pattern">
     <categories>Admission</categories>
     <description>Captures if INSULIN (BASAL/BOLUS) was performed within reasonable time of admission</description>
     <derived-from>

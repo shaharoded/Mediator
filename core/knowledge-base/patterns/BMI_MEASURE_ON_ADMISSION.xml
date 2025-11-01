@@ -8,20 +8,30 @@
     </derived-from>
  
     <!-- Patterns can have unique or shared values -->
-    <abstraction-rules order="first">
-        <rule operator="and">
+    <abstraction-rules operator="or">
+        <rule>
+            <!-- Relation between 2 KBTA objects -->
             <temporal-relation how='before' max-distance='48h'>
-                <attribute name="ADMISSION_EVENT">
-                    <allowed-value equal="True"/>
-                </attribute>
-                <attribute name="BMI_MEASURE" idx="0">
-                    <allowed-value min="0"/>
-                </attribute>
-                <!-- OPTIONAL: Compliance function to define fuzzy time window -->
-                <compliance-function>
-                    <time-constraint-compliance trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
-                </compliance-function>
+                <anchor>
+                    <attribute name="ADMISSION_EVENT">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute name="BMI_MEASURE" idx="0">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
             </temporal-relation>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                    </function>
+                </time-constraint-compliance>
+            </compliance-function>
         </rule>
     </abstraction-rules>
 </pattern>

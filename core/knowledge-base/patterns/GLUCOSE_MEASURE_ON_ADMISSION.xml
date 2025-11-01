@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<pattern name="GLUCOSE_MEASURE_ON_ADMISSION" concept-type="local-pattern">
+<pattern name="GLUCOSE_MEASURE_ON_ADMISSION_PATTERN" concept-type="local-pattern">
     <categories>Admission</categories>
     <description>Captures if DEX was preformed within resonable time of admission</description>
     <derived-from>
@@ -8,43 +8,62 @@
         <attribute name="ADMISSION_EVENT" tak="event"/>
     </derived-from>
  
-    <!-- Patterns can have unique or shared values -->
-    <abstraction-rules order="first">
-        <rule operator="and">
-            <temporal-relation how='overlap'>
+    <!-- max-distance is the maximum distance between rule 1 end and rule 2 start, for operator='and' only -->
+    <abstraction-rules operator="or">
+        <rule>
+            <!-- OPTIONAL: Contextual Information relevant if begins at / before the last event of the pattern starts-->
+            <context>
                 <attribute name="DIABETES_DIAGNOSIS_CONTEXT">
                     <allowed-value equal="True"/>
                 </attribute>
-                <attribute name="ADMISSION_EVENT">
-                    <allowed-value equal="True"/>
-                </attribute>
-            </temporal-relation>
+            </context>
+
+            <!-- Relation between 2 KBTA objects -->
             <temporal-relation how='before' max-distance='8h'>
-                <attribute name="ADMISSION_EVENT">
-                    <allowed-value equal="True"/>
-                </attribute>
-                <attribute name="GLUCOSE_MEASURE" idx="0">
-                    <allowed-value min="0"/>
-                </attribute>
-                <!-- OPTIONAL: Compliance function to define fuzzy time window -->
-                <compliance-function>
-                    <time-constraint-compliance trapezeA="0h" trapezeB="0h" trapezeC="8h" trapezeD="12h"/>
-                </compliance-function>
+                <anchor>
+                    <attribute name="ADMISSION_EVENT">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute name="GLUCOSE_MEASURE" idx="0">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
             </temporal-relation>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="8h" trapezeD="12h"/>
+                    </function>
+                </time-constraint-compliance>
+            </compliance-function>
         </rule>
-        <rule operator="and">
+        <rule>
+            <!-- Relation between 2 KBTA objects -->
             <temporal-relation how='before' max-distance='24h'>
-                <attribute name="ADMISSION_EVENT">
-                    <allowed-value equal="True"/>
-                </attribute>
-                <attribute name="GLUCOSE_MEASURE" idx="0">
-                    <allowed-value min="0"/>
-                </attribute>
-                <!-- OPTIONAL: Compliance function to define fuzzy time window -->
-                <compliance-function>
-                    <time-constraint-compliance trapezeA="0h" trapezeB="0h" trapezeC="24h" trapezeD="36h"/>
-                </compliance-function>
+                <anchor>
+                    <attribute name="ADMISSION_EVENT">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute name="GLUCOSE_MEASURE" idx="0">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
             </temporal-relation>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="24h" trapezeD="36h"/>
+                    </function>
+                </time-constraint-compliance>
+            </compliance-function>
         </rule>
     </abstraction-rules>
 </pattern>
