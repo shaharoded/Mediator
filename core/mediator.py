@@ -1,6 +1,5 @@
 """
 TO-DO:
- - Instead of having a "order" parameter we can have a flag on the REPO instance marking 
  - Change both events and contexts to work with ref in the schema instead of repeated declaration of tak and idx.
  - Possibly better to move clipper in context to the top of the schema below attributes. Remove global clippers from local taks.
  - A pattern's max distance must be the trapez maximal node, so that patterns are discovered once
@@ -27,7 +26,7 @@ from .tak.event import Event
 from .tak.state import State
 from .tak.trend import Trend
 from .tak.context import Context
-from .tak.pattern import Pattern  # TODO: Implement Pattern TAK
+from .tak.pattern import Pattern
 from .config import TAK_FOLDER
 
 # Add parent directory to path for backend imports
@@ -77,7 +76,7 @@ class Mediator:
         self.states: List[State] = []
         self.trends: List[Trend] = []
         self.contexts: List[Context] = []
-        self.patterns: List[Pattern] = []  # TODO: Implement Pattern TAK
+        self.patterns: List[Pattern] = []
         
         # Load global clippers (START/END events that clip all abstractions)
         self.global_clippers = self._load_global_clippers()
@@ -136,7 +135,7 @@ class Mediator:
             ("States", self.kb_path / "states", State, self.states),
             ("Trends", self.kb_path / "trends", Trend, self.trends),
             ("Contexts", self.kb_path / "contexts", Context, self.contexts),
-            # ("Patterns", self.kb_path / "patterns", Pattern, self.patterns),  # TODO
+            ("Patterns", self.kb_path / "patterns", Pattern, self.patterns)
         ]
         
         total_files = sum(len(list(path.glob("*.xml"))) for _, path, _, _ in phases if path.exists())
@@ -167,9 +166,9 @@ class Mediator:
         # Run business-logic validation on all TAKs
         print("\n[Validation] Running business-logic checks on TAK repository...")
         try:
-            repo.validate_all()
+            repo.finalize_repository()
         except Exception as e:
-            raise RuntimeError(f"TAK validation failed: {e}") from e
+            raise RuntimeError(f"TAK repository finalization failed: {e}") from e
         
         # Summary
         print("\n" + "="*80)
@@ -519,55 +518,59 @@ class Mediator:
     
     def _process_patient_sync(self, patient_id: int) -> Dict[str, int]:
         """
-        Synchronous patient processing with full caching and global clippers.
-        Creates per-thread DB connection for thread safety.
+        Process a single patient using pre-computed topological execution order.
+        TAKs are already sorted so dependencies are guaranteed to be calculated first.
         """
         # Create new DB connection for this thread (SQLite thread safety)
         thread_da = DataAccess(db_path=self.db_path)
         
+        logger.info(f"[Patient {patient_id}] Processing start")
         stats = {}
-        tak_outputs = {}  # Cache ALL TAK outputs
+        tak_outputs = {}  # Cache ALL TAK outputs for this patient_id
         
         try:
             # Phase 0: Query global clipper times ONCE per patient
             clipper_df = self._get_global_clipper_times_thread(patient_id, thread_da)
-            
-            # Phase 1: Apply raw-concepts (cached, NOT written to DB)
-            for rc in self.raw_concepts:
-                df_input = self.get_input_for_raw_concept_thread(patient_id, rc, thread_da)
-                if df_input.empty:
-                    continue
-                df_output = rc.apply(df_input)
-                tak_outputs[rc.name] = df_output  # Cache
-                stats[rc.name] = len(df_output)
-            
-            # Phases 2-6: Apply all other TAK families (unified loop)
-            tak_families = [
-                ("events", self.events),
-                ("states", self.states),
-                ("trends", self.trends),
-                ("contexts", self.contexts),
-                ("patterns", self.patterns),
-            ]
-            
-            for family_name, tak_list in tak_families:
-                for tak in tak_list:
-                    df_input = self.get_input_for_tak_thread(patient_id, tak, tak_outputs, thread_da)
+            execution_order = getattr(self.repo, 'execution_order', list(self.repo.taks.keys()))
+
+            # Process TAKs in topological order
+            for tak_name in execution_order:
+                tak = self.repo.get(tak_name)
+                try:
+                    # Get input data for this TAK
+                    if isinstance(tak, RawConcept):
+                        df_input = self.get_input_for_raw_concept_thread(patient_id, tak, thread_da)
+                    else:
+                        df_input = self.get_input_for_tak_thread(patient_id, tak, tak_outputs, thread_da)
+                    
                     if df_input.empty:
                         continue
-                    df_output = tak.apply(df_input)
                     
+                    # Apply TAK
+                    df_output = tak.apply(df_input)
+
                     # Apply global clippers BEFORE caching/writing
                     df_output = self._apply_global_clippers(df_output, clipper_df)
                     
-                    tak_outputs[tak.name] = df_output  # Cache
-                    rows_written = self.write_output_thread(df_output, thread_da)
+                    # Store output for downstream TAKs
+                    tak_outputs[tak_name] = df_output # Cache
+
+                    if not isinstance(tak, RawConcept):
+                        # Write to DB
+                        rows_written = self.write_output_thread(df_output, thread_da)
+                    else:
+                        rows_written = len(df_output)
                     stats[tak.name] = rows_written
+                    
+                except Exception as e:
+                    logger.error(f"[Patient {patient_id}][{tak_name}] Error: {e}")
+                    stats[tak_name] = {"error": str(e)}
             
+            logger.info(f"[Patient {patient_id}] Processing complete | stats={stats}")
             return stats
             
         except Exception as e:
-            logger.error(f"[Patient {patient_id}] Processing failed: {e}", exc_info=True)
+            logger.error(f"[Patient {patient_id}] Critical error: {e}", exc_info=True)
             return {"error": str(e)}
         finally:
             # Close thread-local connection

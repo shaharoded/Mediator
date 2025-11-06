@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple, Union, Dict, List, Any
 import pandas as pd
 from datetime import timedelta
-from typing import Dict, Any, List, Optional, Iterable, Set
+from typing import Dict, Any, List, Optional, Set
 from abc import ABC, abstractmethod
 from lxml import etree as lxml_etree
 from pathlib import Path
@@ -14,6 +14,12 @@ logger = logging.getLogger(__name__)
 # Import schema path from config
 from ..config import TAK_SCHEMA_PATH
 from .utils import parse_duration
+from .raw_concept import RawConcept
+from .event import Event
+from .state import State
+from .trend import Trend
+from .context import Context
+from .pattern import Pattern
 
 # Global singleton TAKRepository instance (set by mediator at startup)
 _GLOBAL_TAK_REPO: Optional["TAKRepository"] = None
@@ -81,10 +87,151 @@ class TAKRepository:
         """Retrieve a TAK by name."""
         return self.taks.get(name)
 
-    def validate_all(self) -> None:
-        """Run business-logic validation on all registered TAKs."""
-        for tak in self.taks.values():
-            tak.validate()
+    def finalize_repository(self) -> None:
+        """
+        Finalize the TAK repository after all TAKs are registered.
+        Detects circular references and computes topological execution order.
+        (Individual TAK validation already happens in each TAK's .parse() method.)
+        """
+        # 1) Build dependency graph and detect circular references
+        dep_graph = self._build_dependency_graph()
+        self._detect_circular_references(dep_graph)
+
+        # 2) Compute topological sort order
+        self.execution_order = self._topological_sort(dep_graph)
+        logger.info(f"TAK execution order: {self.execution_order}")
+
+    def _build_dependency_graph(self) -> Dict[str, Set[str]]:
+        """
+        Build a dependency graph: {tak_name: set_of_dependent_tak_names}
+        A TAK depends on all TAKs it references (derived-from, parameters, clippers, etc.)
+        """
+        graph: Dict[str, Set[str]] = {name: set() for name in self.taks}
+
+        for tak_name, tak in self.taks.items():
+            dependencies = self._extract_dependencies(tak)
+            graph[tak_name] = dependencies
+
+        return graph
+
+    def _extract_dependencies(self, tak: TAK) -> Set[str]:
+        """Extract all TAK names that this TAK depends on."""
+        deps = set()
+
+        # Raw Concept: no dependencies (data source)
+        if isinstance(tak, RawConcept):
+            return deps
+
+        # Event: depends on derived-from raw-concepts
+        if isinstance(tak, Event):
+            for df in tak.derived_from:
+                deps.add(df["name"])
+            return deps
+
+        # State: depends on derived-from (raw-concept or event)
+        if isinstance(tak, State):
+            deps.add(tak.derived_from)
+            return deps
+
+        # Trend: depends on derived-from raw-concept
+        if isinstance(tak, Trend):
+            deps.add(tak.derived_from)
+            return deps
+
+        # Context: depends on derived-from + clippers
+        if isinstance(tak, Context):
+            for df in tak.derived_from:
+                deps.add(df["name"])
+            for clipper in tak.clippers:
+                deps.add(clipper["name"])
+            return deps
+
+        # Pattern: depends on derived-from + parameters TAKs
+        if isinstance(tak, Pattern):
+            for df in tak.derived_from:
+                deps.add(df["name"])
+            for param in tak.parameters:
+                deps.add(param["tak"])
+            return deps
+
+        return deps
+
+    def _detect_circular_references(self, graph: Dict[str, Set[str]]) -> None:
+        """
+        Detect circular references using DFS.
+        Raises ValueError if a cycle is found.
+        """
+        visited: Set[str] = set()
+        rec_stack: Set[str] = set()
+
+        def dfs(node: str, path: List[str]) -> None:
+            visited.add(node)
+            rec_stack.add(node)
+            path.append(node)
+
+            for neighbor in graph.get(node, set()):
+                if neighbor not in self.taks:
+                    # Neighbor not in repository (missing TAK)
+                    raise ValueError(f"TAK '{node}' references missing TAK '{neighbor}'")
+
+                if neighbor not in visited:
+                    dfs(neighbor, path.copy())
+                elif neighbor in rec_stack:
+                    # Found cycle
+                    cycle_start = path.index(neighbor)
+                    cycle_path = path[cycle_start:] + [neighbor]
+                    raise ValueError(
+                        f"Circular reference detected: {' → '.join(cycle_path)}"
+                    )
+
+            rec_stack.discard(node)
+
+        # Run DFS from each unvisited node
+        for tak_name in self.taks:
+            if tak_name not in visited:
+                dfs(tak_name, [])
+
+    def _topological_sort(self, graph: Dict[str, Set[str]]) -> List[str]:
+        """
+        Compute topological sort order using Kahn's algorithm.
+        Returns list of TAK names in execution order (dependencies first).
+        """
+        in_degree = {name: 0 for name in self.taks}
+        for tak_name, deps in graph.items():
+            in_degree[tak_name] = len(deps)
+
+        queue = [name for name, degree in in_degree.items() if degree == 0]
+        order = []
+
+        while queue:
+            # Sort queue by TAK family for predictable ordering
+            queue.sort(key=lambda name: (self._family_priority(self.taks[name].family), name))
+            node = queue.pop(0)
+            order.append(node)
+
+            # Find all TAKs that depend on this node
+            for tak_name, deps in graph.items():
+                if node in deps:
+                    in_degree[tak_name] -= 1
+                    if in_degree[tak_name] == 0:
+                        queue.append(tak_name)
+
+        return order
+
+    @staticmethod
+    def _family_priority(family: str) -> int:
+        """Return priority for execution order (lower = earlier)."""
+        priority_map = {
+            "raw-concept": 0,
+            "event": 1,
+            "state": 2,
+            "trend": 3,
+            "context": 4,
+            "pattern": 5,
+            "local-pattern": 5,
+            "global-pattern": 6,
+        }
+        return priority_map.get(family, 99)
 
 
 class TAKRule(ABC):
