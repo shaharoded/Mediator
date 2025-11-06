@@ -1,5 +1,6 @@
 """
 TO-DO:
+ - Instead of having a "order" parameter we can have a flag on the REPO instance marking 
  - Change both events and contexts to work with ref in the schema instead of repeated declaration of tak and idx.
  - Possibly better to move clipper in context to the top of the schema below attributes. Remove global clippers from local taks.
  - A pattern's max distance must be the trapez maximal node, so that patterns are discovered once

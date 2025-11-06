@@ -25,9 +25,9 @@ class Pattern(TAK):
         description: str,
         derived_from: List[Dict[str, Any]],
         abstraction_rules: List[Dict[str, Any]],
-        pattern_type: str = "pattern"
+        family: str = "pattern"
     ):
-        super().__init__(name=name, categories=categories, description=description, family=pattern_type)
+        super().__init__(name=name, categories=categories, description=description, family=family)
         self.derived_from = derived_from
         self.abstraction_rules = abstraction_rules
 
@@ -58,7 +58,7 @@ class LocalPattern(Pattern):
             description=description,
             derived_from=derived_from,
             abstraction_rules=abstraction_rules,
-            pattern_type="local-pattern"
+            family="local-pattern"
         )
         self.parameters = parameters
 
@@ -341,17 +341,21 @@ class LocalPattern(Pattern):
         parameters_by_ref = {item["ref"]: item for item in self.parameters}
         all_declared_refs = set(derived_from_by_ref.keys()) | set(parameters_by_ref.keys())
         
-        # 1) Validate all derived-from TAKs exist
-        for df in self.derived_from:
+        # 1) Validate all derived-from TAKs exist and referenced correctly
+        for df in self.derived_from + self.parameters:
             tak = repo.get(df["name"])
             if tak is None:
-                raise ValueError(f"{self.name}: derived-from TAK '{df['name']}' (ref='{df['ref']}') not found")
+                raise ValueError(f"{self.name}: derived-from TAK '{df['name']}' (ref='{df['ref']}') not found in TAK repository")
             
             # If referencing raw-concept and idx specified, validate idx
-            if df["tak"] == "raw-concept" and isinstance(tak, RawConcept):
+            if isinstance(tak, RawConcept):
                 if tak.concept_type == "raw":
                     if df["idx"] >= len(tak.tuple_order):
                         raise ValueError(f"{self.name}: ref '{df['ref']}' idx={df['idx']} out of bounds for '{df['name']}' (tuple_size={len(tak.tuple_order)})")
+                else:
+                    # raw-numeric, raw-nominal, raw-boolean: only idx=0 valid
+                    if df["idx"] != 0:
+                        raise ValueError(f"{self.name}: ref '{df['ref']}' idx={df['idx']} invalid for '{df['name']}' of type '{tak.concept_type}'; only idx=0 allowed")
         
         # 2) Validate all used refs are declared
         for rule in self.abstraction_rules:
