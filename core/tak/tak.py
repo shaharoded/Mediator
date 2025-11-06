@@ -2,6 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, Union, Dict, List, Any
 import pandas as pd
+from datetime import timedelta
+from typing import Dict, Any, List, Optional, Iterable, Set
 from abc import ABC, abstractmethod
 from lxml import etree as lxml_etree
 from pathlib import Path
@@ -11,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Import schema path from config
 from ..config import TAK_SCHEMA_PATH
+from .utils import parse_duration
 
 # Global singleton TAKRepository instance (set by mediator at startup)
 _GLOBAL_TAK_REPO: Optional["TAKRepository"] = None
@@ -235,57 +238,188 @@ class EventAbstractionRule(TAKRule):
 
 
 class TemporalRelationRule(TAKRule):
-    """
-    Rule for matching temporal relations in patterns: anchor + event within constraints.
-    """
-    def __init__(self, anchor_spec: Dict[str, Any], event_spec: Dict[str, Any], how: str, max_distance: Optional[str]):
-        self.anchor_spec = anchor_spec
-        self.event_spec = event_spec
-        self.how = how
-        self.max_distance = max_distance
+    """Locate anchor/event pairs that satisfy temporal constraints, with an optional context."""
+    def __init__(
+        self,
+        derived_map: Dict[str, Dict[str, Any]],
+        relation_spec: Dict[str, Any],
+        context_spec: Optional[Dict[str, Any]] = None,
+    ):
+        self.derived_map = derived_map
+        self.relation_spec = relation_spec
+        self.context_spec = context_spec or {}
+        self.max_delta: Optional[timedelta] = None
+        if relation_spec.get("max_distance"):
+            self.max_delta = parse_duration(relation_spec["max_distance"])
 
-    def matches(self, anchor_df: pd.DataFrame, event_df: pd.DataFrame) -> List[Dict[str, Any]]:
-        """
-        Find all anchor-event pairs that satisfy the temporal relation.
-        Returns list of {'anchor_row': row, 'event_row': row, 'start': dt, 'end': dt}
-        """
-        matches = []
-        for _, anchor_row in anchor_df.iterrows():
-            for _, event_row in event_df.iterrows():
-                if self._satisfies_temporal(anchor_row, event_row):
-                    start = anchor_row['StartDateTime']
-                    end = event_row['EndDateTime']
-                    matches.append({
-                        'anchor_row': anchor_row,
-                        'event_row': event_row,
-                        'start': start,
-                        'end': end
-                    })
-        return matches
+    def find_matches(
+        self,
+        df: pd.DataFrame,
+        used_anchor_ids: Optional[Set[int]] = None,
+        used_event_ids: Optional[Set[int]] = None,
+    ) -> List[Dict[str, Any]]:
+        used_anchor_ids = used_anchor_ids or set()
+        used_event_ids = used_event_ids or set()
 
-    def _satisfies_temporal(self, anchor_row: pd.Series, event_row: pd.Series) -> bool:
-        # Implement temporal logic based on how and max_distance
-        # Use parse_duration for max_distance
-        # For 'before': anchor before event, within max_distance
-        # For 'overlap': overlap in time
-        pass  # Implement based on schema
+        # Separate input df to components, with only the relevant rows to use as anchor/ event.
+        anchors = self._extract_candidates(df, self.relation_spec.get("anchor"))
+        events = self._extract_candidates(df, self.relation_spec.get("event"))
+        contexts = self._extract_candidates(df, self.context_spec) if self.context_spec else None
+
+        results: List[Dict[str, Any]] = []
+        if anchors.empty or events.empty:
+            return results
+
+        # Sort anchor options and event options per TAK 'select' specification
+        anchor_order = self._order_indices(anchors, self.relation_spec.get("anchor", {}))
+        event_order = self._order_indices(events, self.relation_spec.get("event", {}))
+
+        # Iterate over anchors using 'used' buckets to enforce one-to-one matching
+        for anchor_idx in anchor_order:
+            if anchor_idx in used_anchor_ids:
+                continue
+            anchor_row = anchors.loc[anchor_idx]
+            anchor_start = anchor_row.StartDateTime
+
+            for event_idx in event_order:
+                if event_idx in used_event_ids:
+                    continue
+                event_row = events.loc[event_idx]
+                if not self._temporal_match(anchor_row, event_row):
+                    continue
+                if not self._context_satisfied(anchor_row, event_row, contexts):
+                    continue
+                results.append(
+                    {
+                        "anchor_idx": anchor_idx,
+                        "event_idx": event_idx,
+                        "anchor_row": anchor_row,
+                        "event_row": event_row,
+                        "start": anchor_start,
+                        "end": event_row.EndDateTime,
+                    }
+                )
+                used_anchor_ids.add(anchor_idx)
+                used_event_ids.add(event_idx)
+                break  # one-to-one pairing
+        return results
+
+    def _extract_candidates(self, df: pd.DataFrame, spec: Optional[Dict[str, Any]]) -> pd.DataFrame:
+        """
+        Extract candidate rows for anchor/event/context attributes.
+        Supports multiple attributes (OR semantics): any attribute that satisfies the constraints is eligible.
+        """
+        if not spec:
+            return pd.DataFrame(columns=df.columns)
+
+        attrs = spec.get("attributes", {})
+        if not attrs:
+            return pd.DataFrame(columns=df.columns)
+
+        masked_parts = []
+        # Take the filtered subset derived from every attribute
+        for attr_name, constraints in attrs.items():
+            idx = constraints.get("idx", 0)
+            rows = df[df["ConceptName"] == attr_name].copy()
+            if rows.empty:
+                continue
+
+            # Get relevant value for the attribute given idx (if relevant) - A 1D operation
+            rows["__value__"] = rows.apply(lambda r: self._extract_value(r["Value"], idx), axis=1)
+
+            allowed = constraints.get("allowed_values") or set()
+            if allowed:
+                rows = rows[rows["__value__"].astype(str).isin(allowed)]
+            if constraints.get("min") is not None:
+                rows = rows[pd.to_numeric(rows["__value__"], errors="coerce") >= constraints["min"]]
+            if constraints.get("max") is not None:
+                rows = rows[pd.to_numeric(rows["__value__"], errors="coerce") <= constraints["max"]]
+
+            if not rows.empty:
+                masked_parts.append(rows)
+
+        if not masked_parts:
+            return pd.DataFrame(columns=df.columns)
+
+        combined = pd.concat(masked_parts).sort_values("StartDateTime")
+        return combined.set_index(combined.index)
+
+    def _order_indices(self, df: pd.DataFrame, spec: Dict[str, Any]) -> List[int]:
+        """
+        TAK select operation decides if we are to prefer longer or shorter patterns.
+        This function assists this selection, sorting ascending for 'first' and descending for 'last'.
+        """
+        if df.empty:
+            return []
+        select = (spec or {}).get("select", "first")
+        if select == "last":
+            return list(df.sort_values("StartDateTime", ascending=False).index)
+        return list(df.sort_values("StartDateTime", ascending=True).index)
+
+    def _temporal_match(self, anchor_row: pd.Series, event_row: pd.Series) -> bool:
+        """
+        Check if the temporal relation between anchor and event rows holds.
+        Respects "overlap" and "before" relationships (with <max_distance> restrictions).
+        """
+        if self.relation_spec["how"] == "overlap":
+            return not (
+                anchor_row.EndDateTime < event_row.StartDateTime
+                or event_row.EndDateTime < anchor_row.StartDateTime
+            )
+        # how == before
+        if anchor_row.EndDateTime > event_row.StartDateTime:
+            return False
+        if self.max_delta is None:
+            return True
+        return (event_row.StartDateTime - anchor_row.EndDateTime) <= self.max_delta
+
+    @staticmethod
+    def _extract_value(value: Any, idx: int) -> Any:
+        """
+            1. Extract value from tuple (raw-concept) or string representation.
+            2. If not a tuple or parsable string, return value as-is (for all other TAK cases).
+        """
+        if isinstance(value, tuple):
+            return value[idx]
+        if isinstance(value, str) and value.startswith("(") and value.endswith(")"):
+            try:
+                import ast
+                parsed = ast.literal_eval(value)
+                if isinstance(parsed, tuple):
+                    return parsed[idx]
+            except (ValueError, SyntaxError):
+                return value
+        return value
+
+    def _context_satisfied(self, anchor_row: pd.Series, event_row: pd.Series, contexts: Optional[pd.DataFrame]) -> bool:
+        """
+        Check if any context row overlaps the interval between anchor and event start times.
+        Overlap: context.StartDateTime <= max_start AND context.EndDateTime >= min_start
+        """
+        # Context spec is not defined for this rule
+        if not self.context_spec or not self.context_spec.get("attributes"):
+            return True
+        # No context relevant data was extracted for the patient
+        if contexts is None or contexts.empty:
+            return False
+
+        min_start = min(anchor_row.StartDateTime, event_row.StartDateTime)
+        max_start = max(anchor_row.StartDateTime, event_row.StartDateTime)
+
+        mask = (contexts["StartDateTime"] <= max_start) & (contexts["EndDateTime"] >= min_start)
+        return mask.any()
 
 
 class QATPRule(TAKRule):
-    """
-    Rule for QA compliance rating using trapezoid functions.
-    """
+    """Evaluate compliance score (placeholder: returns 'True' unless spec provided)."""
     def __init__(self, compliance_spec: Dict[str, Any]):
         self.compliance_spec = compliance_spec
 
-    def matches(self, pattern_instance: Dict[str, Any]) -> str:
-        """
-        Rate compliance: True, Partial, False.
-        Apply external function on trapez if present.
-        """
-        # Implement compliance logic
-        # Use apply_external_function
-        pass  # Implement
+    def evaluate(self, pattern_instance: Dict[str, Any]) -> str:
+        if not self.compliance_spec:
+            return "True"
+        # TODO: implement trapezoid-based compliance scoring
+        return "True"
 
 
 def validate_xml_against_schema(xml_path: Path, schema_path: Optional[Path] = None) -> None:

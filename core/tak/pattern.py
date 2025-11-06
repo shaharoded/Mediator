@@ -1,6 +1,7 @@
 from __future__ import annotations
-from typing import Tuple, List, Dict, Any, Union
+from typing import Optional, Tuple, List, Dict, Any, Union
 import pandas as pd
+from datetime import timedelta
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import logging
@@ -39,7 +40,7 @@ class Pattern(TAK):
 
 class LocalPattern(Pattern):
     """
-    LocalPattern: interval-based pattern abstraction.
+    LocalPattern: interval-based pattern abstraction with ref-based attributes.
     Output values: True, Partial, False (False only for QATPs).
     """
     def __init__(
@@ -49,7 +50,6 @@ class LocalPattern(Pattern):
         description: str,
         derived_from: List[Dict[str, Any]],
         parameters: List[Dict[str, Any]],
-        abstraction_rules_operator: str,
         abstraction_rules: List[Dict[str, Any]]
     ):
         super().__init__(
@@ -61,7 +61,6 @@ class LocalPattern(Pattern):
             pattern_type="local-pattern"
         )
         self.parameters = parameters
-        self.abstraction_rules_operator = abstraction_rules_operator
 
     @classmethod
     def parse(cls, xml_path: Union[str, Path]) -> "LocalPattern":
@@ -80,14 +79,30 @@ class LocalPattern(Pattern):
         if df_el is None:
             raise ValueError(f"{name}: missing <derived-from> block")
         derived_from = []
+        declared_refs = set()
+        
         for attr_el in df_el.findall("attribute"):
-            if "name" not in attr_el.attrib or "tak" not in attr_el.attrib:
-                raise ValueError(f"{name}: <derived-from><attribute> must have 'name' and 'tak' attributes")
+            if "name" not in attr_el.attrib or "tak" not in attr_el.attrib or "ref" not in attr_el.attrib:
+                raise ValueError(f"{name}: <derived-from><attribute> must have 'name', 'tak', and 'ref' attributes")
+            
+            ref = attr_el.attrib["ref"]
+            if ref in declared_refs:
+                raise ValueError(f"{name}: duplicate ref '{ref}' in derived-from block")
+            declared_refs.add(ref)
+            
+            tak_type = attr_el.attrib["tak"]
+            idx = int(attr_el.attrib.get("idx")) if attr_el.attrib.get("idx") is not None else None
+            if tak_type == 'raw-concept' and idx is None:
+                raise ValueError(f"{name}: 'raw-concept' attributes must declare idx for tuple parse")
+            
             spec = {
+                "ref": ref,
                 "name": attr_el.attrib["name"],
-                "tak": attr_el.attrib["tak"]
+                "tak": tak_type,
+                "idx": idx
             }
             derived_from.append(spec)
+        
         if not derived_from:
             raise ValueError(f"{name}: <derived-from> must contain at least one <attribute>")
 
@@ -96,11 +111,24 @@ class LocalPattern(Pattern):
         params_el = root.find("parameters")
         if params_el is not None:
             for param_el in params_el.findall("parameter"):
+                if "name" not in param_el.attrib or "ref" not in param_el.attrib or "default" not in param_el.attrib:
+                    raise ValueError(f"{name}: <parameter> must have 'name', 'ref', and 'default' attributes")
+                
+                ref = param_el.attrib["ref"]
+                if ref in declared_refs:
+                    raise ValueError(f"{name}: parameter ref '{ref}' conflicts with derived-from ref")
+                declared_refs.add(ref)
+
+                tak_type = param_el.attrib["tak"]
+                idx = int(param_el.attrib.get("idx")) if param_el.attrib.get("idx") is not None else None
+                if tak_type == 'raw-concept' and idx is None:
+                    raise ValueError(f"{name}: 'raw-concept' parameter must declare idx for tuple parse")
+                
                 param_spec = {
+                    "ref": ref,
                     "name": param_el.attrib["name"],
-                    "tak": param_el.attrib["tak"],
-                    "idx": int(param_el.attrib.get("idx", 0)),
-                    "ref": param_el.attrib.get("ref"),
+                    "tak": tak_type,
+                    "idx": idx,
                     "default": param_el.attrib.get("default")
                 }
                 parameters.append(param_spec)
@@ -109,8 +137,8 @@ class LocalPattern(Pattern):
         abs_el = root.find("abstraction-rules")
         if abs_el is None:
             raise ValueError(f"{name}: <pattern> must define <abstraction-rules>")
-        abstraction_rules_operator = abs_el.attrib.get("operator", "and")
         abstraction_rules = []
+        
         for rule_el in abs_el.findall("rule"):
             rule_spec = {}
 
@@ -119,14 +147,16 @@ class LocalPattern(Pattern):
             if context_el is not None:
                 context_spec = {}
                 for attr_el in context_el.findall("attribute"):
-                    attr_name = attr_el.attrib["name"]
-                    allowed = set()
+                    ref = attr_el.attrib.get("ref")
+                    if not ref:
+                        raise ValueError(f"{name}: context attribute must have 'ref' attribute")
+                    allowed_values = set()
                     for av in attr_el.findall("allowed-value"):
                         if "equal" in av.attrib:
-                            allowed.add(av.attrib["equal"])
+                            allowed_values.add(av.attrib["equal"])
                         else:
-                            raise ValueError(f"{name}: only 'equal' constraints supported in context (nominal) attributes")
-                    context_spec[attr_name] = allowed
+                            raise ValueError(f"{name}: only 'equal' constraints supported in context attributes")
+                    context_spec[ref] = allowed_values
                 rule_spec["context"] = context_spec
 
             # --- temporal-relation (required) ---
@@ -152,28 +182,28 @@ class LocalPattern(Pattern):
                 }
                 anchor_attrs = {}
                 for attr_el in anchor_el.findall("attribute"):
-                    attr_name = attr_el.attrib["name"]
-                    idx = int(attr_el.attrib.get("idx", 0))
+                    ref = attr_el.attrib.get("ref")
+                    if not ref:
+                        raise ValueError(f"{name}: anchor attribute must have 'ref' attribute")
                     allowed_values = set()
                     min_val = None
                     max_val = None
                     for av in attr_el.findall("allowed-value"):
                         if "equal" in av.attrib:
-                            allowed_values.add(av.attrib["equal"])
+                            allowed_values.add(str(av.attrib["equal"]))
                         if "min" in av.attrib:
                             min_val = float(av.attrib["min"])
                         if "max" in av.attrib:
                             max_val = float(av.attrib["max"])
-                    anchor_attrs[attr_name] = {
-                        "idx": idx,
+                    anchor_attrs[ref] = {
                         "allowed_values": allowed_values,
                         "min": min_val,
                         "max": max_val
                     }
                 anchor_spec["attributes"] = anchor_attrs
                 # Check if more than 1 attr, select must be mentioned
-                if len(anchor_attrs) > 1 and anchor_spec["select"] == "first":
-                    raise ValueError(f"{name}: anchor with multiple attributes requires select attribute")
+                if len(anchor_attrs) > 1 and not anchor_spec.get("select"):
+                    raise ValueError(f"{name}: anchor with multiple attributes requires explicit select attribute")
                 temporal_relation["anchor"] = anchor_spec
 
             # event
@@ -184,8 +214,9 @@ class LocalPattern(Pattern):
                 }
                 event_attrs = {}
                 for attr_el in event_el.findall("attribute"):
-                    attr_name = attr_el.attrib["name"]
-                    idx = int(attr_el.attrib.get("idx", 0))
+                    ref = attr_el.attrib.get("ref")
+                    if not ref:
+                        raise ValueError(f"{name}: event attribute must have 'ref' attribute")
                     allowed_values = set()
                     min_val = None
                     max_val = None
@@ -196,16 +227,15 @@ class LocalPattern(Pattern):
                             min_val = float(av.attrib["min"])
                         if "max" in av.attrib:
                             max_val = float(av.attrib["max"])
-                    event_attrs[attr_name] = {
-                        "idx": idx,
+                    event_attrs[ref] = {
                         "allowed_values": allowed_values,
                         "min": min_val,
                         "max": max_val
                     }
                 event_spec["attributes"] = event_attrs
                 # Check if more than 1 attr, select must be mentioned
-                if len(event_attrs) > 1 and event_spec["select"] == "first":
-                    raise ValueError(f"{name}: event with multiple attributes requires select attribute")
+                if len(event_attrs) > 1 and not event_spec.get("select"):
+                    raise ValueError(f"{name}: event with multiple attributes requires explicit select attribute")
                 temporal_relation["event"] = event_spec
 
             rule_spec["temporal_relation"] = temporal_relation
@@ -246,8 +276,8 @@ class LocalPattern(Pattern):
                             params = []
                             for p in parameters_el.findall("parameter"):
                                 ref = p.attrib.get("ref")
-                                if ref not in [p["name"] for p in parameters]:
-                                    raise ValueError(f"{name}: parameter ref '{ref}' not found in declared parameters")
+                                if ref not in declared_refs:
+                                    raise ValueError(f"{name}: parameter ref '{ref}' not declared")
                                 params.append({"ref": ref})
                             time_spec["parameters"] = params
                         compliance_function["time_constraint"] = time_spec
@@ -281,8 +311,8 @@ class LocalPattern(Pattern):
                             params = []
                             for p in parameters_el.findall("parameter"):
                                 ref = p.attrib.get("ref")
-                                if ref not in [p["name"] for p in parameters]:
-                                    raise ValueError(f"{name}: parameter ref '{ref}' not found in declared parameters")
+                                if ref not in declared_refs:
+                                    raise ValueError(f"{name}: parameter ref '{ref}' not declared")
                                 params.append({"ref": ref})
                             value_spec["parameters"] = params
                         compliance_function["value_constraint"] = value_spec
@@ -297,108 +327,165 @@ class LocalPattern(Pattern):
             description=desc,
             derived_from=derived_from,
             parameters=parameters,
-            abstraction_rules_operator=abstraction_rules_operator,
             abstraction_rules=abstraction_rules
         )
         pattern.validate()
         return pattern
 
     def validate(self) -> None:
+        """Validate ref-based pattern structure and constraints."""
         repo = get_tak_repository()
         
-        # Early validation: derived_from and parameters must have required fields
-        for df in self.derived_from:
-            if not df["name"] or not df["tak"]:
-                raise ValueError(f"{self.name}: derived_from must have non-empty 'name' and 'tak'")
+        # Build lookup maps: ref → derived_from entry
+        derived_from_by_ref = {item["ref"]: item for item in self.derived_from}
+        parameters_by_ref = {item["ref"]: item for item in self.parameters}
+        all_declared_refs = set(derived_from_by_ref.keys()) | set(parameters_by_ref.keys())
         
-        for param in self.parameters:
-            if not param["name"] or not param["tak"] or not param["ref"] or not param["default"]:
-                raise ValueError(f"{self.name}: parameters must have non-empty 'name', 'tak', 'ref', 'default'")
-            # idx is mandatory only if parameter is a raw-concept
-            tak = repo.get(param["tak"])
-            if tak is None:
-                raise ValueError(f"{self.name}: parameter TAK '{param['tak']}' not found")
-            if isinstance(tak, RawConcept) and tak.concept_type == "raw":
-                if "idx" not in param or param["idx"] is None:
-                    raise ValueError(f"{self.name}: parameter '{param['name']}' references raw-concept '{param['tak']}', so idx is mandatory")
-        
-        # 1) All derived-from TAKs must exist
+        # 1) Validate all derived-from TAKs exist
         for df in self.derived_from:
             tak = repo.get(df["name"])
             if tak is None:
-                raise ValueError(f"{self.name}: derived_from TAK '{df['name']}' not found in repository")
-            if df["tak"] == "raw-concept":
-                # Must mention idx in abstraction rules if referenced
-                if not any(
-                    any(attr["name"] == df["name"] and "idx" in attr for tr in rule["temporal_relation"] for attr in tr.get("anchor", {}).get("attributes", {}).values() or tr.get("event", {}).get("attributes", {}).values())
-                    for rule in self.abstraction_rules
-                ):
-                    raise ValueError(f"{self.name}: raw-concept '{df['name']}' must be referenced with idx in abstraction rules")
+                raise ValueError(f"{self.name}: derived-from TAK '{df['name']}' (ref='{df['ref']}') not found")
+            
+            # If referencing raw-concept and idx specified, validate idx
+            if df["tak"] == "raw-concept" and isinstance(tak, RawConcept):
+                if tak.concept_type == "raw":
+                    if df["idx"] >= len(tak.tuple_order):
+                        raise ValueError(f"{self.name}: ref '{df['ref']}' idx={df['idx']} out of bounds for '{df['name']}' (tuple_size={len(tak.tuple_order)})")
         
-        # 2) Must have abstraction rules
-        if not self.abstraction_rules:
-            raise ValueError(f"{self.name}: LocalPattern must define abstraction rules")
-        
-        # 3) Each rule must have at least one temporal-relation
+        # 2) Validate all used refs are declared
         for rule in self.abstraction_rules:
-            if "temporal_relation" not in rule:
-                raise ValueError(f"{self.name}: abstraction rule missing temporal-relation")
-            tr = rule["temporal_relation"]
-            if "anchor" not in tr and "event" not in tr:
-                raise ValueError(f"{self.name}: temporal-relation missing anchor or event")
-            for attr in tr.get("anchor", {}).keys():
-                tak = repo.get(attr)
-                if tak is None:
-                    raise ValueError(f"{self.name}: anchor attribute TAK '{attr}' not found")
-                if attr not in [d["name"] for d in self.derived_from]:
-                    raise ValueError(f"{self.name}: anchor attribute TAK '{attr}' not found in derived-from")
-            for attr in tr.get("event", {}).get("attributes", {}).keys():
-                tak = repo.get(attr)
-                if tak is None:
-                    raise ValueError(f"{self.name}: event attribute TAK '{attr}' not found")
-                if attr not in [d["name"] for d in self.derived_from]:
-                    raise ValueError(f"{self.name}: event attribute TAK '{attr}' not found in derived-from")
-                # Only raw-concept numeric can use min/max constraints
-                for constraint in tr["event"]["attributes"][attr]["allowed"]:
-                    if constraint["type"] in ("min", "max"):
-                        if not (isinstance(tak, RawConcept) and any(a["type"] == "numeric" for a in tak.attributes)):
-                            raise ValueError(f"{self.name}: min/max constraint only allowed for numeric raw-concept attributes")
-        # Add validation for context, anchor, event attributes
-        derived_from_names = {df["name"] for df in self.derived_from}
-        for rule in self.abstraction_rules:
+            # Check context refs
             if "context" in rule:
-                for attr_name in rule["context"]:
-                    if attr_name not in derived_from_names:
-                        raise ValueError(f"{self.name}: context attribute '{attr_name}' not in derived_from")
+                for ref in rule["context"]:
+                    if ref not in all_declared_refs:
+                        raise ValueError(f"{self.name}: context ref '{ref}' not declared in derived-from or parameters")
+            
             tr = rule["temporal_relation"]
-            for attr_name in tr.get("anchor", {}).get("attributes", {}):
-                if attr_name not in derived_from_names:
-                    raise ValueError(f"{self.name}: anchor attribute '{attr_name}' not in derived_from")
-                # Check allowed values
-                tak = repo.get(attr_name)
-                attr_spec = tr["anchor"]["attributes"][attr_name]
-                if isinstance(tak, (Context, Event)) or (isinstance(tak, RawConcept) and tak.concept_type in ("raw-nominal", "raw-boolean")):
-                    if not attr_spec["allowed_values"].issubset(set(tak.attributes[0]["allowed"]) if tak.attributes else set()):
-                        raise ValueError(f"{self.name}: anchor allowed values for '{attr_name}' not in TAK's allowed values")
-                elif isinstance(tak, RawConcept) and any(a["type"] == "numeric" for a in tak.attributes):
-                    if attr_spec["min"] is not None and (tak.attributes[0]["min"] is not None and attr_spec["min"] < tak.attributes[0]["min"]):
-                        raise ValueError(f"{self.name}: anchor min for '{attr_name}' below TAK's min")
-                    if attr_spec["max"] is not None and (tak.attributes[0]["max"] is not None and attr_spec["max"] > tak.attributes[0]["max"]):
-                        raise ValueError(f"{self.name}: anchor max for '{attr_name}' above TAK's max")
-            for attr_name in tr.get("event", {}).get("attributes", {}):
-                if attr_name not in derived_from_names:
-                    raise ValueError(f"{self.name}: event attribute '{attr_name}' not in derived_from")
-                # Similar checks for event
-                tak = repo.get(attr_name)
-                attr_spec = tr["event"]["attributes"][attr_name]
-                if isinstance(tak, (Context, Event)) or (isinstance(tak, RawConcept) and tak.concept_type in ("raw-nominal", "raw-boolean")):
-                    if not attr_spec["allowed_values"].issubset(set(tak.attributes[0]["allowed"]) if tak.attributes else set()):
-                        raise ValueError(f"{self.name}: event allowed values for '{attr_name}' not in TAK's allowed values")
-                elif isinstance(tak, RawConcept) and any(a["type"] == "numeric" for a in tak.attributes):
-                    if attr_spec["min"] is not None and (tak.attributes[0]["min"] is not None and attr_spec["min"] < tak.attributes[0]["min"]):
-                        raise ValueError(f"{self.name}: event min for '{attr_name}' below TAK's min")
-                    if attr_spec["max"] is not None and (tak.attributes[0]["max"] is not None and attr_spec["max"] > tak.attributes[0]["max"]):
-                        raise ValueError(f"{self.name}: event max for '{attr_name}' above TAK's max")
+            # Check anchor refs
+            for ref in tr.get("anchor", {}).get("attributes", {}):
+                if ref not in all_declared_refs:
+                    raise ValueError(f"{self.name}: anchor ref '{ref}' not declared")
+            # Check event refs
+            for ref in tr.get("event", {}).get("attributes", {}):
+                if ref not in all_declared_refs:
+                    raise ValueError(f"{self.name}: event ref '{ref}' not declared")
+            # Check compliance function parameter refs
+            cf = rule.get("compliance_function", {})
+            for cc_type in ("time_constraint", "value_constraint"):
+                cc_spec = cf.get(cc_type, {})
+                for param in cc_spec.get("parameters", []):
+                    if param["ref"] not in all_declared_refs:
+                        raise ValueError(f"{self.name}: compliance function parameter ref '{param['ref']}' not declared")
+        
+        # 3) Validate numeric range constraints match TAK's attribute types
+        def _get_parent_attribute(tak, idx):
+            """Extract the parent attribute spec from a TAK at the given idx."""
+            if isinstance(tak, RawConcept):
+                if tak.concept_type == "raw":
+                    attr_name = tak.tuple_order[idx]
+                    return next((a for a in tak.attributes if a["name"] == attr_name), None)
+                else:
+                    # raw-numeric, raw-nominal, raw-boolean: single attribute at idx=0
+                    return tak.attributes[0] if tak.attributes else None
+            return None
+        
+        for rule in self.abstraction_rules:
+            tr = rule["temporal_relation"]
+            
+            # Validate anchor attributes
+            for ref, attr_spec in tr.get("anchor", {}).get("attributes", {}).items():
+                if ref not in derived_from_by_ref:
+                    continue
+                df = derived_from_by_ref[ref]
+                tak = repo.get(df["name"])
+                if not isinstance(tak, RawConcept):
+                    continue
+                
+                parent_attr = _get_parent_attribute(tak, df["idx"])
+                if parent_attr is None:
+                    continue
+                
+                # Reject min/max on non-numeric; reject equal on numeric
+                if parent_attr["type"] != "numeric":
+                    if attr_spec.get("min") is not None or attr_spec.get("max") is not None:
+                        raise ValueError(
+                            f"{self.name}: anchor ref '{ref}' has min/max constraints but attribute '{parent_attr['name']}' "
+                            f"is {parent_attr['type']} (not numeric). Use only 'equal' constraints for non-numeric attributes."
+                        )
+                else:
+                    # numeric: reject equal, allow min/max
+                    if attr_spec.get("allowed_values"):
+                        raise ValueError(
+                            f"{self.name}: anchor ref '{ref}' has 'equal' constraint but attribute '{parent_attr['name']}' "
+                            f"is numeric. Use only 'min'/'max' constraints for numeric attributes."
+                        )
+                    # Check range overlap with TAK's range
+                    tak_min = parent_attr.get("min")
+                    tak_max = parent_attr.get("max")
+                    rule_min = attr_spec.get("min")
+                    rule_max = attr_spec.get("max")
+                    
+                    if rule_min is not None and tak_max is not None and rule_min > tak_max:
+                        raise ValueError(f"{self.name}: anchor ref '{ref}' min={rule_min} exceeds TAK max={tak_max}")
+                    if rule_max is not None and tak_min is not None and rule_max < tak_min:
+                        raise ValueError(f"{self.name}: anchor ref '{ref}' max={rule_max} below TAK min={tak_min}")
+            
+            # Validate event attributes (same logic)
+            for ref, attr_spec in tr.get("event", {}).get("attributes", {}).items():
+                if ref not in derived_from_by_ref:
+                    continue
+                df = derived_from_by_ref[ref]
+                tak = repo.get(df["name"])
+                if not isinstance(tak, RawConcept):
+                    continue
+                
+                parent_attr = _get_parent_attribute(tak, df["idx"])
+                if parent_attr is None:
+                    continue
+                
+                if parent_attr["type"] != "numeric":
+                    if attr_spec.get("min") is not None or attr_spec.get("max") is not None:
+                        raise ValueError(
+                            f"{self.name}: event ref '{ref}' has min/max constraints but attribute '{parent_attr['name']}' "
+                            f"is {parent_attr['type']} (not numeric). Use only 'equal' constraints for non-numeric attributes."
+                        )
+                else:
+                    if attr_spec.get("allowed_values"):
+                        raise ValueError(
+                            f"{self.name}: event ref '{ref}' has 'equal' constraint but attribute '{parent_attr['name']}' "
+                            f"is numeric. Use only 'min'/'max' constraints for numeric attributes."
+                        )
+                    tak_min = parent_attr.get("min")
+                    tak_max = parent_attr.get("max")
+                    rule_min = attr_spec.get("min")
+                    rule_max = attr_spec.get("max")
+                    
+                    if rule_min is not None and tak_max is not None and rule_min > tak_max:
+                        raise ValueError(f"{self.name}: event ref '{ref}' min={rule_min} exceeds TAK max={tak_max}")
+                    if rule_max is not None and tak_min is not None and rule_max < tak_min:
+                        raise ValueError(f"{self.name}: event ref '{ref}' max={rule_max} below TAK min={tak_min}")
+
+            # Validate context attributes (nominal only, so reject min/max)
+            context_attrs = rule.get("context", {}).get("attributes", {})
+            for ref, attr_spec in context_attrs.items():
+                if ref not in derived_from_by_ref:
+                    continue
+                df = derived_from_by_ref[ref]
+                tak = repo.get(df["name"])
+                if not isinstance(tak, RawConcept):
+                    continue
+                
+                parent_attr = _get_parent_attribute(tak, df["idx"])
+                if parent_attr is None:
+                    continue
+                
+                # Context only supports nominal (no min/max)
+                if attr_spec.get("min") is not None or attr_spec.get("max") is not None:
+                    raise ValueError(
+                        f"{self.name}: context ref '{ref}' has min/max constraints. Context attributes are nominal only; "
+                        f"use only 'equal' constraints."
+                    )
 
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -408,90 +495,4 @@ class LocalPattern(Pattern):
         """
         if df.empty:
             return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-
-        logger.info("[%s] apply() start | input_rows=%d", self.name, len(df))
-
-        # Group by patient
-        patients = df['PatientId'].unique()
-        results = []
-        for pid in patients:
-            patient_df = df[df['PatientId'] == pid]
-            patient_patterns = self._find_patterns(patient_df)
-            for pattern in patient_patterns:
-                compliance = self._rate_compliance(pattern)
-                if compliance != 'False':  # Only True/Partial to OutputPatientData
-                    results.append({
-                        'PatientId': pid,
-                        'ConceptName': self.name,
-                        'StartDateTime': pattern['start'],
-                        'EndDateTime': pattern['end'],
-                        'Value': compliance,
-                        'AbstractionType': self.family
-                    })
-                # For QA: insert False as well, but separate table
-
-        out_df = pd.DataFrame(results)
-        logger.info("[%s] apply() end | output_rows=%d", self.name, len(out_df))
-        return out_df
-
-    def _find_patterns(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
-        """
-        Find pattern instances using rules and chaining for operator="and".
-        """
-        patterns = []
-        used_anchors = set()
-        used_events = set()
-
-        for rule in self.abstraction_rules:
-            tr = rule['temporal_relation']
-            anchor_df = self._filter_df(df, tr.get('anchor', {}))
-            event_df = self._filter_df(df, tr.get('event', {}))
-
-            rule_matches = []
-            for match in TemporalRelationRule(tr.get('anchor', {}), tr.get('event', {}), tr['how'], tr.get('max_distance')).matches(anchor_df, event_df):
-                if match['anchor_row'].name not in used_anchors and match['event_row'].name not in used_events:
-                    rule_matches.append(match)
-                    used_anchors.add(match['anchor_row'].name)
-                    used_events.add(match['event_row'].name)
-
-            if self.abstraction_rules_operator == 'and':
-                # Chain with previous rules
-                if patterns:
-                    chained = []
-                    for prev_pattern in patterns:
-                        for match in rule_matches:
-                            if self._can_chain(prev_pattern, match, rule):
-                                chained.append(self._merge_patterns(prev_pattern, match))
-                    patterns = chained
-                else:
-                    patterns = rule_matches
-            else:
-                patterns.extend(rule_matches)
-
-        return patterns
-
-    def _can_chain(self, prev_pattern: Dict[str, Any], match: Dict[str, Any], rule: Dict[str, Any]) -> bool:
-        # Check distance between prev event and current anchor/event
-        prev_end = prev_pattern['end']
-        curr_start = match['start']
-        max_dist = parse_duration(rule['temporal_relation'].get('max_distance', '0h'))
-        return (curr_start - prev_end) <= max_dist
-
-    def _merge_patterns(self, prev: Dict[str, Any], curr: Dict[str, Any]) -> Dict[str, Any]:
-        # Merge start/end
-        return {
-            'start': min(prev['start'], curr['start']),
-            'end': max(prev['end'], curr['end']),
-            'anchor_row': curr['anchor_row'],  # Update to latest
-            'event_row': curr['event_row']
-        }
-
-    def _rate_compliance(self, pattern: Dict[str, Any]) -> str:
-        # Use QATPRule
-        compliance_spec = {}  # From rule's compliance_function
-        return QATPRule(compliance_spec).matches(pattern)
-
-    def _filter_df(self, df: pd.DataFrame, spec: Dict[str, Any]) -> pd.DataFrame:
-        # Filter df based on spec (allowed_values, min/max)
-        # Implement filtering logic
-        pass
+        return df

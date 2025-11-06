@@ -3,22 +3,22 @@
     <categories>Admission</categories>
     <description>Captures if BMI (Body Mass Index) was performed within reasonable time of admission. The data process place a BMI instance if was measured 6 month prior to admission.</description>
     <derived-from>
-        <attribute name="BMI_MEASURE" tak="raw-concept"/>
-        <attribute name="ADMISSION_EVENT" tak="event"/>
+        <attribute name="BMI_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
     </derived-from>
  
     <!-- Patterns can have unique or shared values -->
-    <abstraction-rules operator="or">
+    <abstraction-rules>
         <rule>
             <!-- Relation between 2 KBTA objects -->
             <temporal-relation how='before' max-distance='48h'>
                 <anchor>
-                    <attribute name="ADMISSION_EVENT">
+                    <attribute ref="A1">
                         <allowed-value equal="True"/>
                     </attribute>
                 </anchor>
                 <event select='first'>
-                    <attribute name="BMI_MEASURE" idx="0">
+                    <attribute ref="E1">
                         <allowed-value min="0"/>
                     </attribute>
                 </event>

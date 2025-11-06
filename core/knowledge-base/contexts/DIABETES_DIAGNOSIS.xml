@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <context name="DIABETES_DIAGNOSIS_CONTEXT">
-    <categories>Medicine</categories>
+    <categories>Diagnosis</categories>
     <description>DIABETES context</description>
     <derived-from>
         <attribute name="DIABETES_DIAGNOSIS" tak="raw-concept" idx="0"/>

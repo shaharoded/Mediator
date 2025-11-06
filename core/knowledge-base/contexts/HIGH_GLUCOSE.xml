@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="HIGH_GLUCOSE_CONTEXT">
+    <categories>Diagnosis</categories>
+    <description>HIGH GLUCOSE context to mark time windows where insulin treatment is needed</description>
+    <derived-from>
+        <attribute name="GLUCOSE_MEASUREMENT" tak="raw-concept" idx="0"/>
+    </derived-from>
+
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute name="GLUCOSE_MEASUREMENT" idx="0">
+                <allowed-value min="180"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+    
+    <context-windows>
+        <!-- A high glucose diagnosis -->
+        <persistence value="True" good-before="0h" good-after="24h"/>
+    </context-windows>
+
+    <!-- An instance of these will clip the context windows -->
+    <clippers>
+        <clipper name="DEATH" tak="raw-concept" clip-before="0s" clip-after="120y"/>
+        <clipper name="RELEASE" tak="raw-concept" clip-before="0s" clip-after="120y"/>
+    </clippers>
+
+</context>

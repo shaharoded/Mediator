@@ -3,17 +3,17 @@
     <categories>Admission</categories>
     <description>Captures if DEX was preformed within resonable time of admission</description>
     <derived-from>
-        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context"/>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept"/>
-        <attribute name="ADMISSION_EVENT" tak="event"/>
+        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
     </derived-from>
  
-    <!-- max-distance is the maximum distance between rule 1 end and rule 2 start, for operator='and' only -->
-    <abstraction-rules operator="or">
+    <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
+    <abstraction-rules>
         <rule>
             <!-- OPTIONAL: Contextual Information relevant if begins at / before the last event of the pattern starts-->
             <context>
-                <attribute name="DIABETES_DIAGNOSIS_CONTEXT">
+                <attribute ref="C1">
                     <allowed-value equal="True"/>
                 </attribute>
             </context>
@@ -21,12 +21,12 @@
             <!-- Relation between 2 KBTA objects -->
             <temporal-relation how='before' max-distance='8h'>
                 <anchor>
-                    <attribute name="ADMISSION_EVENT">
+                    <attribute ref="A1">
                         <allowed-value equal="True"/>
                     </attribute>
                 </anchor>
                 <event select='first'>
-                    <attribute name="GLUCOSE_MEASURE" idx="0">
+                    <attribute ref="E1">
                         <allowed-value min="0"/>
                     </attribute>
                 </event>
@@ -45,12 +45,12 @@
             <!-- Relation between 2 KBTA objects -->
             <temporal-relation how='before' max-distance='24h'>
                 <anchor>
-                    <attribute name="ADMISSION_EVENT">
+                    <attribute ref="A1">
                         <allowed-value equal="True"/>
                     </attribute>
                 </anchor>
                 <event select='first'>
-                    <attribute name="GLUCOSE_MEASURE" idx="0">
+                    <attribute ref="E1">
                         <allowed-value min="0"/>
                     </attribute>
                 </event>
