@@ -243,44 +243,47 @@ class LocalPattern(Pattern):
             # --- compliance-function (optional) ---
             cf_el = rule_el.find("compliance-function")
             if cf_el is not None:
-                compliance_function = {}
+                compliance_function = []
 
                 # time-constraint-compliance
                 tcc_el = cf_el.find("time-constraint-compliance")
                 if tcc_el is not None:
+                    if how != 'before':
+                        raise ValueError(f"{name}: time-constraint-compliance only valid for 'before' temporal relation")
                     func_el = tcc_el.find("function")
                     if func_el is not None:
                         func_name = func_el.attrib["name"]
                         # Check function is in REPO
                         if func_name not in REPO:
-                            raise ValueError(f"{name}: compliance function '{func_name}' not found in external functions. Ensure it's declared in REPO parameter.")
-                        trapez = (func_el.find("trapeze").attrib["trapezeA"], func_el.find("trapeze").attrib["trapezeB"], func_el.find("trapeze").attrib["trapezeC"], func_el.find("trapeze").attrib["trapezeD"])
-                        if len(trapez) != 4:
-                            raise ValueError(f"{name}: trapez must have 4 values")
-                        # Check trapez values are all time or all numeric
-                        time_like = []
-                        for val in trapez:
-                            try:
-                                parse_duration(val)
-                                time_like.append(True)
-                            except:
-                                time_like.append(False)
-                        if not all(time_like) and not all(not t for t in time_like):
-                            raise ValueError(f"{name}: trapez values must be all time representations or all numeric")
-                        time_spec = {
-                            "function_name": func_name,
-                            "trapez": trapez
-                        }
+                            raise ValueError(f"{name}: compliance function '{func_name}' not found in external functions")
+                        
+                        # Parse raw trapez
+                        trapez_el = func_el.find("trapeze")
+                        trapez_raw = (
+                            trapez_el.attrib["trapezeA"],
+                            trapez_el.attrib["trapezeB"],
+                            trapez_el.attrib["trapezeC"],
+                            trapez_el.attrib["trapezeD"]
+                        )
+                        
+                        # Extract parameters (if any)
+                        param_refs = []
                         parameters_el = func_el.find("parameters")
                         if parameters_el is not None:
-                            params = []
                             for p in parameters_el.findall("parameter"):
                                 ref = p.attrib.get("ref")
                                 if ref not in declared_refs:
                                     raise ValueError(f"{name}: parameter ref '{ref}' not declared")
-                                params.append({"ref": ref})
-                            time_spec["parameters"] = params
-                        compliance_function["time_constraint"] = time_spec
+                                param_refs.append(ref)
+                        
+                        compliance_function.append({
+                                "func_name": func_name,
+                                "trapez": trapez_raw,
+                                "constraint_type": "time-constraint",
+                                "parameters": param_refs
+                            })
+                    else:
+                        raise ValueError(f"{name}: time-constraint-compliance missing <function> element. Use 'id' as default.")
 
                 # value-constraint-compliance
                 vcc_el = cf_el.find("value-constraint-compliance")
@@ -290,32 +293,47 @@ class LocalPattern(Pattern):
                         func_name = func_el.attrib["name"]
                         if func_name not in REPO:
                             raise ValueError(f"{name}: compliance function '{func_name}' not found in external functions")
-                        trapez = (func_el.find("trapeze").attrib["trapezeA"], func_el.find("trapeze").attrib["trapezeB"], func_el.find("trapeze").attrib["trapezeC"], func_el.find("trapeze").attrib["trapezeD"])
-                        if len(trapez) != 4:
-                            raise ValueError(f"{name}: trapez must have 4 values")
-                        time_like = []
-                        for val in trapez:
-                            try:
-                                parse_duration(val)
-                                time_like.append(True)
-                            except:
-                                time_like.append(False)
-                        if not all(time_like) and not all(not t for t in time_like):
-                            raise ValueError(f"{name}: trapez values must be all time representations or all numeric")
-                        value_spec = {
-                            "function_name": func_name,
-                            "trapez": trapez
-                        }
+                        
+                        # Parse raw trapez (numeric, not time)
+                        trapez_el = func_el.find("trapeze")
+                        trapez_raw = (
+                            float(trapez_el.attrib["trapezeA"]),
+                            float(trapez_el.attrib["trapezeB"]),
+                            float(trapez_el.attrib["trapezeC"]),
+                            float(trapez_el.attrib["trapezeD"])
+                        )
+                        
+                        # Extract target refs
+                        target_refs = []
+                        target_el = vcc_el.find("target")
+                        if target_el is not None:
+                            for attr_el in target_el.findall("attribute"):
+                                ref = attr_el.attrib.get("ref")
+                                if ref not in declared_refs:
+                                    raise ValueError(f"{name}: target ref '{ref}' not declared")
+                                target_refs.append(ref)
+                        else:
+                            raise ValueError(f"{name}: value-constraint-compliance missing <target> block with <attribute ref=.../> elements.")
+                        
+                        # Extract parameter refs
+                        param_refs = []
                         parameters_el = func_el.find("parameters")
                         if parameters_el is not None:
-                            params = []
                             for p in parameters_el.findall("parameter"):
                                 ref = p.attrib.get("ref")
                                 if ref not in declared_refs:
                                     raise ValueError(f"{name}: parameter ref '{ref}' not declared")
-                                params.append({"ref": ref})
-                            value_spec["parameters"] = params
-                        compliance_function["value_constraint"] = value_spec
+                                param_refs.append(ref)
+                        
+                        compliance_function.append({
+                            "func_name": func_name,
+                            "trapez": trapez_raw,
+                            "targets": target_refs,
+                            "constraint_type": "value-constraint",
+                            "parameters": param_refs
+                        })
+                    else:
+                        raise ValueError(f"{name}: value-constraint-compliance missing <function> element. Use 'id' as default.")
 
                 rule_spec["compliance_function"] = compliance_function
 
