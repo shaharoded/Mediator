@@ -5,6 +5,7 @@ TO-DO:
  - A pattern's max distance must be the trapez maximal node, so that patterns are discovered once
  - Can merge discretization rules and abstraction for states, and use similar structure for patterns.
  - For contexts, abstraction rules and persistence rules can probably be the same block, if we add good before / after to EventRule class and disable it for events.
+ - Add test_repository.py unittests for repository dependency graph extraction (emphasize complex cases like RC -> Event -> State and LocalPattern -> LocalPattern -> GlobalPattern).
  """
 
 from __future__ import annotations
