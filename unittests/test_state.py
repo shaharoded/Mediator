@@ -17,7 +17,7 @@ from pathlib import Path
 # Imports from your codebase
 from core.tak.state import State
 from core.tak.raw_concept import RawConcept
-from core.tak.tak import set_tak_repository, TAKRepository
+from core.tak.repository import set_tak_repository, TAKRepository
 from core.tak.utils import parse_duration
 from core.tak.event import Event  # NEW IMPORT
 
@@ -590,15 +590,23 @@ def test_merge_different_routes_same_dosage_no_merge(repo_with_basal):
 
 
 def test_merge_same_route_different_dosages_no_merge(repo_with_basal):
-    """Same route but different dosage levels don't merge."""
+    """Same route but different dosage levels don't merge (value change trims interval)."""
     state_tak = repo_with_basal.get("BASAL_BITZUA_STATE")
-    df_in = df_basal_same_route_different_dosages()
+    df_in = df_basal_same_route_different_dosages()  # T=0h Low, T=4h High
     df_out = state_tak.apply(df_in)
-    # With corrected interpolation logic: no skip allowed (no third point to validate)
-    # Expected: 2 separate intervals
     assert len(df_out) == 2
     values = set(df_out["Value"])
     assert values == {"SubCutaneous Low", "SubCutaneous High"}
+    
+    # First interval trimmed at value change point
+    assert df_out.iloc[0]["Value"] == "SubCutaneous Low"
+    assert df_out.iloc[0]["StartDateTime"] == make_ts("00:00")
+    assert df_out.iloc[0]["EndDateTime"] == make_ts("04:00")  # TRIMMED at next sample
+    
+    # Second interval extends by good_after
+    assert df_out.iloc[1]["Value"] == "SubCutaneous High"
+    assert df_out.iloc[1]["StartDateTime"] == make_ts("04:00")
+    assert df_out.iloc[1]["EndDateTime"] == make_ts("04:00", day=1)  # 4h + 24h
 
 
 def test_merge_interpolate_skip_outlier(repo_with_basal):

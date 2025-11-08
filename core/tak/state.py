@@ -9,7 +9,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .utils import parse_duration
-from .tak import TAK, get_tak_repository, StateDiscretizationRule, StateAbstractionRule, validate_xml_against_schema
+from .tak import TAK, StateDiscretizationRule, StateAbstractionRule, validate_xml_against_schema
+from .repository import get_tak_repository
 from .raw_concept import RawConcept
 from .event import Event
 
@@ -48,7 +49,7 @@ class State(TAK):
         """Parse <state> XML with structural validation."""
         xml_path = Path(xml_path)
         
-        # NEW: Validate against XSD schema (graceful if lxml not available)
+        # Validate against XSD schema (graceful if lxml not available)
         validate_xml_against_schema(xml_path)
         
         root = ET.parse(xml_path).getroot()

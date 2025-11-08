@@ -9,7 +9,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .utils import parse_duration
-from .tak import TAK, get_tak_repository, validate_xml_against_schema
+from .tak import TAK, validate_xml_against_schema
+from .repository import get_tak_repository
 from .raw_concept import RawConcept
 
 

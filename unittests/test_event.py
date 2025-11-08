@@ -14,8 +14,7 @@ from pathlib import Path
 
 from core.tak.event import Event
 from core.tak.raw_concept import RawConcept
-from core.tak.state import State
-from core.tak.tak import set_tak_repository, TAKRepository
+from core.tak.repository import set_tak_repository, TAKRepository
 
 
 def write_xml(tmp_path: Path, name: str, xml: str) -> Path:

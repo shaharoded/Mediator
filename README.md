@@ -50,7 +50,8 @@ Mediator/
 │   │   ├── tak_schema.xsd                  # XSD validation schema
 │   │   └── TAK_README.md                   # TAK documentation
 │   ├── tak/                                # TAK implementation
-│   │   ├── tak.py                          # Base classes + repository
+│   │   ├── tak.py                          # Base classes + tak rules
+│   │   ├── repository.py                   # TAK repository object + functions
 │   │   ├── raw_concept.py                  # RawConcept TAK
 │   │   ├── event.py                        # Event TAK
 │   │   ├── state.py                        # State TAK

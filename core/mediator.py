@@ -20,7 +20,8 @@ import pandas as pd
 from tqdm.asyncio import tqdm as async_tqdm
 from tqdm import tqdm
 
-from .tak.tak import TAKRepository, set_tak_repository, TAK
+from .tak.tak import TAK
+from tak.repository import TAKRepository, set_tak_repository
 from .tak.raw_concept import RawConcept
 from .tak.event import Event
 from .tak.state import State

@@ -6,7 +6,8 @@ import pandas as pd
 import logging
 logger = logging.getLogger(__name__)
 
-from .tak import TAK, get_tak_repository, EventAbstractionRule, validate_xml_against_schema
+from .tak import TAK, EventAbstractionRule, validate_xml_against_schema
+from .repository import get_tak_repository
 from .raw_concept import RawConcept
 
 

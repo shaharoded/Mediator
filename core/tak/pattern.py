@@ -7,11 +7,9 @@ import xml.etree.ElementTree as ET
 import logging
 logger = logging.getLogger(__name__)
 
-from .tak import TAK, get_tak_repository, validate_xml_against_schema, TemporalRelationRule, QATPRule
+from .tak import TAK, validate_xml_against_schema, TemporalRelationRule
+from .repository import get_tak_repository
 from .raw_concept import RawConcept
-from .event import Event
-from .context import Context
-from .utils import apply_external_function, parse_duration
 from .external_functions import REPO
 
 class Pattern(TAK):
