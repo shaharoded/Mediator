@@ -6,6 +6,12 @@
         <attribute name="GLUCOSE_MEASUREMENT" tak="raw-concept" idx="0"/>
     </derived-from>
 
+    <!-- An instance of these will clip the context windows -->
+    <clippers>
+        <clipper name="DEATH" tak="raw-concept" clip-before="0s" clip-after="120y"/>
+        <clipper name="RELEASE" tak="raw-concept" clip-before="0s" clip-after="120y"/>
+    </clippers>
+
     <abstraction-rules>
         <rule value="True" operator="or">
             <attribute name="GLUCOSE_MEASUREMENT" idx="0">
@@ -18,11 +24,5 @@
         <!-- A high glucose diagnosis -->
         <persistence value="True" good-before="0h" good-after="24h"/>
     </context-windows>
-
-    <!-- An instance of these will clip the context windows -->
-    <clippers>
-        <clipper name="DEATH" tak="raw-concept" clip-before="0s" clip-after="120y"/>
-        <clipper name="RELEASE" tak="raw-concept" clip-before="0s" clip-after="120y"/>
-    </clippers>
 
 </context>

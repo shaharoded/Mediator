@@ -6,16 +6,16 @@
         <attribute name="ANTIDIABETIC_DRUGS_IV_BITZUA" tak="raw-concept" idx="0"/>
     </derived-from>
 
-    <context-windows>
-        <persistence value="Low" good-before="0h" good-after="6h"/>
-        <persistence value="Medium" good-before="0h" good-after="8h"/>
-        <persistence value="High" good-before="0h" good-after="12h"/>
-    </context-windows>
-
     <!-- An instance of these will clip the context windows -->
     <clippers>
         <clipper name="DEATH" tak="raw-concept" clip-before="0s" clip-after="120y"/>
         <clipper name="RELEASE" tak="raw-concept" clip-before="0s" clip-after="120y"/>
     </clippers>
+
+    <context-windows>
+        <persistence value="Low" good-before="0h" good-after="6h"/>
+        <persistence value="Medium" good-before="0h" good-after="8h"/>
+        <persistence value="High" good-before="0h" good-after="12h"/>
+    </context-windows>
 
 </context>

@@ -278,6 +278,20 @@
                         </xs:sequence>
                     </xs:complexType>
                 </xs:element>
+                <xs:element name="clippers" minOccurs="0">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="clipper" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:attribute name="name" type="xs:string" use="required"/>
+                                    <xs:attribute name="tak" type="xs:string" fixed="raw-concept"/>
+                                    <xs:attribute name="clip-before" type="durationString" use="optional"/>
+                                    <xs:attribute name="clip-after" type="durationString" use="optional"/>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
                 <xs:element name="abstraction-rules" minOccurs="0">
                     <xs:complexType>
                         <xs:sequence>
@@ -315,20 +329,6 @@
                                     <xs:attribute name="value" type="xs:string" use="optional"/>
                                     <xs:attribute name="good-before" type="durationString" default="0h"/>
                                     <xs:attribute name="good-after" type="durationString" default="0h"/>
-                                </xs:complexType>
-                            </xs:element>
-                        </xs:sequence>
-                    </xs:complexType>
-                </xs:element>
-                <xs:element name="clippers" minOccurs="0">
-                    <xs:complexType>
-                        <xs:sequence>
-                            <xs:element name="clipper" maxOccurs="unbounded">
-                                <xs:complexType>
-                                    <xs:attribute name="name" type="xs:string" use="required"/>
-                                    <xs:attribute name="tak" type="xs:string" fixed="raw-concept"/>
-                                    <xs:attribute name="clip-before" type="durationString" use="optional"/>
-                                    <xs:attribute name="clip-after" type="durationString" use="optional"/>
                                 </xs:complexType>
                             </xs:element>
                         </xs:sequence>

@@ -5,16 +5,16 @@
     <derived-from>
         <attribute name="DIABETES_DIAGNOSIS" tak="raw-concept" idx="0"/>
     </derived-from>
-    
-    <context-windows>
-        <!-- A DD diagnosis is relevant from the beginning of the hospitalization -->
-        <persistence good-before="14d" good-after="120y"/>
-    </context-windows>
 
     <!-- An instance of these will clip the context windows -->
     <clippers>
         <clipper name="DEATH" tak="raw-concept" clip-before="0s" clip-after="120y"/>
         <clipper name="RELEASE" tak="raw-concept" clip-before="0s" clip-after="120y"/>
     </clippers>
+    
+    <context-windows>
+        <!-- A DD diagnosis is relevant from the beginning of the hospitalization -->
+        <persistence good-before="14d" good-after="120y"/>
+    </context-windows>
 
 </context>

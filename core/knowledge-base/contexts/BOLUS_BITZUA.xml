@@ -6,6 +6,12 @@
         <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0"/>
     </derived-from>
 
+    <!-- An instance of these will clip the context windows -->
+    <clippers>
+        <clipper name="DEATH" tak="raw-concept" clip-before="0s" clip-after="120y"/>
+        <clipper name="RELEASE" tak="raw-concept" clip-before="0s" clip-after="120y"/>
+    </clippers>
+
     <abstraction-rules>
         <rule value="Very Low" operator="or">
             <attribute name="BOLUS_BITZUA" idx="0">
@@ -42,10 +48,4 @@
         <persistence value="High" good-before="0h" good-after="8h"/>
         <persistence value="Very High" good-before="0h" good-after="8h"/>
     </context-windows>
-
-    <!-- An instance of these will clip the context windows -->
-    <clippers>
-        <clipper name="DEATH" tak="raw-concept" clip-before="0s" clip-after="120y"/>
-        <clipper name="RELEASE" tak="raw-concept" clip-before="0s" clip-after="120y"/>
-    </clippers>
 </context>
