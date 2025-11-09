@@ -263,6 +263,12 @@ class LocalPattern(Pattern):
                             trapez_el.attrib["trapezeC"],
                             trapez_el.attrib["trapezeD"]
                         )
+
+                        if max_distance <= trapez_raw[3]:
+                            raise ValueError(
+                                f"{name}: temporal-relation max-distance '{max_distance}' must be at least as big as time-constraint-compliance trapezeD '{trapez_raw[3]}'",
+                                "Otherwise, pattern max distance may not capture all valid instances."
+                                )
                         
                         # Extract parameters (if any)
                         param_refs = []
