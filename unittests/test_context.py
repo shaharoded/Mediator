@@ -107,17 +107,18 @@ CONTEXT_WITH_CLIPPER_XML = """\
 <context name="CLIPPED_CONTEXT">
     <categories>Contexts</categories>
     <description>Context with clipping</description>
+
     <derived-from>
         <attribute name="MEAL" tak="raw-concept" idx="0"/>
     </derived-from>
+
+    <clippers>
+        <clipper name="ADMISSION" clip-before="30m" clip-after="1h"/>
+    </clippers>
     
     <context-windows>
         <persistence good-before="1h" good-after="2h"/>
     </context-windows>
-    
-    <clippers>
-        <clipper name="ADMISSION" clip-before="30m" clip-after="1h"/>
-    </clippers>
 </context>
 """
 
@@ -146,6 +147,10 @@ CONTEXT_VALUE_SPECIFIC_WINDOW_XML = """\
     <derived-from>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
     </derived-from>
+
+    <clippers>
+        <clipper name="ADMISSION" clip-before="0h" clip-after="1h"/>
+    </clippers>
     
     <abstraction-rules>
         <rule value="Low" operator="or">
@@ -164,10 +169,6 @@ CONTEXT_VALUE_SPECIFIC_WINDOW_XML = """\
         <persistence value="Low" good-before="30m" good-after="2h"/>
         <persistence value="High" good-before="1h" good-after="4h"/>
     </context-windows>
-    
-    <clippers>
-        <clipper name="ADMISSION" clip-before="0h" clip-after="1h"/>
-    </clippers>
 </context>
 """
 
