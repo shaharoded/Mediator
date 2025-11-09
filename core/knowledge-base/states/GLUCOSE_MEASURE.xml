@@ -7,17 +7,36 @@
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
     <persistence good-after="24h" interpolate="true" max-skip="1"/>
 
-    <!-- Discretization rules by values in order of appearance in the tuple (idx) -->
-    <!-- Range treated as min_value <= X < max_value -->
-    <discretization-rules>
-        <attribute idx="0">
-            <rule value="Severe Hypoglycemia" min="0" max="54"/>
-            <rule value="Hypoglycemia" min="54" max="70"/>
-            <rule value="Low Glucose" min="70" max="140"/>
-            <rule value="Normal Glucose" min="140" max="180"/>
-            <rule value="High Glucose" min="180" max="250"/>
-            <rule value="Hyperglycemia" min="250"/>
-        </attribute>
-        <!-- idx="1" (route) is nominal; no discretization needed -->
-    </discretization-rules>
+    <abstraction-rules>
+        <rule value="Severe Hypoglycemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="54"/>
+            </attribute>
+        </rule>
+        <rule value="Hypoglycemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="54" max="70"/>
+            </attribute>
+        </rule>
+        <rule value="Low Glucose" operator="and">
+            <attribute idx="0">
+                <allowed-value min="70" max="140"/>
+            </attribute>
+        </rule>
+        <rule value="Normal Glucose" operator="and">
+            <attribute idx="0">
+                <allowed-value min="140" max="180"/>
+            </attribute>
+        </rule>
+        <rule value="High Glucose" operator="and">
+            <attribute idx="0">
+                <allowed-value min="180" max="250"/>
+            </attribute>
+        </rule>
+        <rule value="Hyperglycemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="250"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
 </state>

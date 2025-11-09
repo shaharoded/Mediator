@@ -190,26 +190,6 @@
                         <xs:attribute name="max-skip" type="xs:nonNegativeInteger" default="0"/>
                     </xs:complexType>
                 </xs:element>
-                <xs:element name="discretization-rules" minOccurs="0">
-                    <xs:complexType>
-                        <xs:sequence>
-                            <xs:element name="attribute" maxOccurs="unbounded">
-                                <xs:complexType>
-                                    <xs:sequence>
-                                        <xs:element name="rule" maxOccurs="unbounded">
-                                            <xs:complexType>
-                                                <xs:attribute name="value" type="xs:string" use="required"/>
-                                                <xs:attribute name="min" type="xs:decimal" use="optional"/>
-                                                <xs:attribute name="max" type="xs:decimal" use="optional"/>
-                                            </xs:complexType>
-                                        </xs:element>
-                                    </xs:sequence>
-                                    <xs:attribute name="idx" type="xs:nonNegativeInteger" use="required"/>
-                                </xs:complexType>
-                            </xs:element>
-                        </xs:sequence>
-                    </xs:complexType>
-                </xs:element>
                 <xs:element name="abstraction-rules" minOccurs="0">
                     <xs:complexType>
                         <xs:sequence>
@@ -221,7 +201,10 @@
                                                 <xs:sequence>
                                                     <xs:element name="allowed-value" maxOccurs="unbounded">
                                                         <xs:complexType>
-                                                            <xs:attribute name="equal" type="xs:string" use="required"/>
+                                                            <!-- Support both equal (nominal/boolean) and min/max (numeric) -->
+                                                            <xs:attribute name="equal" type="xs:string" use="optional"/>
+                                                            <xs:attribute name="min" type="xs:decimal" use="optional"/>
+                                                            <xs:attribute name="max" type="xs:decimal" use="optional"/>
                                                         </xs:complexType>
                                                     </xs:element>
                                                 </xs:sequence>
@@ -234,14 +217,6 @@
                                 </xs:complexType>
                             </xs:element>
                         </xs:sequence>
-                        <xs:attribute name="order" default="first">
-                            <xs:simpleType>
-                                <xs:restriction base="xs:string">
-                                    <xs:enumeration value="first"/>
-                                    <xs:enumeration value="all"/>
-                                </xs:restriction>
-                            </xs:simpleType>
-                        </xs:attribute>
                     </xs:complexType>
                 </xs:element>
             </xs:sequence>

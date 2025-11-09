@@ -1,15 +1,14 @@
 from __future__ import annotations
-from typing import Optional, Tuple, List, Dict, Any, Union
+from typing import Optional, Tuple, List, Dict, Any, Union, Set
 from datetime import timedelta
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import pandas as pd
-from collections import defaultdict
 import logging
 logger = logging.getLogger(__name__)
 
 from .utils import parse_duration
-from .tak import TAK, StateDiscretizationRule, StateAbstractionRule, validate_xml_against_schema
+from .tak import TAK, StateAbstractionRule, validate_xml_against_schema
 from .repository import get_tak_repository
 from .raw_concept import RawConcept
 from .event import Event
@@ -17,7 +16,7 @@ from .event import Event
 
 class State(TAK):
     """
-    State abstraction: discretize numeric values, abstract multi-attribute concepts, merge adjacent intervals.
+    State abstraction: abstract multi-attribute concepts, merge adjacent intervals.
     - Handles nominal (no discretization), numeric (single-attr), and complex (multi-attr tuples).
     - Requires derived_from to be a RawConcept or Event TAK.
     - A state can only be derived from one TAK, but that TAK can produce multi-valued tuples.
@@ -27,22 +26,18 @@ class State(TAK):
         name: str,
         categories: Tuple[str, ...],
         description: str,
-        derived_from: str,  # name of RawConcept TAK
+        derived_from: str,
         good_after: timedelta,
         interpolate: bool,
         max_skip: int,
-        discretization_rules: List[StateDiscretizationRule],
         abstraction_rules: List[StateAbstractionRule],
-        abstraction_order: str = "first",  # "first" or "all"
     ):
         super().__init__(name=name, categories=categories, description=description, family="state")
         self.derived_from = derived_from
         self.good_after = good_after
         self.interpolate = interpolate
         self.max_skip = max_skip
-        self.discretization_rules = discretization_rules
         self.abstraction_rules = abstraction_rules
-        self.abstraction_order = abstraction_order
 
     @classmethod
     def parse(cls, xml_path: Union[str, Path]) -> "State":
@@ -97,33 +92,58 @@ class State(TAK):
         interpolate = pers_el.attrib.get("interpolate", "false").lower() == "true"
         max_skip = int(pers_el.attrib.get("max-skip", "0"))
 
-        # --- discretization-rules (optional) ---
-        disc_rules: List[StateDiscretizationRule] = []
-        disc_el = root.find("discretization-rules")
-        if disc_el is not None:
-            for attr_el in disc_el.findall("attribute"):
-                idx = int(attr_el.attrib["idx"])
-                for rule_el in attr_el.findall("rule"):
-                    val = rule_el.attrib["value"]
-                    min_v = float(rule_el.attrib["min"]) if "min" in rule_el.attrib else None
-                    max_v = float(rule_el.attrib["max"]) if "max" in rule_el.attrib else None
-                    disc_rules.append(StateDiscretizationRule(idx, val, min_v, max_v))
-
-        # --- abstraction-rules (optional, for 'raw') ---
+        # --- abstraction-rules (now unified, handles discretization internally) ---
         abs_rules: List[StateAbstractionRule] = []
         abs_el = root.find("abstraction-rules")
-        abs_order: str = "first" # "first" or "all"
+        
         if abs_el is not None:
-            abs_order = abs_el.attrib.get("order", "first")
             for rule_el in abs_el.findall("rule"):
-                val = rule_el.attrib["value"]
-                op = rule_el.attrib.get("operator", "and")
-                constraints: Dict[int, List[str]] = {}
+                value = rule_el.attrib.get("value", "")
+                if not value:
+                    raise ValueError(f"{name}: <rule> missing value attribute")
+                
+                operator = rule_el.attrib.get("operator", "or").lower()
+                if operator not in ("and", "or"):
+                    raise ValueError(f"{name}: <rule value='{value}'> operator='{operator}' must be 'and' or 'or'")
+                
+                # Parse attributes with integrated discretization ranges
+                constraints: Dict[int, Dict[str, Any]] = {}
+                
                 for attr_el in rule_el.findall("attribute"):
-                    idx = int(attr_el.attrib["idx"])
-                    allowed = [av.attrib["equal"] for av in attr_el.findall("allowed-value")]
-                    constraints[idx] = allowed
-                abs_rules.append(StateAbstractionRule(val, op, constraints))
+                    try:
+                        idx = int(attr_el.attrib.get("idx", 0))
+                    except ValueError:
+                        raise ValueError(f"{name}: <rule value='{value}'> <attribute idx='{attr_el.attrib.get('idx')}'> idx must be integer")
+                    
+                    # Parse allowed-values
+                    rules = []
+                    
+                    for allowed_val_el in attr_el.findall("allowed-value"):
+                        # For numeric: min/max attributes
+                        if allowed_val_el.attrib.get("min") is not None or allowed_val_el.attrib.get("max") is not None:
+                            try:
+                                min_val = float(allowed_val_el.attrib["min"]) if "min" in allowed_val_el.attrib else -float('inf')
+                                max_val = float(allowed_val_el.attrib["max"]) if "max" in allowed_val_el.attrib else float('inf')
+                                rules.append({"min": min_val, "max": max_val})
+                            except ValueError as e:
+                                raise ValueError(f"{name}: <allowed-value> min/max must be numeric: {e}")
+                        
+                        # For nominal/boolean: equal attribute
+                        elif allowed_val_el.attrib.get("equal") is not None:
+                            rules.append({"equal": allowed_val_el.attrib["equal"]})
+                        else:
+                            raise ValueError(f"{name}: <allowed-value> must have either 'equal' or 'min'/'max' attributes")
+                    
+                    if not rules:
+                        raise ValueError(f"{name}: <attribute idx={idx}> must have <allowed-value> children with min/max or equal")
+                    
+                    # Store WITHOUT type (will be inferred in validate())
+                    constraints[idx] = {
+                        "type": None,  # To be filled in validate()
+                        "rules": rules,
+                    }
+                
+                abs_rules.append(StateAbstractionRule(value, operator, constraints))
 
         state = cls(
             name=name,
@@ -133,9 +153,7 @@ class State(TAK):
             good_after=ga,
             interpolate=interpolate,
             max_skip=max_skip,
-            discretization_rules=disc_rules,
             abstraction_rules=abs_rules,
-            abstraction_order=abs_order,
         )
         state.validate()
         return state
@@ -164,144 +182,223 @@ class State(TAK):
         else:
             tuple_size = 1
 
-        # 3) Validate discretization rules coherence
-        if self.discretization_rules:
-            # Check all rule indices are within bounds
-            for rule in self.discretization_rules:
-                if rule.attr_idx >= tuple_size:
-                    raise ValueError(f"{self.name}: discretization rule attr_idx={rule.attr_idx} out of bounds (tuple size={tuple_size})")
+        # 3) Check abstraction-rules requirement based on parent type
+        is_numeric = (
+            isinstance(parent_tak, RawConcept) and 
+            parent_tak.concept_type in ("raw", "raw-numeric")
+        )
+        is_multi_attr = tuple_size > 1
+        
+        # Rule: numeric or multi-attr RAW concepts MUST have abstraction-rules
+        if (is_numeric or is_multi_attr) and not self.abstraction_rules:
+            raise ValueError(
+                f"{self.name}: numeric or multi-attribute raw-concept '{self.derived_from}' "
+                f"must have <abstraction-rules> block"
+            )
 
-            # Check for overlaps AND gaps per attribute
-            rules_by_idx = defaultdict(list)
-            for rule in self.discretization_rules:
-                rules_by_idx[rule.attr_idx].append(rule)
-
-            for idx, rules in rules_by_idx.items():
-                # Sort by min to detect overlaps/gaps
-                sorted_rules = sorted(rules, key=lambda r: r.min)
-                
-                # Check overlaps
-                for i in range(len(sorted_rules) - 1):
-                    r1, r2 = sorted_rules[i], sorted_rules[i+1]
-                    if r1.max > r2.min and r1.max != r2.min:
-                        raise ValueError(f"{self.name}: overlapping discretization ranges at idx={idx}: "
-                                       f"[{r1.min}, {r1.max}) overlaps [{r2.min}, {r2.max})")
-                
-                # Check gaps (warn only, not fatal)
-                for i in range(len(sorted_rules) - 1):
-                    r1, r2 = sorted_rules[i], sorted_rules[i+1]
-                    if r1.max < r2.min:
-                        logger.warning(f"{self.name}: gap in discretization ranges at idx={idx}: "
-                                     f"[{r1.max}, {r2.min}) is uncovered")
-
-        # 4) Validate abstraction rules reference valid indices
+        # 4) Infer types and validate abstraction rules structure
         if self.abstraction_rules:
             for rule in self.abstraction_rules:
+                # Check all constraint indices are within bounds
                 for idx in rule.constraints.keys():
                     if idx >= tuple_size:
-                        raise ValueError(f"{self.name}: abstraction rule constraint idx={idx} out of bounds (tuple size={tuple_size})")
+                        raise ValueError(
+                            f"{self.name}: rule '{rule.value}' references attr idx={idx} "
+                            f"but tuple_size={tuple_size}"
+                        )
+                
+                # INFER type from parent TAK and validate each constraint
+                for idx, constraint_spec in rule.constraints.items():
+                    rules_list = constraint_spec.get("rules", [])
+                    
+                    if not rules_list:
+                        raise ValueError(
+                            f"{self.name}: rule '{rule.value}' attr idx={idx} has no rules"
+                        )
+                    
+                    # Get parent attribute info
+                    parent_attr = None
+                    if isinstance(parent_tak, RawConcept):
+                        if parent_tak.concept_type == "raw":
+                            # Multi-attribute: get from tuple_order
+                            if idx < len(parent_tak.tuple_order):
+                                attr_name = parent_tak.tuple_order[idx]
+                                parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name), None)
+                        elif idx == 0:
+                            # Single-attribute: first attribute
+                            if parent_tak.attributes:
+                                parent_attr = parent_tak.attributes[0]
+                    elif isinstance(parent_tak, Event):
+                        # Events emit strings (nominal)
+                        parent_attr = {"type": "nominal", "name": self.derived_from}
+                    
+                    if not parent_attr:
+                        raise ValueError(f"{self.name}: cannot determine type for attribute idx={idx}")
+                    
+                    # INFER and SET type in constraint_spec
+                    attr_type = parent_attr["type"]
+                    constraint_spec["type"] = attr_type
+                    
+                    # VALIDATION FOR NUMERIC ATTRIBUTES
+                    if attr_type == "numeric":
+                        # Validate all rules have min/max (no 'equal' for numeric)
+                        for r in rules_list:
+                            if "equal" in r:
+                                raise ValueError(
+                                    f"{self.name}: rule '{rule.value}' attr idx={idx} is numeric "
+                                    f"but has <allowed-value equal='...'> (must use min/max)"
+                                )
+                            
+                            # Check range validity
+                            min_val = r.get("min", -float('inf'))
+                            max_val = r.get("max", float('inf'))
+                            
+                            if min_val >= max_val:
+                                raise ValueError(
+                                    f"{self.name}: rule '{rule.value}' attr idx={idx} "
+                                    f"has invalid range: min={min_val} >= max={max_val}"
+                                )
+                            
+                            # Check for infinite ranges (both sides unbounded)
+                            if min_val == -float('inf') and max_val == float('inf'):
+                                raise ValueError(
+                                    f"{self.name}: rule '{rule.value}' attr idx={idx} "
+                                    f"has unbounded range (both min and max infinite)"
+                                )
+                        
+                        # Check for overlaps and gaps across ALL rules for this attribute
+                        sorted_ranges = sorted(rules_list, key=lambda r: r.get("min", -float('inf')))
+                        
+                        for i in range(len(sorted_ranges) - 1):
+                            r1, r2 = sorted_ranges[i], sorted_ranges[i+1]
+                            r1_max = r1.get("max", float('inf'))
+                            r2_min = r2.get("min", -float('inf'))
+                            
+                            # Check overlap (r1.max > r2.min means overlap, since ranges are [min, max))
+                            if r1_max > r2_min:
+                                raise ValueError(
+                                    f"{self.name}: rule '{rule.value}' attr idx={idx} "
+                                    f"has overlapping ranges: [{r1.get('min', '-inf')}, {r1_max}) "
+                                    f"overlaps [{r2_min}, {r2.get('max', 'inf')})"
+                                )
+                            
+                            # Check gap (r1.max < r2.min means gap)
+                            if r1_max < r2_min:
+                                logger.warning(
+                                    f"{self.name}: rule '{rule.value}' attr idx={idx} "
+                                    f"has gap in ranges: [{r1_max}, {r2_min}) is uncovered. "
+                                    f"Values in this range will be filtered out."
+                                )
+                    
+                    # VALIDATION FOR NOMINAL/BOOLEAN ATTRIBUTES
+                    else:  # nominal or boolean
+                        # Validate all rules have 'equal' (no min/max for nominal/boolean)
+                        for r in rules_list:
+                            if "min" in r or "max" in r:
+                                raise ValueError(
+                                    f"{self.name}: rule '{rule.value}' attr idx={idx} is {attr_type} "
+                                    f"but has <allowed-value min='...' max='...'> (must use equal='...')"
+                                )
+                            
+                            if "equal" not in r:
+                                raise ValueError(
+                                    f"{self.name}: rule '{rule.value}' attr idx={idx} is {attr_type} "
+                                    f"but <allowed-value> missing 'equal' attribute"
+                                )
 
-        # 5) Check numeric attributes are discretized if referenced in abstraction rules
-        if self.abstraction_rules and parent_tak.concept_type == "raw":
-            referenced_indices = set()
+        # 5) Check coverage: warn if parent's attributes/values are not fully covered by rules
+        if self.abstraction_rules and isinstance(parent_tak, RawConcept):
+            # Build map of what each rule covers per attribute
+            covered_per_attr: Dict[int, Set[str]] = {}
+            numeric_ranges_per_attr: Dict[int, List[Tuple[float, float]]] = {}
+            
             for rule in self.abstraction_rules:
-                referenced_indices.update(rule.constraints.keys())
-
-            for idx in referenced_indices:
-                attr_name = parent_tak.tuple_order[idx]
-                parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name), None)
-                if parent_attr is None:
-                    continue
-
-                has_discretization = any(r.attr_idx == idx for r in self.discretization_rules)
-
-                # ERROR: numeric attribute referenced in abstraction without discretization
-                if parent_attr["type"] == "numeric" and not has_discretization:
-                    raise ValueError(f"{self.name}: numeric attribute at idx={idx} ('{attr_name}') is referenced in abstraction rules "
-                                   f"but has no discretization rules. Add discretization.")
-
-        # 6) Warn about discretized or nominal/boolean attributes NOT referenced in abstraction rules
-        if self.abstraction_rules and parent_tak.concept_type == "raw":
-            referenced_indices = set()
-            for rule in self.abstraction_rules:
-                referenced_indices.update(rule.constraints.keys())
-
-            for idx, attr_name in enumerate(parent_tak.tuple_order):
-                parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name), None)
-                if parent_attr is None:
-                    continue
-
-                has_discretization = any(r.attr_idx == idx for r in self.discretization_rules)
-                is_nominal_or_boolean = parent_attr["type"] in ("nominal", "boolean")
-
-                if (has_discretization or is_nominal_or_boolean) and idx not in referenced_indices:
-                    logger.warning(f"{self.name}: attribute at idx={idx} ('{attr_name}', type={parent_attr['type']}) "
-                                 f"is discretized/nominal/boolean but never referenced in abstraction rules. "
-                                 f"This may be intentional (silent abstraction) or a mistake.")
-
-        # 7) Check abstraction rules cover all possible discrete values
-        if self.abstraction_rules:
-            # Build set of all possible discrete values per attribute index
-            possible_values_per_idx: Dict[int, set] = defaultdict(set)
-
-            if parent_tak.concept_type == "raw":
-                # Collect from discretization rules or parent attributes
-                for idx, attr_name in enumerate(parent_tak.tuple_order):
+                for idx, constraint_spec in rule.constraints.items():
+                    attr_type = constraint_spec.get("type", "nominal")
+                    rules_list = constraint_spec.get("rules", [])
+                    
+                    if attr_type == "numeric":
+                        if idx not in numeric_ranges_per_attr:
+                            numeric_ranges_per_attr[idx] = []
+                        for r in rules_list:
+                            min_val = r.get("min", -float('inf'))
+                            max_val = r.get("max", float('inf'))
+                            numeric_ranges_per_attr[idx].append((min_val, max_val))
+                    else:  # nominal/boolean
+                        if idx not in covered_per_attr:
+                            covered_per_attr[idx] = set()
+                        for r in rules_list:
+                            covered_per_attr[idx].add(r.get("equal", ""))
+            
+            # Check each parent attribute
+            for idx in range(tuple_size):
+                # Get parent attribute info
+                if parent_tak.concept_type == "raw":
+                    attr_name = parent_tak.tuple_order[idx]
                     parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name), None)
-                    if parent_attr is None:
-                        continue
-
-                    # Check if discretization rules exist for this idx
-                    disc_for_idx = [r for r in self.discretization_rules if r.attr_idx == idx]
-                    if disc_for_idx:
-                        # Use discretization output values
-                        possible_values_per_idx[idx] = {r.value for r in disc_for_idx}
-                    else:
-                        # Use parent's allowed values (for nominal/boolean)
-                        if parent_attr["type"] == "nominal" and parent_attr["allowed"]:
-                            possible_values_per_idx[idx] = set(parent_attr["allowed"])
-                        elif parent_attr["type"] == "boolean":
-                            possible_values_per_idx[idx] = {"True"}  # boolean → string "True"
-            else:
-                # Non-raw: single attribute at idx=0
-                parent_attr = parent_tak.attributes[0]
-                if self.discretization_rules:
-                    # Use discretization outputs
-                    disc_for_idx = [r for r in self.discretization_rules if r.attr_idx == 0]
-                    possible_values_per_idx[0] = {r.value for r in disc_for_idx}
                 else:
-                    # Use parent's allowed values
-                    if parent_attr["type"] == "nominal" and parent_attr["allowed"]:
-                        possible_values_per_idx[0] = set(parent_attr["allowed"])
-                    elif parent_attr["type"] == "boolean":
-                        possible_values_per_idx[0] = {"True"}
-
-            # Check if abstraction rules cover all combinations (warn if not)
-            if possible_values_per_idx:
-                # Collect all values referenced in abstraction rules per idx
-                covered_per_idx: Dict[int, set] = defaultdict(set)
-                for rule in self.abstraction_rules:
-                    for idx, allowed in rule.constraints.items():
-                        covered_per_idx[idx].update(allowed)
-
-                # Compare covered vs possible
-                for idx, possible in possible_values_per_idx.items():
-                    covered = covered_per_idx.get(idx, set())
-                    uncovered = possible - covered
+                    attr_name = parent_tak.name
+                    parent_attr = parent_tak.attributes[0] if parent_tak.attributes else None
+                
+                if not parent_attr:
+                    continue
+                
+                # Check if attribute is referenced at all
+                if idx not in covered_per_attr and idx not in numeric_ranges_per_attr:
+                    logger.warning(
+                        f"{self.name}: attribute idx={idx} ('{attr_name}', type={parent_attr['type']}) "
+                        f"from '{self.derived_from}' is not referenced in any abstraction rule. "
+                        f"This attribute will be ignored during abstraction."
+                    )
+                    continue
+                
+                # For nominal attributes: check if all allowed values are covered
+                if parent_attr["type"] == "nominal" and parent_attr.get("allowed"):
+                    covered = covered_per_attr.get(idx, set())
+                    parent_allowed = set(parent_attr["allowed"])
+                    uncovered = parent_allowed - covered
+                    
                     if uncovered:
-                        logger.warning(f"{self.name}: abstraction rules do not cover all discrete values at idx={idx}. "
-                                     f"Uncovered: {uncovered}. Rows with these values will be filtered out.")
+                        logger.warning(
+                            f"{self.name}: attribute idx={idx} ('{attr_name}') has allowed values "
+                            f"in parent '{self.derived_from}' that are not covered by abstraction rules: {uncovered}. "
+                            f"Rows with these values will be filtered out."
+                        )
+                
+                # For boolean attributes: check if "True"/"False" are covered
+                elif parent_attr["type"] == "boolean":
+                    covered = covered_per_attr.get(idx, set())
+                    # Boolean values come as strings "True" or "False"
+                    uncovered = {"True", "False"} - covered
+                    
+                    if uncovered:
+                        logger.warning(
+                            f"{self.name}: attribute idx={idx} ('{attr_name}', boolean) "
+                            f"has values not covered by abstraction rules: {uncovered}. "
+                            f"Rows with these values will be filtered out."
+                        )
+                
+                # For numeric attributes: warn about unbounded ranges
+                elif parent_attr["type"] == "numeric":
+                    ranges = numeric_ranges_per_attr.get(idx, [])
+                    if ranges:
+                        # Check if lower bound is covered
+                        has_lower_bound = any(min_val == -float('inf') for min_val, _ in ranges)
+                        # Check if upper bound is covered
+                        has_upper_bound = any(max_val == float('inf') for _, max_val in ranges)
+                        
+                        if not has_lower_bound:
+                            logger.warning(
+                                f"{self.name}: attribute idx={idx} ('{attr_name}', numeric) "
+                                f"has no range covering -infinity. Very low values will be filtered out."
+                            )
+                        
+                        if not has_upper_bound:
+                            logger.warning(
+                                f"{self.name}: attribute idx={idx} ('{attr_name}', numeric) "
+                                f"has no range covering +infinity. Very high values will be filtered out."
+                            )
 
-        # If parent is raw-concept with concept_type "raw", abstraction_rules must be defined
-        parent_tak = repo.get(self.derived_from)
-        if isinstance(parent_tak, RawConcept) and parent_tak.concept_type == "raw":
-            if not self.abstraction_rules:
-                raise ValueError(
-                    f"{self.name}: State derived from a multi-attribute raw-concept ('{parent_tak.name}') "
-                    "must define abstraction rules to map tuples to state labels."
-                )
-
-        # All checks passed
         return None
 
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -315,175 +412,102 @@ class State(TAK):
 
         logger.info("[%s] apply() start | input_rows=%d", self.name, len(df))
 
-        # 1) Discretize: map raw tuple values → discrete labels
-        df = self._discretize(df.copy())
-        if df.empty:
-            logger.info("[%s] apply() end | post-discretize=0 rows", self.name)
-            return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-
-        # 2) Abstract: apply abstraction rules to discrete tuples
+        # 1) Abstract: apply unified abstraction rules (which internally discretize)
         df = self._abstract(df)
         if df.empty:
             logger.info("[%s] apply() end | post-abstract=0 rows", self.name)
             return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
 
-        # 3) Merge: concatenate adjacent identical states using persistence + interpolation
-        df = self._merge_intervals(df)
-
-        df["ConceptName"] = self.name
-        df["AbstractionType"] = self.family
-        logger.info("[%s] apply() end | output_rows=%d", self.name, len(df))
-        return df[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
-
-    def _discretize(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Map raw tuple values to discrete labels per attribute index."""
-        if not self.discretization_rules:
-            # No discretization needed (nominal or already discrete)
-            return df
-
-        def discretize_tuple(raw_tup: Tuple[Any, ...]) -> Optional[Tuple[str, ...]]:
-            """Apply discretization rules to each tuple element."""
-            discrete = []
-            for idx, raw_val in enumerate(raw_tup):
-                # Skip None values (no rule can match None)
-                if raw_val is None or (isinstance(raw_val, float) and pd.isna(raw_val)):
-                    discrete.append(None)
-                    continue
-
-                matched = None
-                for rule in self.discretization_rules:
-                    if rule.attr_idx == idx and rule.matches(raw_val):
-                        matched = rule.value
-                        break
-                
-                # If idx has discretization rules but no match → drop row
-                has_rules_for_idx = any(r.attr_idx == idx for r in self.discretization_rules)
-                if has_rules_for_idx and matched is None:
-                    return None  # no match → filter out
-                
-                discrete.append(matched if matched else raw_val)  # keep raw if no rules for idx
-            
-            return tuple(discrete)
-
-        df["Value"] = df["Value"].apply(discretize_tuple)
-        df = df[df["Value"].notna()]  # drop None (no-match) rows
-        return df
+        # 2) Merge: concatenate adjacent identical states
+        merged = self._merge_intervals(df)
+        out = pd.DataFrame(merged) if merged else pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+        
+        out["ConceptName"] = self.name
+        out["AbstractionType"] = self.family
+        logger.info("[%s] apply() end | output_rows=%d", self.name, len(out))
+        return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
 
     def _abstract(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply abstraction rules to discrete tuples → final state labels."""
+        """
+        Apply abstraction rules to raw tuple values → final state labels.
+        Rules internally handle discretization of numeric attributes.
+        Returns first matching rule per tuple.
+        """
         if not self.abstraction_rules:
-            # No abstraction rules → use discrete tuple as-is (for single-attribute states)
-            # Always emit the first element as string
+            # No abstraction rules: keep raw values as-is (only nominal/boolean TAKs)
+            logger.warning(f"{self.name}: no abstraction rules; passing through raw values")
             df["Value"] = df["Value"].apply(lambda t: str(t[0]) if isinstance(t, tuple) else str(t))
             return df
 
-        def apply_rules_to_tuple(discrete_tup: Tuple[str, ...]) -> Optional[Union[str, List[str]]]:
-            """Match abstraction rules and return value(s)."""
-            matches = [r.value for r in self.abstraction_rules if r.matches(discrete_tup)]
-            if not matches:
-                return None  # no match → filter out
-            
-            if self.abstraction_order == "first":
-                return matches[0]  # single string
-            else:  # "all"
-                return matches  # list of strings
+        def apply_rules_to_tuple(tup: Tuple[str, ...]) -> Optional[str]:
+            """Apply rules to raw value, return first match."""
+            for rule in self.abstraction_rules:
+                if rule.matches(tup):
+                    return rule.value
+            return None  # No rule matched
 
         df["Value"] = df["Value"].apply(apply_rules_to_tuple)
-        df = df[df["Value"].notna()]
-        return df
+        return df[df["Value"].notna()]
 
-    def _merge_intervals(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _merge_intervals(self, df: pd.DataFrame) -> List[dict]:
         """
         Merge adjacent identical state values using persistence windows + interpolation.
         Each interval extends to last_merged_sample_time + good_after (or next sample's start, whichever is earlier).
+        
+        Returns:
+            List of merged interval dicts
         """
         if df.empty:
-            return df
+            return []
 
+        # Sort by StartDateTime and prepare for vectorized operations
         df = df.sort_values("StartDateTime").reset_index(drop=True)
-
-        # If order="all", explode multi-value rows and group by value
-        if self.abstraction_order == "all":
-            exploded_rows = []
-            for _, row in df.iterrows():
-                val = row["Value"]
-                if isinstance(val, list):
-                    for v in val:
-                        exploded_rows.append({
-                            "PatientId": row["PatientId"],
-                            "ConceptName": row["ConceptName"],
-                            "StartDateTime": row["StartDateTime"],
-                            "EndDateTime": row["EndDateTime"],
-                            "Value": v,
-                            "AbstractionType": row["AbstractionType"]
-                        })
-                else:
-                    exploded_rows.append(row.to_dict())
-            df = pd.DataFrame(exploded_rows)
-            
-            # Process each unique Value independently
-            all_merged = []
-            for value in df["Value"].unique():
-                value_df = df[df["Value"] == value].sort_values("StartDateTime").reset_index(drop=True)
-                merged_for_value = self._merge_single_value_group(value_df)
-                all_merged.extend(merged_for_value)
-            
-            out = pd.DataFrame(all_merged) if all_merged else pd.DataFrame(columns=df.columns)
-            return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
-        else:
-            # order="first": standard merging
-            merged = self._merge_single_value_group(df)
-            out = pd.DataFrame(merged) if merged else pd.DataFrame(columns=df.columns)
-            return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
-
-    def _merge_single_value_group(self, df: pd.DataFrame) -> List[dict]:
-        """
-        Merge intervals for a single value group (all rows have same Value).
-        Returns list of merged interval dicts.
-        """
+        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
+        
         merged: List[dict] = []
         n = len(df)
         i = 0
         
-        # Ensure StartDateTime is datetime64[ns] (not object/string)
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
-        start_times = df["StartDateTime"].values  # numpy datetime64[ns] array
-        good_after_td = pd.Timedelta(self.good_after)  # convert once
+        # Pre-compute numpy arrays for faster access
+        start_times = df["StartDateTime"].values
+        values = df["Value"].values
+        good_after_td = pd.Timedelta(self.good_after)
         
         while i < n:
-            current_row = df.iloc[i]
-            interval_start = start_times[i]  # numpy datetime64
-            interval_value = current_row["Value"]
-            interval_pid = current_row["PatientId"]
-            interval_cname = current_row["ConceptName"]
-            interval_abstype = current_row["AbstractionType"]
+            interval_start = start_times[i]
+            interval_value = values[i]
+            
+            # Extract row data once
+            row = df.iloc[i]
+            interval_pid = row["PatientId"]
+            interval_cname = row["ConceptName"]
+            interval_abstype = row["AbstractionType"]
             
             # Collect all rows that merge into this interval
-            merged_rows = [i]
+            merged_indices = [i]
             skip_count = 0
             j = i + 1
             
             # OPTIMIZATION: Compute window boundary once
             window_end = interval_start + good_after_td
             
+            # Merge loop
             while j < n:
                 next_start = start_times[j]
-                next_value = df.iloc[j]["Value"]
+                next_value = values[j]
                 same_value = (next_value == interval_value)
                 within_window = (next_start <= window_end)
                 
                 if same_value and within_window:
-                    merged_rows.append(j)
+                    merged_indices.append(j)
                     skip_count = 0
                     j += 1
                 elif not same_value and within_window and self.interpolate and skip_count < self.max_skip:
-                    # Check if next row after this one is same_value and within_window
+                    # Interpolation: check if next row is same_value and within_window
                     if j + 1 < n:
                         peek_start = start_times[j + 1]
-                        peek_value = df.iloc[j + 1]["Value"]
-                        peek_same = (peek_value == interval_value)
-                        peek_within = (peek_start <= window_end)
-                        if peek_same and peek_within:
+                        peek_value = values[j + 1]
+                        if peek_value == interval_value and peek_start <= window_end:
                             skip_count += 1
                             j += 1
                             continue
@@ -491,8 +515,8 @@ class State(TAK):
                 else:
                     break
             
-            # Determine interval EndDateTime
-            last_merged_time = start_times[merged_rows[-1]]
+            # Compute interval EndDateTime
+            last_merged_time = start_times[merged_indices[-1]]
             interval_end = last_merged_time + good_after_td
             
             # Cap at next sample's start if it arrives sooner

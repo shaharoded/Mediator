@@ -90,8 +90,7 @@ Each TAK family has specific:
 
 **Key Parameters:**
 - `<derived-from>` — Single raw-concept or event
-- `<discretization-rules>` — Map numeric ranges → discrete labels (e.g., "Low", "High")
-- `<abstraction-rules>` — Combine discrete attributes → final state labels
+- `<abstraction-rules>` — Combine attributes → final state labels, including numeric discretization.
 - `<persistence>` — Interval merging: `good-after`, `interpolate`, `max-skip`
 
 **Algorithm:**
@@ -102,9 +101,7 @@ Each TAK family has specific:
    [180, ∞) → "Hyperglycemia"
    ```
 
-2. **Abstract:** Apply abstraction rules to discrete tuples
-   - `order="first"`: Return first matching rule
-   - `order="all"`: Return ALL matching rules (emits multiple overlapping intervals)
+2. **Abstract:** Apply abstraction rules to discrete tuples/ Will return first matching rule
 
 3. **Merge:** Concatenate adjacent identical states
    - **Same value + within `good_after` window** → merge

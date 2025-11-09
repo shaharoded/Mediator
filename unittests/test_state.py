@@ -69,7 +69,7 @@ RAW_BASAL_XML = """\
 </raw-concept>
 """
 
-# State: BASAL_BITZUA_STATE (ACTUAL COMPLETE VERSION)
+# State: BASAL_BITZUA_STATE
 STATE_BASAL_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <state name="BASAL_BITZUA_STATE">
@@ -77,20 +77,10 @@ STATE_BASAL_XML = """\
     <description>Abstraction for the dosage and route of administration of BASAL insulin</description>
     <derived-from name="BASAL_BITZUA" tak="raw-concept"/>
     <persistence good-after="24h" interpolate="true" max-skip="1"/>
-    <discretization-rules>
-        <attribute idx="0">
-            <rule value="Very Low" min="0" max="10"/>
-            <rule value="Low" min="10" max="20"/>
-            <rule value="Medium" min="20" max="40"/>
-            <rule value="High" min="40" max="60"/>
-            <rule value="Very High" min="60"/>
-        </attribute>
-    </discretization-rules>
-    <abstraction-rules order="first">
+    <abstraction-rules>
         <rule value="SubCutaneous Low" operator="and">
             <attribute idx="0">
-                <allowed-value equal="Very Low"/>
-                <allowed-value equal="Low"/>
+                <allowed-value min="0" max="20"/>
             </attribute>
             <attribute idx="1">
                 <allowed-value equal="SubCutaneous"/>
@@ -98,8 +88,7 @@ STATE_BASAL_XML = """\
         </rule>
         <rule value="IntraVenous Low" operator="and">
             <attribute idx="0">
-                <allowed-value equal="Very Low"/>
-                <allowed-value equal="Low"/>
+                <allowed-value min="0" max="20"/>
             </attribute>
             <attribute idx="1">
                 <allowed-value equal="IntraVenous"/>
@@ -107,7 +96,7 @@ STATE_BASAL_XML = """\
         </rule>
         <rule value="SubCutaneous Medium" operator="and">
             <attribute idx="0">
-                <allowed-value equal="Medium"/>
+                <allowed-value min="20" max="40"/>
             </attribute>
             <attribute idx="1">
                 <allowed-value equal="SubCutaneous"/>
@@ -115,7 +104,7 @@ STATE_BASAL_XML = """\
         </rule>
         <rule value="IntraVenous Medium" operator="and">
             <attribute idx="0">
-                <allowed-value equal="Medium"/>
+                <allowed-value min="20" max="40"/>
             </attribute>
             <attribute idx="1">
                 <allowed-value equal="IntraVenous"/>
@@ -123,8 +112,7 @@ STATE_BASAL_XML = """\
         </rule>
         <rule value="SubCutaneous High" operator="and">
             <attribute idx="0">
-                <allowed-value equal="High"/>
-                <allowed-value equal="Very High"/>
+                <allowed-value min="40"/>
             </attribute>
             <attribute idx="1">
                 <allowed-value equal="SubCutaneous"/>
@@ -132,8 +120,7 @@ STATE_BASAL_XML = """\
         </rule>
         <rule value="IntraVenous High" operator="and">
             <attribute idx="0">
-                <allowed-value equal="High"/>
-                <allowed-value equal="Very High"/>
+                <allowed-value min="40"/>
             </attribute>
             <attribute idx="1">
                 <allowed-value equal="IntraVenous"/>
@@ -141,83 +128,20 @@ STATE_BASAL_XML = """\
         </rule>
         <rule value="Low" operator="and">
             <attribute idx="0">
-                <allowed-value equal="Very Low"/>
-                <allowed-value equal="Low"/>
+                <allowed-value min="0" max="20"/>
             </attribute>
         </rule>
         <rule value="Medium" operator="and">
             <attribute idx="0">
-                <allowed-value equal="Medium"/>
+                <allowed-value min="20" max="40"/>
             </attribute>
         </rule>
         <rule value="High" operator="and">
             <attribute idx="0">
-                <allowed-value equal="High"/>
-                <allowed-value equal="Very High"/>
+                <allowed-value min="40"/>
             </attribute>
         </rule>
     </abstraction-rules>
-</state>
-"""
-
-# State with order="all" for testing multi-rule matching
-STATE_BASAL_ALL_XML = """\
-<?xml version="1.0" encoding="UTF-8"?>
-<state name="BASAL_ALL_STATE">
-  <categories>Medications</categories>
-  <description>Order=all test</description>
-  <derived-from name="BASAL_BITZUA" tak="raw-concept"/>
-  <persistence good-after="6h" interpolate="false" max-skip="0"/>
-  <discretization-rules>
-    <attribute idx="0">
-      <rule value="Low" min="0" max="30"/>
-      <rule value="High" min="30" max="100"/>
-    </attribute>
-  </discretization-rules>
-  <abstraction-rules order="all">
-    <rule value="SubCutaneous" operator="and">
-      <attribute idx="1">
-        <allowed-value equal="SubCutaneous"/>
-      </attribute>
-    </rule>
-    <rule value="Low Dose" operator="and">
-      <attribute idx="0">
-        <allowed-value equal="Low"/>
-      </attribute>
-    </rule>
-  </abstraction-rules>
-</state>
-"""
-
-# State with permissive rules (partial tuple matching)
-STATE_BASAL_PERMISSIVE_XML = """\
-<?xml version="1.0" encoding="UTF-8"?>
-<state name="BASAL_PERMISSIVE_STATE">
-  <categories>Medications</categories>
-  <description>Order=all with permissive rules</description>
-  <derived-from name="BASAL_BITZUA" tak="raw-concept"/>
-  <persistence good-after="6h" interpolate="false" max-skip="0"/>
-  <discretization-rules>
-    <attribute idx="0">
-      <rule value="Low" min="0" max="30"/>
-      <rule value="High" min="30" max="100"/>
-    </attribute>
-  </discretization-rules>
-  <abstraction-rules order="all">
-    <rule value="SubCutaneous Low" operator="and">
-      <attribute idx="0">
-        <allowed-value equal="Low"/>
-      </attribute>
-      <attribute idx="1">
-        <allowed-value equal="SubCutaneous"/>
-      </attribute>
-    </rule>
-    <rule value="Low Dose" operator="and">
-      <attribute idx="0">
-        <allowed-value equal="Low"/>
-      </attribute>
-    </rule>
-  </abstraction-rules>
 </state>
 """
 
@@ -237,7 +161,7 @@ RAW_GLUCOSE_XML = """\
 </raw-concept>
 """
 
-# State: GLUCOSE_MEASURE_STATE (ACTUAL COMPLETE VERSION)
+# State: GLUCOSE_MEASURE_STATE
 STATE_GLUCOSE_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <state name="GLUCOSE_MEASURE_STATE">
@@ -245,16 +169,38 @@ STATE_GLUCOSE_XML = """\
     <description>Abstraction for the measurements of GLUCOSE (Lab / Capillary)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
     <persistence good-after="24h" interpolate="true" max-skip="1"/>
-    <discretization-rules>
-        <attribute idx="0">
-            <rule value="Severe hypoglycemia" min="0" max="54"/>
-            <rule value="Hypoglycemia" min="54" max="70"/>
-            <rule value="Low glucose" min="70" max="140"/>
-            <rule value="Normal glucose" min="140" max="180"/>
-            <rule value="High glucose" min="180" max="250"/>
-            <rule value="Hyperglycemia" min="250"/>
-        </attribute>
-    </discretization-rules>
+    <abstraction-rules>
+        <rule value="Severe hypoglycemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="54"/>
+            </attribute>
+        </rule>
+        <rule value="Hypoglycemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="54" max="70"/>
+            </attribute>
+        </rule>
+        <rule value="Low glucose" operator="and">
+            <attribute idx="0">
+                <allowed-value min="70" max="140"/>
+            </attribute>
+        </rule>
+        <rule value="Normal glucose" operator="and">
+            <attribute idx="0">
+                <allowed-value min="140" max="180"/>
+            </attribute>
+        </rule>
+        <rule value="High glucose" operator="and">
+            <attribute idx="0">
+                <allowed-value min="180" max="250"/>
+            </attribute>
+        </rule>
+        <rule value="Hyperglycemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="250"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
 </state>
 """
 
@@ -351,15 +297,6 @@ def df_basal_interpolate_skip() -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
 
 
-def df_basal_order_all() -> pd.DataFrame:
-    """2 tuples for order="all" test."""
-    rows = [
-        (1, "BASAL_BITZUA", make_ts("00:00"), make_ts("00:00"), (15, "SubCutaneous"), "raw-concept"),
-        (1, "BASAL_BITZUA", make_ts("04:00"), make_ts("04:00"), (20, "SubCutaneous"), "raw-concept"),
-    ]
-    return pd.DataFrame(rows, columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-
-
 def df_glucose_three_different_levels() -> pd.DataFrame:
     """3 glucose measurements at different discretization levels."""
     rows = [
@@ -379,34 +316,6 @@ def repo_with_basal(tmp_path: Path) -> TAKRepository:
     """BASAL raw-concept + state (COMPLETE ACTUAL TAK)."""
     raw_path = write_xml(tmp_path, "BASAL_BITZUA.xml", RAW_BASAL_XML)
     state_path = write_xml(tmp_path, "BASAL_BITZUA_STATE.xml", STATE_BASAL_XML)
-    repo = TAKRepository()
-    raw_tak = RawConcept.parse(raw_path)
-    repo.register(raw_tak)
-    set_tak_repository(repo)
-    state_tak = State.parse(state_path)
-    repo.register(state_tak)
-    return repo
-
-
-@pytest.fixture
-def repo_with_basal_all(tmp_path: Path) -> TAKRepository:
-    """BASAL + order="all" state."""
-    raw_path = write_xml(tmp_path, "BASAL_BITZUA.xml", RAW_BASAL_XML)
-    state_path = write_xml(tmp_path, "BASAL_ALL_STATE.xml", STATE_BASAL_ALL_XML)
-    repo = TAKRepository()
-    raw_tak = RawConcept.parse(raw_path)
-    repo.register(raw_tak)
-    set_tak_repository(repo)
-    state_tak = State.parse(state_path)
-    repo.register(state_tak)
-    return repo
-
-
-@pytest.fixture
-def repo_with_basal_permissive(tmp_path: Path) -> TAKRepository:
-    """BASAL + permissive order="all" state."""
-    raw_path = write_xml(tmp_path, "BASAL_BITZUA.xml", RAW_BASAL_XML)
-    state_path = write_xml(tmp_path, "BASAL_PERMISSIVE_STATE.xml", STATE_BASAL_PERMISSIVE_XML)
     repo = TAKRepository()
     raw_tak = RawConcept.parse(raw_path)
     repo.register(raw_tak)
@@ -462,8 +371,7 @@ def test_parse_state_validates_structure(repo_with_basal):
     assert state_tak.good_after == parse_duration("24h")
     assert state_tak.interpolate is True
     assert state_tak.max_skip == 1
-    assert len(state_tak.discretization_rules) == 5  # Very Low, Low, Medium, High, Very High
-    assert len(state_tak.abstraction_rules) == 9
+    assert len(state_tak.abstraction_rules) == 9  # Updated: all rules now in abstraction-rules
 
 
 def test_validate_raises_if_parent_not_found(tmp_path: Path):
@@ -481,40 +389,23 @@ def test_validate_raises_if_parent_not_found(tmp_path: Path):
 # -----------------------------
 
 def test_discretize_numeric_ranges(repo_with_basal):
-    """Discretization maps numeric dosages correctly."""
+    """Test that abstraction rules handle numeric discretization internally."""
     state_tak = repo_with_basal.get("BASAL_BITZUA_STATE")
     df_in = pd.DataFrame([
         (1, "BASAL_BITZUA", make_ts("00:00"), make_ts("00:00"), (5, "SubCutaneous"), "raw-concept"),
         (1, "BASAL_BITZUA", make_ts("01:00"), make_ts("01:00"), (25, "IntraVenous"), "raw-concept"),
         (1, "BASAL_BITZUA", make_ts("02:00"), make_ts("02:00"), (55, "SubCutaneous"), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    df_disc = state_tak._discretize(df_in.copy())
-    discrete_vals = list(df_disc["Value"])
-    assert discrete_vals[0] == ("Very Low", "SubCutaneous")
-    assert discrete_vals[1] == ("Medium", "IntraVenous")
-    assert discrete_vals[2] == ("High", "SubCutaneous")
-
-
-def test_discretize_filters_out_of_range(repo_with_glucose):
-    """Values outside raw-concept's allowed range are pre-filtered by RawConcept.apply()."""
-    # This test should use State.apply() end-to-end, not _discretize() in isolation
-    state_tak = repo_with_glucose.get("GLUCOSE_MEASURE_STATE")
-    raw_tak = repo_with_glucose.get("GLUCOSE_MEASURE")
     
-    # Simulate raw-concept output (RawConcept.apply() already filtered out-of-range)
-    df_raw_input = pd.DataFrame([
-        (1, "GLUCOSE_LAB_MEASURE", make_ts("00:00"), make_ts("00:00"), -10),   # will be filtered by raw-concept
-        (1, "GLUCOSE_LAB_MEASURE", make_ts("01:00"), make_ts("01:00"), 80),    # valid
-        (1, "GLUCOSE_LAB_MEASURE", make_ts("02:00"), make_ts("02:00"), 700),   # will be filtered by raw-concept
-    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    # Apply abstraction (which handles discretization internally)
+    df_out = state_tak.apply(df_in)
     
-    # Apply raw-concept first (this filters out-of-range values)
-    df_raw_output = raw_tak.apply(df_raw_input)
-    
-    # Now apply state (should only see value=80)
-    df_state_output = state_tak.apply(df_raw_output)
-    assert len(df_state_output) == 1
-    assert df_state_output.iloc[0]["Value"] == 'Low glucose'
+    # Check that values are correctly abstracted
+    # FIX: order="first" means most specific rule wins
+    assert len(df_out) == 3
+    assert df_out.iloc[0]["Value"] == "SubCutaneous Low"  # 5 falls in [0, 20) + SubCutaneous
+    assert df_out.iloc[1]["Value"] == "IntraVenous Medium"  # 25 falls in [20, 40) + IntraVenous
+    assert df_out.iloc[2]["Value"] == "SubCutaneous High"  # 55 falls in [40, inf) + SubCutaneous
 
 
 # -----------------------------
@@ -522,29 +413,17 @@ def test_discretize_filters_out_of_range(repo_with_glucose):
 # -----------------------------
 
 def test_abstract_first_order(repo_with_basal):
-    """order="first" returns first matching rule."""
+    """Abstraction returns first matching rule."""
     state_tak = repo_with_basal.get("BASAL_BITZUA_STATE")
-    df_disc = pd.DataFrame([
-        (1, "BASAL_BITZUA_STATE", make_ts("00:00"), make_ts("00:00"), ("Low", "SubCutaneous"), "state"),
-        (1, "BASAL_BITZUA_STATE", make_ts("01:00"), make_ts("01:00"), ("High", "IntraVenous"), "state"),
+    df_in = pd.DataFrame([
+        (1, "BASAL_BITZUA", make_ts("00:00"), make_ts("00:00"), (12, "SubCutaneous"), "raw-concept"),
+        (1, "BASAL_BITZUA", make_ts("01:00"), make_ts("01:00"), (50, "IntraVenous"), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    df_abs = state_tak._abstract(df_disc.copy())
-    assert len(df_abs) == 2
-    assert df_abs.iloc[0]["Value"] == "SubCutaneous Low"
-    assert df_abs.iloc[1]["Value"] == "IntraVenous High"
-
-
-def test_abstract_all_order(repo_with_basal_all):
-    """order="all" returns list of all matching rules."""
-    state_tak = repo_with_basal_all.get("BASAL_ALL_STATE")
-    df_disc = pd.DataFrame([
-        (1, "BASAL_ALL_STATE", make_ts("00:00"), make_ts("00:00"), ("Low", "SubCutaneous"), "state"),
-    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    df_abs = state_tak._abstract(df_disc.copy())
-    assert len(df_abs) == 1
-    val = df_abs.iloc[0]["Value"]
-    assert isinstance(val, list)
-    assert set(val) == {"SubCutaneous", "Low Dose"}
+    
+    df_out = state_tak.apply(df_in)
+    assert len(df_out) == 2
+    assert df_out.iloc[0]["Value"] == "SubCutaneous Low"
+    assert df_out.iloc[1]["Value"] == "IntraVenous High"
 
 
 # -----------------------------
@@ -622,54 +501,6 @@ def test_merge_interpolate_skip_outlier(repo_with_basal):
     assert row["EndDateTime"] == make_ts("12:00", day=1)
 
 
-def test_merge_order_all_overlapping_intervals(repo_with_basal_all):
-    """order="all" emits 2 overlapping intervals (one per rule)."""
-    state_tak = repo_with_basal_all.get("BASAL_ALL_STATE")
-    df_in = df_basal_order_all()  # T=0h, 4h with good_after=6h
-    df_out = state_tak.apply(df_in)
-    assert len(df_out) == 2
-    values = set(df_out["Value"])
-    assert values == {"SubCutaneous", "Low Dose"}
-    assert all(df_out["StartDateTime"] == make_ts("00:00"))
-    # CORRECTED: Each rule merges 2 samples (0h, 4h) → EndDateTime = 4h + 6h = 10h
-    assert all(df_out["EndDateTime"] == make_ts("10:00"))
-
-
-def test_merge_order_all_permissive_rules(repo_with_basal_permissive):
-    """Permissive rules: less-specific rule matches more tuples."""
-    state_tak = repo_with_basal_permissive.get("BASAL_PERMISSIVE_STATE")
-    df_in = pd.DataFrame([
-        (1, "BASAL_BITZUA", make_ts("00:00"), make_ts("00:00"), (15, "SubCutaneous"), "raw-concept"),
-        (1, "BASAL_BITZUA", make_ts("04:00"), make_ts("04:00"), (20, "SubCutaneous"), "raw-concept"),
-        (1, "BASAL_BITZUA", make_ts("08:00"), make_ts("08:00"), (12, "SubCutaneous"), "raw-concept"),
-    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    df_out = state_tak.apply(df_in)
-    
-    # CORRECTED: With good_after=6h, T=8h is beyond window from T=0h (0h+6h=6h)
-    # So we get 2 intervals per rule:
-    # - First interval: [0h → 4h], EndDateTime = 4h + 6h = 10h, but T=8h arrives before 10h → EndDateTime = 8h
-    # - Second interval: [8h → 8h+6h = 14h]
-    assert len(df_out) == 4
-    values = set(df_out["Value"])
-    assert values == {"SubCutaneous Low", "Low Dose"}
-    
-    # Check that each rule has 2 intervals
-    low_dose_intervals = df_out[df_out["Value"] == "Low Dose"]
-    subcut_low_intervals = df_out[df_out["Value"] == "SubCutaneous Low"]
-    assert len(low_dose_intervals) == 2
-    assert len(subcut_low_intervals) == 2
-    
-    # First interval for each rule: [0h → 8h] (stops at next sample)
-    assert low_dose_intervals.iloc[0]["EndDateTime"] == make_ts("08:00")
-    assert subcut_low_intervals.iloc[0]["EndDateTime"] == make_ts("08:00")
-    
-    # Second interval for each rule: [8h → 14h] (8h + 6h)
-    assert low_dose_intervals.iloc[1]["StartDateTime"] == make_ts("08:00")
-    assert low_dose_intervals.iloc[1]["EndDateTime"] == make_ts("14:00")
-    assert subcut_low_intervals.iloc[1]["StartDateTime"] == make_ts("08:00")
-    assert subcut_low_intervals.iloc[1]["EndDateTime"] == make_ts("14:00")
-
-
 # -----------------------------
 # Tests: Edge Cases
 # -----------------------------
@@ -690,12 +521,11 @@ def test_single_point_dull_state(repo_with_basal):
 
 
 def test_no_abstraction_rules_emits_discrete_string(repo_with_glucose):
-    """State without abstraction rules emits discrete tuples as strings."""
+    """State with abstraction rules emits abstracted state labels."""
     state_tak = repo_with_glucose.get("GLUCOSE_MEASURE_STATE")
     df_in = df_glucose_three_different_levels()
     df_out = state_tak.apply(df_in)
-    # With corrected interpolation: T=6h "Normal glucose" cannot be skipped (no third point to validate)
-    # Expected: 3 separate intervals (no merging)
+    # Expected: 3 separate intervals (no merging due to different values)
     assert len(df_out) == 3
     values = list(df_out["Value"])
     assert values[0] == 'Low glucose'

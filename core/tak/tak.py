@@ -59,57 +59,86 @@ class TAKRule(ABC):
         pass
 
 
-class StateDiscretizationRule(TAKRule):
-    """
-    Single discretization threshold for one attribute index.
-    Example: attribute idx=0, value="Low", min=10, max=20
-    """
-    def __init__(self, attr_idx: int, value: str, min_val: Optional[float], max_val: Optional[float]):
-        self.attr_idx = attr_idx
-        self.value = value
-        self.min = min_val if min_val is not None else -float('inf')
-        self.max = max_val if max_val is not None else float('inf')
-
-    def matches(self, val: Any) -> bool:
-        """Check if a numeric value falls within [min, max)."""
-        try:
-            x = float(val)
-            return self.min <= x < self.max
-        except (ValueError, TypeError):
-            return False
-
-
 class StateAbstractionRule(TAKRule):
     """
-    Logical rule to combine discrete attribute values → final state label.
-    Example: value="SubCutaneous Low", operator="and", constraints={(0, ['Very Low','Low']), (1, ['SubCutaneous'])}
+    Unified abstraction rule combining discretization + abstraction logic.
     
-    Rule matches if ALL specified constraints are satisfied (tuple can have additional unreferenced attributes).
+    For numeric attributes: ranges define discretization bins
+    For nominal/boolean: exact equality matches
+    
+    Structure:
+        value: Final abstracted state label (e.g., "SubCutaneous Low")
+        operator: "and" (all attrs must match) or "or" (any attr matches)
+        constraints: {
+            attr_idx: {
+                "type": "numeric" | "nominal" | "boolean",
+                "rules": [
+                    {"min": 0, "max": 10},      # for numeric: ranges
+                    {"equal": "SubCutaneous"},  # for nominal/boolean: exact matches
+                ]
+            }
+        }
     """
-    def __init__(self, value: str, operator: str, constraints: Dict[int, List[str]]):
+    def __init__(self, value: str, operator: str, constraints: Dict[int, Dict[str, Any]]):
         self.value = value
-        self.operator = operator.lower() # One of "and", "or"
-        self.constraints = constraints  # {attr_idx: [allowed_discrete_values]}
+        self.operator = operator.lower()  # "and" or "or"
+        self.constraints = constraints    # {attr_idx: {"type": ..., "rules": [...]}}
 
-    def matches(self, discrete_tuple: Tuple[Any, ...]) -> bool:
+    def matches(self, raw_tuple: Tuple[Any, ...]) -> bool:
         """
-        Check if a discrete tuple satisfies this rule.
-        Rule matches if all constraint indices are satisfied (tuple can have MORE attributes than rule references).
+        Check if a raw tuple satisfies this rule.
+        Internally discretizes numeric attributes using ranges.
+        
+        Args:
+            raw_tuple: Tuple from raw-concept value
+        
+        Returns:
+            True if tuple matches this rule (per operator semantics)
         """
         results = []
-        for idx, allowed in self.constraints.items():
-            if idx >= len(discrete_tuple):
-                # Rule references an index not present in tuple → fail
-                results.append(False)
-            else:
-                # Convert tuple element to string for comparison (handles bool/nominal uniformly)
-                val_str = str(discrete_tuple[idx])
-                results.append(val_str in allowed)
         
+        for idx, constraint_spec in self.constraints.items():
+            # Skip if tuple doesn't have this attribute
+            if idx >= len(raw_tuple):
+                results.append(False)
+                continue
+            
+            attr_value = raw_tuple[idx]
+            attr_type = constraint_spec.get("type", "nominal")
+            rules = constraint_spec.get("rules", [])
+            
+            # Check if value matches any of the rules for this attribute
+            matches_any_rule = False
+            
+            for rule in rules:
+                if attr_type == "numeric":
+                    # Discretize: check if value falls in [min, max) range
+                    try:
+                        x = float(attr_value)
+                        min_val = rule.get("min", -float('inf'))
+                        max_val = rule.get("max", float('inf'))
+                        
+                        if min_val <= x < max_val:
+                            matches_any_rule = True
+                            break
+                    except (ValueError, TypeError):
+                        # Can't convert to numeric; doesn't match
+                        pass
+                
+                else:  # nominal or boolean
+                    # Exact equality match
+                    if rule.get("equal") == str(attr_value):
+                        matches_any_rule = True
+                        break
+            
+            results.append(matches_any_rule)
+        
+        # Combine per operator
         if self.operator == "and":
             return all(results)
         elif self.operator == "or":
             return any(results)
+        
         return False
 
 

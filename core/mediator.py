@@ -6,6 +6,7 @@ TO-DO:
  - Can merge discretization rules and abstraction for states, and use similar structure for patterns.
  - For contexts, abstraction rules and persistence rules can probably be the same block, if we add good before / after to EventRule class and disable it for events.
  - Add test_repository.py unittests for repository dependency graph extraction (emphasize complex cases like RC -> Event -> State and LocalPattern -> LocalPattern -> GlobalPattern).
+ - Can I make the pattern rule really inherit from TAKRule (with matches method) instead of the current find_matches?
  """
 
 from __future__ import annotations
