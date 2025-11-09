@@ -1,5 +1,6 @@
 """
 TO-DO:
+ - write_output_thread function needs to split Pattern output and write properly to the 2 different tables
  - Add test_repository.py unittests for repository dependency graph extraction (emphasize complex cases like RC -> Event -> State and LocalPattern -> LocalPattern -> GlobalPattern).
  - Can I make the pattern rule really inherit from TAKRule (with matches method) instead of the current find_matches?
  """
