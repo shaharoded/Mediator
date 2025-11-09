@@ -1,13 +1,14 @@
 from __future__ import annotations
 from typing import Optional, Tuple, List, Dict, Any, Union
 import pandas as pd
-from datetime import timedelta
+import math
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import logging
 logger = logging.getLogger(__name__)
 
 from .tak import TAK, validate_xml_against_schema, TemporalRelationRule
+from .utils import apply_external_function, parse_duration
 from .repository import get_tak_repository
 from .raw_concept import RawConcept
 from .external_functions import REPO
@@ -22,12 +23,10 @@ class Pattern(TAK):
         categories: Tuple[str, ...],
         description: str,
         derived_from: List[Dict[str, Any]],
-        abstraction_rules: List[Dict[str, Any]],
         family: str = "pattern"
     ):
         super().__init__(name=name, categories=categories, description=description, family=family)
         self.derived_from = derived_from
-        self.abstraction_rules = abstraction_rules
 
     @classmethod
     def parse(cls, xml_path: Union[str, Path]) -> "Pattern":
@@ -48,17 +47,25 @@ class LocalPattern(Pattern):
         description: str,
         derived_from: List[Dict[str, Any]],
         parameters: List[Dict[str, Any]],
-        abstraction_rules: List[Dict[str, Any]]
+        abstraction_rules: List[TemporalRelationRule]
     ):
         super().__init__(
             name=name,
             categories=categories,
             description=description,
             derived_from=derived_from,
-            abstraction_rules=abstraction_rules,
             family="local-pattern"
         )
         self.parameters = parameters
+        self.abstraction_rules = abstraction_rules  # List of TemporalRelationRule objects
+        
+        # Build ref lookup maps for quick access during apply()
+        self.derived_from_map: Dict[str, Dict[str, Any]] = {
+            df["ref"]: df for df in derived_from
+        }
+        self.parameters_map: Dict[str, Dict[str, Any]] = {
+            p["ref"]: p for p in parameters
+        }
 
     @classmethod
     def parse(cls, xml_path: Union[str, Path]) -> "LocalPattern":
@@ -131,58 +138,47 @@ class LocalPattern(Pattern):
                 }
                 parameters.append(param_spec)
 
-        # --- abstraction-rules (required) ---
+        # --- abstraction-rules: Parse as TemporalRelationRule objects ---
         abs_el = root.find("abstraction-rules")
         if abs_el is None:
             raise ValueError(f"{name}: <pattern> must define <abstraction-rules>")
-        abstraction_rules = []
+        
+        abstraction_rules: List[TemporalRelationRule] = []
         
         for rule_el in abs_el.findall("rule"):
-            rule_spec = {}
-
-            # --- context (optional) ---
-            context_el = rule_el.find("context")
-            if context_el is not None:
-                context_spec = {}
-                for attr_el in context_el.findall("attribute"):
-                    ref = attr_el.attrib.get("ref")
-                    if not ref:
-                        raise ValueError(f"{name}: context attribute must have 'ref' attribute")
-                    allowed_values = set()
-                    for av in attr_el.findall("allowed-value"):
-                        if "equal" in av.attrib:
-                            allowed_values.add(av.attrib["equal"])
-                        else:
-                            raise ValueError(f"{name}: only 'equal' constraints supported in context attributes")
-                    context_spec[ref] = allowed_values
-                rule_spec["context"] = context_spec
-
-            # --- temporal-relation (required) ---
+            # --- Parse temporal-relation ---
             tr_el = rule_el.find("temporal-relation")
             if tr_el is None:
                 raise ValueError(f"{name}: rule missing <temporal-relation>")
+            
             how = tr_el.attrib.get("how")
             if how not in ("before", "overlap"):
                 raise ValueError(f"{name}: temporal-relation how='{how}' must be 'before' or 'overlap'")
             max_distance = tr_el.attrib.get("max-distance")
             if how == "before" and not max_distance:
                 raise ValueError(f"{name}: temporal-relation how='before' requires max-distance")
-            temporal_relation = {
+            
+            relation_spec = {
                 "how": how,
                 "max_distance": max_distance
             }
-
-            # anchor
+            
+            # Parse anchor
             anchor_el = tr_el.find("anchor")
             if anchor_el is not None:
                 anchor_spec = {
-                    "select": anchor_el.attrib.get("select", "first")
+                    "select": anchor_el.attrib.get("select", "first"),
+                    "attributes": {}
                 }
-                anchor_attrs = {}
                 for attr_el in anchor_el.findall("attribute"):
                     ref = attr_el.attrib.get("ref")
-                    if not ref:
-                        raise ValueError(f"{name}: anchor attribute must have 'ref' attribute")
+                    if not ref or ref not in declared_refs:
+                        raise ValueError(f"{name}: anchor attribute ref='{ref}' not declared")
+                    
+                    # Convert ref → name (for TemporalRelationRule compatibility)
+                    df_entry = next((d for d in derived_from if d["ref"] == ref), None)
+                    attr_name = df_entry["name"]
+                    
                     allowed_values = set()
                     min_val = None
                     max_val = None
@@ -193,28 +189,33 @@ class LocalPattern(Pattern):
                             min_val = float(av.attrib["min"])
                         if "max" in av.attrib:
                             max_val = float(av.attrib["max"])
-                    anchor_attrs[ref] = {
+                    
+                    anchor_spec["attributes"][attr_name] = {
+                        "idx": df_entry["idx"],
                         "allowed_values": allowed_values,
                         "min": min_val,
                         "max": max_val
                     }
-                anchor_spec["attributes"] = anchor_attrs
-                # Check if more than 1 attr, select must be mentioned
-                if len(anchor_attrs) > 1 and not anchor_spec.get("select"):
+                
+                if len(anchor_spec["attributes"]) > 1 and not anchor_spec.get("select"):
                     raise ValueError(f"{name}: anchor with multiple attributes requires explicit select attribute")
-                temporal_relation["anchor"] = anchor_spec
-
-            # event
+                relation_spec["anchor"] = anchor_spec
+            
+            # Parse event (same logic as anchor)
             event_el = tr_el.find("event")
             if event_el is not None:
                 event_spec = {
-                    "select": event_el.attrib.get("select", "first")
+                    "select": event_el.attrib.get("select", "first"),
+                    "attributes": {}
                 }
-                event_attrs = {}
                 for attr_el in event_el.findall("attribute"):
                     ref = attr_el.attrib.get("ref")
-                    if not ref:
-                        raise ValueError(f"{name}: event attribute must have 'ref' attribute")
+                    if not ref or ref not in declared_refs:
+                        raise ValueError(f"{name}: event attribute ref='{ref}' not declared")
+                    
+                    df_entry = next((d for d in derived_from if d["ref"] == ref), None)
+                    attr_name = df_entry["name"]
+                    
                     allowed_values = set()
                     min_val = None
                     max_val = None
@@ -225,123 +226,180 @@ class LocalPattern(Pattern):
                             min_val = float(av.attrib["min"])
                         if "max" in av.attrib:
                             max_val = float(av.attrib["max"])
-                    event_attrs[ref] = {
+                    
+                    event_spec["attributes"][attr_name] = {
+                        "idx": df_entry["idx"],
                         "allowed_values": allowed_values,
                         "min": min_val,
                         "max": max_val
                     }
-                event_spec["attributes"] = event_attrs
-                # Check if more than 1 attr, select must be mentioned
-                if len(event_attrs) > 1 and not event_spec.get("select"):
+                
+                if len(event_spec["attributes"]) > 1 and not event_spec.get("select"):
                     raise ValueError(f"{name}: event with multiple attributes requires explicit select attribute")
-                temporal_relation["event"] = event_spec
-
-            rule_spec["temporal_relation"] = temporal_relation
-
-            # --- compliance-function (optional) ---
+                relation_spec["event"] = event_spec
+            
+            # --- Parse context (optional) ---
+            context_spec = None
+            context_el = rule_el.find("context")
+            if context_el is not None:
+                context_spec = {"attributes": {}}
+                for attr_el in context_el.findall("attribute"):
+                    ref = attr_el.attrib.get("ref")
+                    if not ref or ref not in declared_refs:
+                        raise ValueError(f"{name}: context attribute ref='{ref}' not declared")
+                    
+                    df_entry = next((d for d in derived_from if d["ref"] == ref), None)
+                    attr_name = df_entry["name"]
+                    
+                    allowed_values = set()
+                    for av in attr_el.findall("allowed-value"):
+                        if "equal" in av.attrib:
+                            allowed_values.add(av.attrib["equal"])
+                        else:
+                            raise ValueError(f"{name}: only 'equal' constraints supported in context attributes")
+                    
+                    context_spec["attributes"][attr_name] = {
+                        "idx": df_entry["idx"],
+                        "allowed_values": allowed_values
+                    }
+            
+            # Build derived_map (name → df_entry) for TemporalRelationRule
+            derived_map = {d["name"]: d for d in derived_from}
+            
+            # --- Parse compliance-function (optional) ---
+            time_constraint_compliance = None
+            value_constraint_compliance = None
+            
             cf_el = rule_el.find("compliance-function")
             if cf_el is not None:
-                compliance_function = []
-
-                # time-constraint-compliance
+                # Parse time-constraint-compliance
                 tcc_el = cf_el.find("time-constraint-compliance")
                 if tcc_el is not None:
                     if how != 'before':
                         raise ValueError(f"{name}: time-constraint-compliance only valid for 'before' temporal relation")
+                    
                     func_el = tcc_el.find("function")
-                    if func_el is not None:
-                        func_name = func_el.attrib["name"]
-                        # Check function is in REPO
-                        if func_name not in REPO:
-                            raise ValueError(f"{name}: compliance function '{func_name}' not found in external functions")
-                        
-                        # Parse raw trapez
-                        trapez_el = func_el.find("trapeze")
-                        trapez_raw = (
-                            trapez_el.attrib["trapezeA"],
-                            trapez_el.attrib["trapezeB"],
-                            trapez_el.attrib["trapezeC"],
-                            trapez_el.attrib["trapezeD"]
+                    if func_el is None:
+                        raise ValueError(f"{name}: time-constraint-compliance missing <function> element")
+                    
+                    func_name = func_el.attrib.get("name")
+                    if not func_name:
+                        raise ValueError(f"{name}: time-constraint-compliance <function> missing 'name' attribute")
+                    
+                    # Check function exists in REPO
+                    if func_name not in REPO:
+                        raise ValueError(f"{name}: compliance function '{func_name}' not found in external functions")
+                    
+                    # Parse trapeze (time-based, stored as strings)
+                    trapez_el = func_el.find("trapeze")
+                    if trapez_el is None:
+                        raise ValueError(f"{name}: time-constraint-compliance <function> missing <trapeze>")
+                    
+                    trapez_raw = (
+                        trapez_el.attrib.get("trapezeA"),
+                        trapez_el.attrib.get("trapezeB"),
+                        trapez_el.attrib.get("trapezeC"),
+                        trapez_el.attrib.get("trapezeD")
+                    )
+                    
+                    if None in trapez_raw:
+                        raise ValueError(f"{name}: time-constraint-compliance trapeze must have all 4 attributes (A, B, C, D)")
+                    
+                    # Validate max_distance >= trapezeD (pattern must capture all valid instances)
+                    if parse_duration(trapez_raw[3]) > parse_duration(max_distance):
+                        raise ValueError(
+                            f"{name}: temporal-relation max-distance '{max_distance}' must be >= "
+                            f"time-constraint-compliance trapezeD '{trapez_raw[3]}' "
+                            f"(otherwise pattern may miss valid instances)"
                         )
-
-                        if max_distance <= trapez_raw[3]:
-                            raise ValueError(
-                                f"{name}: temporal-relation max-distance '{max_distance}' must be at least as big as time-constraint-compliance trapezeD '{trapez_raw[3]}'",
-                                "Otherwise, pattern max distance may not capture all valid instances."
-                                )
-                        
-                        # Extract parameters (if any)
-                        param_refs = []
-                        parameters_el = func_el.find("parameters")
-                        if parameters_el is not None:
-                            for p in parameters_el.findall("parameter"):
-                                ref = p.attrib.get("ref")
-                                if ref not in declared_refs:
-                                    raise ValueError(f"{name}: parameter ref '{ref}' not declared")
-                                param_refs.append(ref)
-                        
-                        compliance_function.append({
-                                "func_name": func_name,
-                                "trapez": trapez_raw,
-                                "constraint_type": "time-constraint",
-                                "parameters": param_refs
-                            })
-                    else:
-                        raise ValueError(f"{name}: time-constraint-compliance missing <function> element. Use 'id' as default.")
-
-                # value-constraint-compliance
+                    
+                    # Extract parameter refs (if any)
+                    param_refs = []
+                    parameters_el = func_el.find("parameters")
+                    if parameters_el is not None:
+                        for p in parameters_el.findall("parameter"):
+                            ref = p.attrib.get("ref")
+                            if not ref or ref not in declared_refs:
+                                raise ValueError(f"{name}: parameter ref '{ref}' not declared in derived-from or parameters")
+                            param_refs.append(ref)
+                    
+                    time_constraint_compliance = {
+                        "func_name": func_name,
+                        "trapez": trapez_raw,  # Store as strings (will be processed by apply_external_function)
+                        "parameters": param_refs
+                    }
+                
+                # Parse value-constraint-compliance
                 vcc_el = cf_el.find("value-constraint-compliance")
                 if vcc_el is not None:
                     func_el = vcc_el.find("function")
-                    if func_el is not None:
-                        func_name = func_el.attrib["name"]
-                        if func_name not in REPO:
-                            raise ValueError(f"{name}: compliance function '{func_name}' not found in external functions")
-                        
-                        # Parse raw trapez (numeric, not time)
-                        trapez_el = func_el.find("trapeze")
+                    if func_el is None:
+                        raise ValueError(f"{name}: value-constraint-compliance missing <function> element")
+                    
+                    func_name = func_el.attrib.get("name")
+                    if not func_name:
+                        raise ValueError(f"{name}: value-constraint-compliance <function> missing 'name' attribute")
+                    
+                    if func_name not in REPO:
+                        raise ValueError(f"{name}: compliance function '{func_name}' not found in external functions")
+                    
+                    # Parse trapeze (numeric values)
+                    trapez_el = func_el.find("trapeze")
+                    if trapez_el is None:
+                        raise ValueError(f"{name}: value-constraint-compliance <function> missing <trapeze>")
+                    
+                    try:
                         trapez_raw = (
-                            float(trapez_el.attrib["trapezeA"]),
-                            float(trapez_el.attrib["trapezeB"]),
-                            float(trapez_el.attrib["trapezeC"]),
-                            float(trapez_el.attrib["trapezeD"])
+                            float(trapez_el.attrib.get("trapezeA")),
+                            float(trapez_el.attrib.get("trapezeB")),
+                            float(trapez_el.attrib.get("trapezeC")),
+                            float(trapez_el.attrib.get("trapezeD"))
                         )
-                        
-                        # Extract target refs
-                        target_refs = []
-                        target_el = vcc_el.find("target")
-                        if target_el is not None:
-                            for attr_el in target_el.findall("attribute"):
-                                ref = attr_el.attrib.get("ref")
-                                if ref not in declared_refs:
-                                    raise ValueError(f"{name}: target ref '{ref}' not declared")
-                                target_refs.append(ref)
-                        else:
-                            raise ValueError(f"{name}: value-constraint-compliance missing <target> block with <attribute ref=.../> elements.")
-                        
-                        # Extract parameter refs
-                        param_refs = []
-                        parameters_el = func_el.find("parameters")
-                        if parameters_el is not None:
-                            for p in parameters_el.findall("parameter"):
-                                ref = p.attrib.get("ref")
-                                if ref not in declared_refs:
-                                    raise ValueError(f"{name}: parameter ref '{ref}' not declared")
-                                param_refs.append(ref)
-                        
-                        compliance_function.append({
-                            "func_name": func_name,
-                            "trapez": trapez_raw,
-                            "targets": target_refs,
-                            "constraint_type": "value-constraint",
-                            "parameters": param_refs
-                        })
-                    else:
-                        raise ValueError(f"{name}: value-constraint-compliance missing <function> element. Use 'id' as default.")
-
-                rule_spec["compliance_function"] = compliance_function
-
-            abstraction_rules.append(rule_spec)
+                    except (TypeError, ValueError) as e:
+                        raise ValueError(f"{name}: value-constraint-compliance trapeze values must be numeric: {e}")
+                    
+                    # Extract target refs (required for value constraints)
+                    target_refs = []
+                    target_el = vcc_el.find("target")
+                    if target_el is None:
+                        raise ValueError(f"{name}: value-constraint-compliance missing <target> block")
+                    
+                    for attr_el in target_el.findall("attribute"):
+                        ref = attr_el.attrib.get("ref")
+                        if not ref or ref not in declared_refs:
+                            raise ValueError(f"{name}: target ref '{ref}' not declared in derived-from or parameters")
+                        target_refs.append(ref)
+                    
+                    if not target_refs:
+                        raise ValueError(f"{name}: value-constraint-compliance <target> must contain at least one <attribute ref=.../>")
+                    
+                    # Extract parameter refs (if any)
+                    param_refs = []
+                    parameters_el = func_el.find("parameters")
+                    if parameters_el is not None:
+                        for p in parameters_el.findall("parameter"):
+                            ref = p.attrib.get("ref")
+                            if not ref or ref not in declared_refs:
+                                raise ValueError(f"{name}: parameter ref '{ref}' not declared in derived-from or parameters")
+                            param_refs.append(ref)
+                    
+                    value_constraint_compliance = {
+                        "func_name": func_name,
+                        "trapez": trapez_raw,  # Stored as floats
+                        "targets": target_refs,
+                        "parameters": param_refs
+                    }
+            
+            # Create TemporalRelationRule with compliance functions
+            rule = TemporalRelationRule(
+                derived_map=derived_map,
+                relation_spec=relation_spec,
+                context_spec=context_spec,
+                time_constraint_compliance=time_constraint_compliance,
+                value_constraint_compliance=value_constraint_compliance
+            )
+            
+            abstraction_rules.append(rule)
 
         pattern = cls(
             name=name,
@@ -516,9 +574,509 @@ class LocalPattern(Pattern):
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Apply LocalPattern to find and rate pattern instances.
-        Input: Patient data (from derived_from TAKs)
-        Output: Intervals with Value=True/Partial/False (False only for QA)
+        
+        ASSUMPTION: Input df contains ONLY records relevant to this pattern (potential anchors/events/contexts/parameters).
+        All records belong to SINGLE patient.
+        
+        Output columns:
+          - PatientId
+          - ConceptName (pattern name)
+          - StartDateTime (anchor start)
+          - EndDateTime (event end)
+          - Value ("True" | "Partial" | "False")
+          - TimeConstraintScore (0-1, if time-constraint compliance exists, else None)
+          - ValueConstraintScore (0-1, if value-constraint compliance exists, else None)
+          - AbstractionType ("local-pattern")
         """
         if df.empty:
-            return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-        return df
+            return pd.DataFrame(columns=[
+                "PatientId", "ConceptName", "StartDateTime", "EndDateTime", 
+                "Value", "TimeConstraintScore", "ValueConstraintScore", "AbstractionType"
+            ])
+        
+        logger.info("[%s] apply() start | input_rows=%d", self.name, len(df))
+        
+        # Assumption: all records belong to same patient
+        patient_id = df.iloc[0]["PatientId"]
+        
+        # Find all anchor-event pairs satisfying temporal relations
+        instances = self._find_pattern_instances(patient_id, df)
+        
+        if not instances:
+            # No pattern found: return False with NaN times
+            logger.info("[%s] apply() end | no pattern found", self.name)
+            return pd.DataFrame([{
+                "PatientId": patient_id,
+                "ConceptName": self.name,
+                "StartDateTime": pd.NaT,
+                "EndDateTime": pd.NaT,
+                "Value": "False",
+                "TimeConstraintScore": None,
+                "ValueConstraintScore": None,
+                "AbstractionType": self.family
+            }])
+        
+        # Convert to DataFrame
+        out = pd.DataFrame(instances)
+        out["ConceptName"] = self.name
+        out["AbstractionType"] = self.family
+        
+        logger.info("[%s] apply() end | output_rows=%d", self.name, len(out))
+        return out[[
+            "PatientId", "ConceptName", "StartDateTime", "EndDateTime", 
+            "Value", "TimeConstraintScore", "ValueConstraintScore", "AbstractionType"
+        ]]
+
+    def _find_pattern_instances(self, patient_id: int, patient_df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """
+        Find all anchor-event pairs satisfying temporal relations, compute compliance scores.
+        
+        Returns:
+            List of pattern instance dicts with scores
+        """
+        instances = []
+        
+        # Track used indices for one-to-one matching
+        used_anchor_ids = set()
+        used_event_ids = set()
+        
+        for rule in self.abstraction_rules:
+            # Extract anchor/event/context candidates
+            anchors = self._extract_candidates(patient_df, rule.relation_spec.get("anchor"))
+            events = self._extract_candidates(patient_df, rule.relation_spec.get("event"))
+            contexts = self._extract_candidates(patient_df, rule.context_spec) if rule.context_spec else None
+            
+            if anchors.empty or events.empty:
+                continue
+            
+            # Sort by select preference
+            anchor_order = self._order_indices(anchors, rule.relation_spec.get("anchor", {}))
+            event_order = self._order_indices(events, rule.relation_spec.get("event", {}))
+            
+            # Iterate over anchors (one-to-one pairing)
+            for anchor_idx in anchor_order:
+                if anchor_idx in used_anchor_ids:
+                    continue
+                anchor_row = anchors.loc[anchor_idx]
+                
+                for event_idx in event_order:
+                    if event_idx in used_event_ids:
+                        continue
+                    event_row = events.loc[event_idx]
+                    
+                    # Check if this pair matches the rule
+                    if not rule.matches(anchor_row, event_row, contexts):
+                        continue
+                    
+                    # Pattern found! Compute compliance scores
+                    time_score = None
+                    value_score = None
+                    
+                    # Resolve parameters ONCE per instance (use closest to pattern start)
+                    parameter_values = self._resolve_parameters(anchor_row["StartDateTime"], patient_df)
+                    
+                    # Compute time-constraint compliance
+                    if rule.time_constraint_compliance:
+                        time_score = self._compute_time_compliance(
+                            anchor_row=anchor_row,
+                            event_row=event_row,
+                            tcc_spec=rule.time_constraint_compliance,
+                            parameter_values=parameter_values
+                        )
+                    
+                    # Compute value-constraint compliance
+                    if rule.value_constraint_compliance:
+                        value_score = self._compute_value_compliance(
+                            anchor_row=anchor_row,
+                            event_row=event_row,
+                            vcc_spec=rule.value_constraint_compliance,
+                            parameter_values=parameter_values
+                        )
+                    
+                    # Classify pattern instance based on scores
+                    combined_score = self._compute_combined_score(time_score, value_score)
+                    
+                    if combined_score == 1.0:
+                        value_label = "True"
+                    elif combined_score > 0.0:
+                        value_label = "Partial"
+                    else:
+                        value_label = "False"
+                    
+                    instances.append({
+                        "PatientId": patient_id,
+                        "StartDateTime": anchor_row["StartDateTime"],
+                        "EndDateTime": event_row["EndDateTime"],
+                        "Value": value_label,
+                        "TimeConstraintScore": time_score,
+                        "ValueConstraintScore": value_score
+                    })
+                    
+                    used_anchor_ids.add(anchor_idx)
+                    used_event_ids.add(event_idx)
+                    break  # one-to-one pairing
+        
+        return instances
+
+    def _resolve_parameters(self, pattern_start: pd.Timestamp, patient_df: pd.DataFrame) -> Dict[str, float]:
+        """
+        Resolve parameter values: use closest record to pattern start time.
+        
+        Args:
+            pattern_start: Start time of pattern instance (anchor start)
+            patient_df: Patient's full data
+        
+        Returns:
+            Dict {param_ref: resolved_value}
+        """
+        resolved = {}
+        
+        for param_spec in self.parameters:
+            param_ref = param_spec["ref"]
+            param_name = param_spec["name"]
+            param_idx = param_spec["idx"]
+            
+            # Find rows matching this parameter TAK
+            param_rows = patient_df[patient_df["ConceptName"] == param_name]
+            
+            if param_rows.empty:
+                # No data: use default
+                resolved[param_ref] = float(param_spec["default"])
+                continue
+            
+            # Find closest record to pattern_start (minimize time distance)
+            param_rows = param_rows.copy()
+            param_rows["TimeDist"] = (param_rows["StartDateTime"] - pattern_start).abs()
+            closest_row = param_rows.loc[param_rows["TimeDist"].idxmin()]
+            
+            # Extract value using idx
+            val = closest_row["Value"]
+            if isinstance(val, tuple):
+                val = val[param_idx] if param_idx < len(val) else None
+            
+            if val is not None:
+                try:
+                    resolved[param_ref] = float(val)
+                except (ValueError, TypeError):
+                    logger.warning(f"[{self.name}] Cannot convert parameter {param_ref} value to float: {val}, using default")
+                    resolved[param_ref] = float(param_spec["default"])
+            else:
+                resolved[param_ref] = float(param_spec["default"])
+        
+        return resolved
+
+    def _compute_time_compliance(
+        self,
+        anchor_row: pd.Series,
+        event_row: pd.Series,
+        tcc_spec: Dict[str, Any],
+        parameter_values: Dict[str, float]
+    ) -> float:
+        """
+        Compute time-constraint compliance score.
+        
+        Args:
+            anchor_row: Anchor row
+            event_row: Event row
+            tcc_spec: {func_name, trapez, parameters}
+            parameter_values: Resolved parameter values
+        
+        Returns:
+            float: Compliance score in [0, 1]
+        """
+        # Compute actual time gap (event.start - anchor.end)
+        time_gap = event_row["StartDateTime"] - anchor_row["EndDateTime"]
+        
+        # Extract parameter values for function
+        param_vals = [parameter_values.get(ref, 0.0) for ref in tcc_spec["parameters"]]
+        
+        try:
+            # Apply external function to build TrapezNode
+            trapez_node = apply_external_function(
+                func_name=tcc_spec["func_name"],
+                trapez=tcc_spec["trapez"],
+                constraint_type="time-constraint",
+                *param_vals
+            )
+            
+            # Compute compliance score
+            score = trapez_node.compliance_score(time_gap)
+            return score
+            
+        except Exception as e:
+            logger.error(f"[{self.name}] Time-constraint compliance error: {e}")
+            return 0.0
+
+    def _compute_value_compliance(
+        self,
+        anchor_row: pd.Series,
+        event_row: pd.Series,
+        vcc_spec: Dict[str, Any],
+        parameter_values: Dict[str, float]
+    ) -> float:
+        """
+        Compute value-constraint compliance score.
+        
+        Args:
+            anchor_row: Anchor row
+            event_row: Event row
+            vcc_spec: {func_name, trapez, targets, parameters}
+            parameter_values: Resolved parameter values
+        
+        Returns:
+            float: Compliance score in [0, 1] (minimum of all target scores)
+        """
+        # Extract target values (from anchor/event rows)
+        target_values = []
+        for target_ref in vcc_spec["targets"]:
+            target_spec = self.derived_from_map.get(target_ref)
+            if not target_spec:
+                continue
+            
+            # Check if target is anchor or event
+            if target_spec["name"] == anchor_row["ConceptName"]:
+                val = anchor_row["Value"]
+            elif target_spec["name"] == event_row["ConceptName"]:
+                val = event_row["Value"]
+            else:
+                # Target not in anchor/event (shouldn't happen after validation)
+                logger.warning(f"[{self.name}] Target {target_ref} not found in anchor or event")
+                continue
+            
+            # Extract value using idx
+            if isinstance(val, tuple):
+                idx = target_spec["idx"]
+                val = val[idx] if idx < len(val) else None
+            
+            if val is not None:
+                try:
+                    target_values.append(float(val))
+                except (ValueError, TypeError):
+                    logger.warning(f"[{self.name}] Cannot convert target value to float: {val}")
+        
+        if not target_values:
+            logger.warning(f"[{self.name}] No target values found for value-constraint compliance")
+            return 0.0
+        
+        # Extract parameter values for function
+        param_vals = [parameter_values.get(ref, 0.0) for ref in vcc_spec["parameters"]]
+        
+        try:
+            # Apply external function to build TrapezNode
+            trapez_node = apply_external_function(
+                func_name=vcc_spec["func_name"],
+                trapez=vcc_spec["trapez"],
+                constraint_type="value-constraint",
+                *param_vals
+            )
+            
+            # Compute compliance score for each target (take minimum = most restrictive)
+            scores = [trapez_node.compliance_score(v) for v in target_values]
+            return min(scores)
+            
+        except Exception as e:
+            logger.error(f"[{self.name}] Value-constraint compliance error: {e}")
+            return 0.0
+
+    @staticmethod
+    def _compute_combined_score(time_score: Optional[float], value_score: Optional[float]) -> float:
+        """
+        Combine time and value compliance scores.
+        
+        Strategy: Product (both must be satisfied).
+        If only one exists, use that score.
+        If neither exists, return 1.0 (full compliance).
+        """
+        scores = [s for s in [time_score, value_score] if s is not None]
+        
+        if not scores:
+            return 1.0  # No compliance functions → full compliance
+        
+        return math.prod(scores)
+
+    def _extract_candidates(self, df: pd.DataFrame, spec: Optional[Dict[str, Any]]) -> pd.DataFrame:
+        """
+        Extract candidate rows for anchor/event/context attributes.
+        Supports multiple attributes (OR semantics): any attribute that satisfies the constraints is eligible.
+        """
+        if not spec:
+            return pd.DataFrame(columns=df.columns)
+
+        attrs = spec.get("attributes", {})
+        if not attrs:
+            return pd.DataFrame(columns=df.columns)
+
+        masked_parts = []
+        for attr_name, constraints in attrs.items():
+            idx = constraints.get("idx", 0)
+            rows = df[df["ConceptName"] == attr_name].copy()
+            if rows.empty:
+                continue
+
+            # Extract value for the attribute given idx
+            rows["__value__"] = rows.apply(lambda r: self._extract_value(r["Value"], idx), axis=1)
+
+            # Apply constraints
+            allowed = constraints.get("allowed_values") or set()
+            if allowed:
+                rows = rows[rows["__value__"].astype(str).isin(allowed)]
+            if constraints.get("min") is not None:
+                rows = rows[pd.to_numeric(rows["__value__"], errors="coerce") >= constraints["min"]]
+            if constraints.get("max") is not None:
+                rows = rows[pd.to_numeric(rows["__value__"], errors="coerce") <= constraints["max"]]
+
+            if not rows.empty:
+                masked_parts.append(rows)
+
+        if not masked_parts:
+            return pd.DataFrame(columns=df.columns)
+
+        combined = pd.concat(masked_parts).sort_values("StartDateTime")
+        return combined.reset_index(drop=True)
+
+    def _order_indices(self, df: pd.DataFrame, spec: Dict[str, Any]) -> List[int]:
+        """
+        Sort indices by select preference (first=ascending, last=descending).
+        """
+        if df.empty:
+            return []
+        select = (spec or {}).get("select", "first")
+        if select == "last":
+            return list(df.sort_values("StartDateTime", ascending=False).index)
+        return list(df.sort_values("StartDateTime", ascending=True).index)
+
+    @staticmethod
+    def _extract_value(value: Any, idx: int) -> Any:
+        """Extract value from tuple (raw-concept) or string representation."""
+        if isinstance(value, tuple):
+            return value[idx] if idx < len(value) else None
+        if isinstance(value, str) and value.startswith("(") and value.endswith(")"):
+            try:
+                import ast
+                parsed = ast.literal_eval(value)
+                if isinstance(parsed, tuple):
+                    return parsed[idx] if idx < len(parsed) else None
+            except (ValueError, SyntaxError):
+                return value
+        return value
+
+    def _compute_compliance_score(
+        self,
+        anchor_row: pd.Series,
+        event_row: pd.Series,
+        rule: TemporalRelationRule,
+        patient_df: pd.DataFrame
+    ) -> float:
+        """
+        Compute compliance score for a pattern instance.
+        
+        Combines time-constraint and value-constraint compliance scores (product if both exist).
+        Uses apply_external_function from utils to process trapezoid scoring.
+        
+        Args:
+            anchor_row: Anchor row (DataFrame row)
+            event_row: Event row (DataFrame row)
+            rule: TemporalRelationRule with compliance functions
+            patient_df: Patient's full data (for extracting target/parameter values)
+        
+        Returns:
+            float: Compliance score in [0, 1]
+        """
+        
+        scores = []
+        
+        # 1) Time-constraint compliance
+        if rule.time_constraint_compliance:
+            tcc = rule.time_constraint_compliance
+            
+            # Compute actual time gap (event.start - anchor.end)
+            time_gap = event_row["StartDateTime"] - anchor_row["EndDateTime"]
+            
+            # Extract parameter values (if any)
+            param_values = []
+            for param_ref in tcc["parameters"]:
+                param_spec = self.parameters_map.get(param_ref)
+                if param_spec:
+                    # Use default value (parameters are not in patient_df yet)
+                    param_values.append(float(param_spec["default"]))
+            
+            # Apply external function to get TrapezNode
+            try:
+                trapez_node = apply_external_function(
+                    func_name=tcc["func_name"],
+                    trapez=tcc["trapez"],
+                    constraint_type="time-constraint",
+                    *param_values
+                )
+                
+                # Compute compliance score using TrapezNode
+                time_score = trapez_node.compliance_score(time_gap)
+                scores.append(time_score)
+                
+            except Exception as e:
+                logger.error(f"[{self.name}] Time-constraint compliance error: {e}")
+                scores.append(0.0)
+        
+        # 2) Value-constraint compliance
+        if rule.value_constraint_compliance:
+            vcc = rule.value_constraint_compliance
+            
+            # Extract target values (from anchor/event rows)
+            target_values = []
+            for target_ref in vcc["targets"]:
+                target_spec = self.derived_from_map.get(target_ref)
+                if target_spec:
+                    # Check if target is anchor or event
+                    if target_spec["name"] == anchor_row["ConceptName"]:
+                        val = anchor_row["Value"]
+                    elif target_spec["name"] == event_row["ConceptName"]:
+                        val = event_row["Value"]
+                    else:
+                        continue
+                    
+                    # Extract value using idx
+                    if isinstance(val, tuple):
+                        idx = target_spec["idx"]
+                        val = val[idx] if idx < len(val) else None
+                    
+                    if val is not None:
+                        try:
+                            target_values.append(float(val))
+                        except (ValueError, TypeError):
+                            logger.warning(f"[{self.name}] Cannot convert target value to float: {val}")
+            
+            # Extract parameter values
+            param_values = []
+            for param_ref in vcc["parameters"]:
+                param_spec = self.parameters_map.get(param_ref)
+                if param_spec:
+                    param_values.append(float(param_spec["default"]))
+            
+            # Apply external function to get TrapezNode
+            try:
+                trapez_node = apply_external_function(
+                    func_name=vcc["func_name"],
+                    trapez=vcc["trapez"],
+                    constraint_type="value-constraint",
+                    *param_values
+                )
+                
+                # Compute compliance score for each target value (aggregate as minimum)
+                if target_values:
+                    value_scores = [trapez_node.compliance_score(v) for v in target_values]
+                    value_score = min(value_scores)  # Most restrictive target
+                    scores.append(value_score)
+                else:
+                    logger.warning(f"[{self.name}] No target values found for value-constraint compliance")
+                    scores.append(0.0)
+                
+            except Exception as e:
+                logger.error(f"[{self.name}] Value-constraint compliance error: {e}")
+                scores.append(0.0)
+        
+        # Combine scores (product: both must be satisfied)
+        if scores:
+            import math
+            return math.prod(scores)
+        else:
+            return 1.0  # No compliance functions → full compliance
