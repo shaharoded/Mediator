@@ -3,9 +3,9 @@
     <categories>Events</categories>
     <description>Dysglycemia event</description>
     <derived-from>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
-        <attribute name="HYPERGLYCEMIA" tak="raw-concept" idx="0"/>
-        <attribute name="HYPOGLYCEMIA" tak="raw-concept" idx="0"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="HYPERGLYCEMIA" tak="raw-concept" idx="0" ref="A2"/>
+        <attribute name="HYPOGLYCEMIA" tak="raw-concept" idx="0" ref="A3"/>
     </derived-from>
     
     <!-- 
@@ -17,18 +17,18 @@
     -->
     <abstraction-rules>
         <rule value="Hypoglycemia" operator="or">
-            <attribute name="GLUCOSE_MEASURE" idx="0">
+            <attribute ref="A1">
                 <allowed-value max="70"/>  <!-- <= 70 -->
             </attribute>
-            <attribute name="HYPOGLYCEMIA" idx="0">
+            <attribute ref="A3">
                 <allowed-value equal="True"/>  <!-- exact match -->
             </attribute>
         </rule>
         <rule value="Hyperglycemia" operator="or">
-            <attribute name="GLUCOSE_MEASURE" idx="0">
+            <attribute ref="A1">
                 <allowed-value min="250"/>  <!-- >= 250 -->
             </attribute>
-            <attribute name="HYPERGLYCEMIA" idx="0">
+            <attribute ref="A2">
                 <allowed-value equal="True"/>
             </attribute>
         </rule>

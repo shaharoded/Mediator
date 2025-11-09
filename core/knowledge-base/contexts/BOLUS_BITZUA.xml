@@ -3,7 +3,7 @@
     <categories>Medicine</categories>
     <description>BOLUS influence context</description>
     <derived-from>
-        <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0"/>
+        <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
 
     <!-- An instance of these will clip the context windows -->
@@ -14,27 +14,27 @@
 
     <abstraction-rules>
         <rule value="Very Low" operator="or">
-            <attribute name="BOLUS_BITZUA" idx="0">
+            <attribute ref="A1">
                 <allowed-value min="0" max="4"/>
             </attribute>
         </rule>
         <rule value="Low" operator="or">
-            <attribute name="BOLUS_BITZUA" idx="0">
+            <attribute ref="A1">
                 <allowed-value min="4" max="10"/>
             </attribute>
         </rule>
         <rule value="Medium" operator="or">
-            <attribute name="BOLUS_BITZUA" idx="0">
+            <attribute ref="A1">
                 <allowed-value min="10" max="20"/>
             </attribute>
         </rule>
         <rule value="High" operator="or">
-            <attribute name="BOLUS_BITZUA" idx="0">
+            <attribute ref="A1">
                 <allowed-value min="20" max="30"/>
             </attribute>
         </rule>
         <rule value="Very High" operator="or">
-            <attribute name="BOLUS_BITZUA" idx="0">
+            <attribute ref="A1">
                 <allowed-value min="30"/>
             </attribute>
         </rule>

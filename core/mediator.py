@@ -1,7 +1,6 @@
 """
 TO-DO:
  - Change both events and contexts to work with ref in the schema instead of repeated declaration of tak and idx.
- - For contexts, abstraction rules and persistence rules can probably be the same block, if we add good before / after to EventRule class and disable it for events.
  - Add test_repository.py unittests for repository dependency graph extraction (emphasize complex cases like RC -> Event -> State and LocalPattern -> LocalPattern -> GlobalPattern).
  - Can I make the pattern rule really inherit from TAKRule (with matches method) instead of the current find_matches?
  """

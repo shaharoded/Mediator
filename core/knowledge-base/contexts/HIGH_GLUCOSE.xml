@@ -3,7 +3,7 @@
     <categories>Diagnosis</categories>
     <description>HIGH GLUCOSE context to mark time windows where insulin treatment is needed</description>
     <derived-from>
-        <attribute name="GLUCOSE_MEASUREMENT" tak="raw-concept" idx="0"/>
+        <attribute name="GLUCOSE_MEASUREMENT" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
 
     <!-- An instance of these will clip the context windows -->
@@ -14,7 +14,7 @@
 
     <abstraction-rules>
         <rule value="True" operator="or">
-            <attribute name="GLUCOSE_MEASUREMENT" idx="0">
+            <attribute ref="A1">
                 <allowed-value min="180"/>
             </attribute>
         </rule>

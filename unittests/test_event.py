@@ -79,21 +79,21 @@ EVENT_DISGLYCEMIA_XML = """\
     <categories>Events</categories>
     <description>Dysglycemia event</description>
     <derived-from>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
-        <attribute name="HYPOGLYCEMIA" tak="raw-concept" idx="0"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="HYPOGLYCEMIA" tak="raw-concept" idx="0" ref="A2"/>
     </derived-from>
     
     <abstraction-rules>
         <rule value="Hypoglycemia" operator="or">
-            <attribute name="GLUCOSE_MEASURE" idx="0">
+            <attribute ref="A1">
                 <allowed-value max="70"/>
             </attribute>
-            <attribute name="HYPOGLYCEMIA" idx="0">
+            <attribute ref="A2">
                 <allowed-value equal="True"/>
             </attribute>
         </rule>
         <rule value="Hyperglycemia" operator="or">
-            <attribute name="GLUCOSE_MEASURE" idx="0">
+            <attribute ref="A1">
                 <allowed-value min="250"/>
             </attribute>
         </rule>
@@ -197,11 +197,11 @@ def test_event_validates_constraint_schema(tmp_path: Path):
     <categories>Events</categories>
     <description>Invalid constraint schema</description>
     <derived-from>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
     <abstraction-rules>
         <rule value="Bad" operator="or">
-            <attribute name="GLUCOSE_MEASURE" idx="0">
+            <attribute ref="A1">
                 <allowed-value equal="100" min="50"/>  <!-- INVALID: can't mix equal with min/max -->
             </attribute>
         </rule>
@@ -227,11 +227,11 @@ def test_event_parses_range_constraint(tmp_path: Path):
     <categories>Events</categories>
     <description>Range constraint test</description>
     <derived-from>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
     <abstraction-rules>
         <rule value="Normal Range" operator="or">
-            <attribute name="GLUCOSE_MEASURE" idx="0">
+            <attribute ref="A1">
                 <allowed-value min="70" max="180"/>  <!-- Range: [70, 180] -->
             </attribute>
         </rule>
@@ -250,8 +250,8 @@ def test_event_parses_range_constraint(tmp_path: Path):
     
     # Verify internal representation
     rule = event.abstraction_rules[0]
-    constraint = rule.constraints["GLUCOSE_MEASURE"][0]
-    assert constraint["type"] == "range"  # Internal representation
+    constraint = rule.constraints["A1"][0]
+    assert constraint["type"] == "range"
     assert constraint["min"] == 70.0
     assert constraint["max"] == 180.0
     

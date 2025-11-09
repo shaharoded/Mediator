@@ -144,37 +144,37 @@ class StateAbstractionRule(TAKRule):
 
 class EventAbstractionRule(TAKRule):
     """
-    Custom abstraction rule for Event and Context TAKs.
-    constraints: {attr_name: [{type: 'equal'|'min'|'max'|'range', value/min/max: ...}]}
+    Abstraction rule for Event and Context TAKs (now using ref mechanism).
+    constraints: {ref: [{type: 'equal'|'min'|'max'|'range', value/min/max: ...}]}
     
-    Unlike AbstractionRule (which matches tuple indices), EventAbstractionRule matches
-    by raw-concept name and supports flexible numeric constraints (min/max/range/equal).
+    Uses ref (not attr_name) to look up derived-from specs.
     """
     def __init__(self, value: str, operator: str, constraints: Dict[str, List[Dict[str, Any]]]):
         self.value = value
-        self.operator = operator.lower() # One of "and", "or"
-        self.constraints = constraints  # {attr_name: [{constraint_spec}]}
+        self.operator = operator.lower()  # "and" or "or"
+        self.constraints = constraints  # {ref: [{constraint_spec}]}
 
-    def matches(self, row: pd.Series, derived_from: List[Dict[str, Any]]) -> bool:
+    def matches(self, row: pd.Series, derived_from_map: Dict[str, Dict[str, Any]]) -> bool:
         """
         Check if a row satisfies this rule.
-        operator="or": any attribute matches
-        operator="and": all attributes match
+        operator="or": any ref matches
+        operator="and": all refs match
         
         Args:
             row: DataFrame row with columns [PatientId, ConceptName, StartDateTime, EndDateTime, Value, AbstractionType]
-            derived_from: List of {name, tak_type, idx} dicts from Event.derived_from
+            derived_from_map: {ref: {name, tak_type, idx}} from Event/Context.derived_from
         """
         results = []
-        for attr_name, constraint_list in self.constraints.items():
-            # Find derived-from entry for this attribute
-            df_entry = next((df for df in derived_from if df["name"] == attr_name), None)
+        
+        for ref, constraint_list in self.constraints.items():
+            # Look up ref in derived_from_map
+            df_entry = derived_from_map.get(ref)
             if df_entry is None:
                 results.append(False)
                 continue
 
-            # Check if row's ConceptName matches this attribute
-            if row["ConceptName"] != attr_name:
+            # Check if row's ConceptName matches this ref's TAK
+            if row["ConceptName"] != df_entry["name"]:
                 results.append(False)
                 continue
 

@@ -20,13 +20,14 @@ class Context(TAK):
     - Applies context window (before/after) — can vary by abstraction value
     - Supports clippers (external raw-concepts that trim interval boundaries)
     - No interval merging (unlike State)
+    - Context abstraction using ref mechanism (aligned with Event/Pattern).
     """
     def __init__(
         self,
         name: str,
         categories: Tuple[str, ...],
         description: str,
-        derived_from: List[Dict[str, Any]],
+        derived_from: List[Dict[str, Any]],  # [{name, tak_type, idx, ref}]
         abstraction_rules: List[EventAbstractionRule],
         context_windows: Dict[Optional[str], Dict[str, timedelta]],  # {value: {before, after}}
         clippers: List[Dict[str, Any]],
@@ -36,10 +37,15 @@ class Context(TAK):
         self.abstraction_rules = abstraction_rules
         self.context_windows = context_windows  # {value: {'before': td, 'after': td}, None: default}
         self.clippers = clippers
+        
+        # Build ref lookup map
+        self.derived_from_map: Dict[str, Dict[str, Any]] = {
+            df["ref"]: df for df in derived_from if "ref" in df
+        }
 
     @classmethod
     def parse(cls, xml_path: Union[str, Path]) -> "Context":
-        """Parse <context> XML with structural validation."""
+        """Parse <context> XML with ref mechanism."""
         xml_path = Path(xml_path)
         
         # NEW: Validate against XSD schema (graceful if lxml not available)
@@ -59,19 +65,30 @@ class Context(TAK):
             raise ValueError(f"{name}: missing <derived-from> block")
         
         derived_from = []
+        seen_refs = set()
+        
         for attr_el in df_el.findall("attribute"):
             if "name" not in attr_el.attrib or "tak" not in attr_el.attrib:
                 raise ValueError(f"{name}: <derived-from><attribute> must have 'name' and 'tak' attributes")
             
             tak_type = attr_el.attrib["tak"]
             if tak_type != "raw-concept":
-                raise ValueError(f"{name}: <derived-from><attribute tak='{tak_type}'> invalid. Contexts can only be derived from 'raw-concept'.")
+                raise ValueError(f"{name}: Contexts can only be derived from 'raw-concept'.")
             
-            derived_from.append({
+            df_spec = {
                 "name": attr_el.attrib["name"],
                 "tak_type": tak_type,
                 "idx": int(attr_el.attrib.get("idx", 0))
-            })
+            }
+            
+            if "ref" in attr_el.attrib:
+                ref = attr_el.attrib["ref"]
+                if ref in seen_refs:
+                    raise ValueError(f"{name}: duplicate ref='{ref}' in <derived-from>")
+                seen_refs.add(ref)
+                df_spec["ref"] = ref
+            
+            derived_from.append(df_spec)
         
         if not derived_from:
             raise ValueError(f"{name}: <derived-from> must contain at least one <attribute>")
@@ -121,19 +138,30 @@ class Context(TAK):
         # --- abstraction-rules (optional) ---
         abs_rules: List[EventAbstractionRule] = []
         abs_el = root.find("abstraction-rules")
+        
         if abs_el is not None:
+            missing_refs = [df["name"] for df in derived_from if "ref" not in df]
+            if missing_refs:
+                raise ValueError(
+                    f"{name}: <abstraction-rules> present but some <derived-from> attributes missing 'ref': {missing_refs}"
+                )
+            
             for rule_el in abs_el.findall("rule"):
                 val = rule_el.attrib["value"]
                 op = rule_el.attrib.get("operator", "or")
                 constraints: Dict[str, List[Dict[str, Any]]] = {}
                 
                 for attr_el in rule_el.findall("attribute"):
-                    attr_name = attr_el.attrib["name"]
-                    attr_idx = int(attr_el.attrib.get("idx", 0))
-                    allowed = []
+                    if "ref" not in attr_el.attrib:
+                        raise ValueError(f"{name}: <abstraction-rules><attribute> must have 'ref' attribute")
                     
+                    ref = attr_el.attrib["ref"]
+                    if ref not in seen_refs:
+                        raise ValueError(f"{name}: rule references unknown ref='{ref}'")
+                    
+                    allowed = []
                     for av in attr_el.findall("allowed-value"):
-                        constraint = {"idx": attr_idx}
+                        constraint = {"idx": attr_el.attrib.get("idx", 0)}
                         has_equal = "equal" in av.attrib
                         has_min = "min" in av.attrib
                         has_max = "max" in av.attrib
@@ -159,7 +187,7 @@ class Context(TAK):
                         
                         allowed.append(constraint)
                     
-                    constraints[attr_name] = allowed
+                    constraints[ref] = allowed
                 
                 abs_rules.append(EventAbstractionRule(val, op, constraints))
 
@@ -328,7 +356,7 @@ class Context(TAK):
         """Apply abstraction rules to input tuples → context labels."""
         def apply_rules_to_row(row) -> Optional[str]:
             for rule in self.abstraction_rules:
-                if rule.matches(row, self.derived_from):
+                if rule.matches(row, self.derived_from_map):  # Uses ref-based map
                     return rule.value
             return None
 
@@ -381,8 +409,8 @@ class Context(TAK):
 
         for clipper_spec in self.clippers:
             clipper_name = clipper_spec["name"]
-            clip_before = clipper_spec.get("clip_before")
-            clip_after = clipper_spec.get("clip_after")
+            clipper_before = clipper_spec.get("clip_before")
+            clipper_after = clipper_spec.get("clip_after")
             
             if clipper_name not in clipper_dfs:
                 logger.warning("[%s] Clipper '%s' not found in clipper_dfs (skipping)", self.name, clipper_name)
@@ -421,15 +449,15 @@ class Context(TAK):
                     clipper_end = clipper_row["EndDateTime"]
 
                     # Apply clip-before: trim context front if context starts before clipper
-                    if clip_before is not None and ctx_start < clipper_start:
-                        new_start = clipper_start + pd.Timedelta(clip_before)
+                    if clipper_before is not None and ctx_start < clipper_start:
+                        new_start = clipper_start + pd.Timedelta(clipper_before)
                         ctx_start = max(ctx_start, new_start)
 
                     # Apply clip-after: delay context start if context overlaps clipper end
-                    if clip_after is not None:
+                    if clipper_after is not None:
                         # Check if context still overlaps clipper after clip-before
                         if ctx_start < clipper_end:
-                            delayed_start = clipper_end + pd.Timedelta(clip_after)
+                            delayed_start = clipper_end + pd.Timedelta(clipper_after)
                             ctx_start = max(ctx_start, delayed_start)
 
                 # Update df with clipped start time

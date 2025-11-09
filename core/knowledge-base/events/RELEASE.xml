@@ -3,6 +3,7 @@
     <categories>Events</categories>
     <description>Release event</description>
     <derived-from>
+        <!-- ref optional when no abstraction-rules -->
         <attribute name="RELEASE" tak="raw-concept" idx="0"/>
     </derived-from>
 </event>

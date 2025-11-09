@@ -122,6 +122,7 @@
                                     <xs:attribute name="name" type="xs:string" use="required"/>
                                     <xs:attribute name="tak" type="xs:string" use="required"/>
                                     <xs:attribute name="idx" type="xs:nonNegativeInteger" default="0"/>
+                                    <xs:attribute name="ref" type="xs:string" use="optional"/>
                                 </xs:complexType>
                             </xs:element>
                         </xs:sequence>
@@ -144,8 +145,7 @@
                                                         </xs:complexType>
                                                     </xs:element>
                                                 </xs:sequence>
-                                                <xs:attribute name="name" type="xs:string" use="required"/>
-                                                <xs:attribute name="idx" type="xs:nonNegativeInteger" default="0"/>
+                                                <xs:attribute name="ref" type="xs:string" use="required"/>
                                             </xs:complexType>
                                         </xs:element>
                                     </xs:sequence>
@@ -273,6 +273,7 @@
                                     <xs:attribute name="name" type="xs:string" use="required"/>
                                     <xs:attribute name="tak" type="xs:string" use="required"/>
                                     <xs:attribute name="idx" type="xs:nonNegativeInteger" default="0"/>
+                                    <xs:attribute name="ref" type="xs:string" use="optional"/>
                                 </xs:complexType>
                             </xs:element>
                         </xs:sequence>
@@ -309,8 +310,7 @@
                                                         </xs:complexType>
                                                     </xs:element>
                                                 </xs:sequence>
-                                                <xs:attribute name="name" type="xs:string" use="required"/>
-                                                <xs:attribute name="idx" type="xs:nonNegativeInteger" default="0"/>
+                                                <xs:attribute name="ref" type="xs:string" use="required"/>
                                             </xs:complexType>
                                         </xs:element>
                                     </xs:sequence>

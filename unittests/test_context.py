@@ -84,12 +84,12 @@ CONTEXT_HYPOGLYCEMIA_XML = """\
     <categories>Contexts</categories>
     <description>Hypoglycemia context with windowing</description>
     <derived-from>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
     
     <abstraction-rules>
         <rule value="Hypoglycemia" operator="or">
-            <attribute name="GLUCOSE_MEASURE" idx="0">
+            <attribute ref="A1">
                 <allowed-value max="70"/>
             </attribute>
         </rule>
@@ -145,7 +145,7 @@ CONTEXT_VALUE_SPECIFIC_WINDOW_XML = """\
     <categories>Contexts</categories>
     <description>Context with value-specific windows</description>
     <derived-from>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
 
     <clippers>
@@ -154,12 +154,12 @@ CONTEXT_VALUE_SPECIFIC_WINDOW_XML = """\
     
     <abstraction-rules>
         <rule value="Low" operator="or">
-            <attribute name="GLUCOSE_MEASURE" idx="0">
+            <attribute ref="A1">
                 <allowed-value max="70"/>
             </attribute>
         </rule>
         <rule value="High" operator="or">
-            <attribute name="GLUCOSE_MEASURE" idx="0">
+            <attribute ref="A1">
                 <allowed-value min="180"/>
             </attribute>
         </rule>

@@ -18,18 +18,24 @@ class Event(TAK):
     - Outputs point-in-time records (preserves input StartDateTime/EndDateTime)
     - If no abstraction rules: emit raw values as-is
     - If abstraction rules: apply matching logic with constraints (equal, min, max, range)
+    - Event abstraction using ref mechanism (aligned with Event/Pattern).
     """
     def __init__(
         self,
         name: str,
         categories: Tuple[str, ...],
         description: str,
-        derived_from: List[Dict[str, Any]],  # [{name, tak_type, idx}]
+        derived_from: List[Dict[str, Any]],  # [{name, tak_type, idx, ref}]
         abstraction_rules: List[EventAbstractionRule],
     ):
         super().__init__(name=name, categories=categories, description=description, family="event")
-        self.derived_from = derived_from  # [{"name": "GLUCOSE_MEASURE", "tak_type": "raw-concept", "idx": 0}, ...]
+        self.derived_from = derived_from
         self.abstraction_rules = abstraction_rules
+        
+        # Build ref lookup map (for abstraction rules)
+        self.derived_from_map: Dict[str, Dict[str, Any]] = {
+            df["ref"]: df for df in derived_from if "ref" in df
+        }
 
     @classmethod
     def parse(cls, xml_path: Union[str, Path]) -> "Event":
@@ -53,6 +59,8 @@ class Event(TAK):
             raise ValueError(f"{name}: missing <derived-from> block")
         
         derived_from = []
+        seen_refs = set()
+        
         for attr_el in df_el.findall("attribute"):
             if "name" not in attr_el.attrib or "tak" not in attr_el.attrib:
                 raise ValueError(f"{name}: <derived-from><attribute> must have 'name' and 'tak' attributes")
@@ -61,11 +69,21 @@ class Event(TAK):
             if tak_type != "raw-concept":
                 raise ValueError(f"{name}: <derived-from><attribute tak='{tak_type}'> invalid. Events can only be derived from 'raw-concept'.")
             
-            derived_from.append({
+            df_spec = {
                 "name": attr_el.attrib["name"],
                 "tak_type": tak_type,
-                "idx": int(attr_el.attrib.get("idx", 0))  # default to idx=0 for raw-numeric/nominal/boolean
-            })
+                "idx": int(attr_el.attrib.get("idx", 0))
+            }
+            
+            # Parse ref (optional, but required if abstraction-rules exist)
+            if "ref" in attr_el.attrib:
+                ref = attr_el.attrib["ref"]
+                if ref in seen_refs:
+                    raise ValueError(f"{name}: duplicate ref='{ref}' in <derived-from>")
+                seen_refs.add(ref)
+                df_spec["ref"] = ref
+            
+            derived_from.append(df_spec)
         
         if not derived_from:
             raise ValueError(f"{name}: <derived-from> must contain at least one <attribute>")
@@ -73,21 +91,33 @@ class Event(TAK):
         # --- abstraction-rules (optional) ---
         abs_rules: List[EventAbstractionRule] = []
         abs_el = root.find("abstraction-rules")
+        
         if abs_el is not None:
+            # If abstraction-rules exist, all derived-from entries MUST have refs
+            missing_refs = [df["name"] for df in derived_from if "ref" not in df]
+            if missing_refs:
+                raise ValueError(
+                    f"{name}: <abstraction-rules> present but some <derived-from> attributes missing 'ref': {missing_refs}"
+                )
+            
             for rule_el in abs_el.findall("rule"):
                 val = rule_el.attrib["value"]
-                op = rule_el.attrib.get("operator", "or")  # default to "or" for events
-                constraints: Dict[str, List[Dict[str, Any]]] = {}  # {attr_name: [{constraint_spec}]}
+                op = rule_el.attrib.get("operator", "or")
+                constraints: Dict[str, List[Dict[str, Any]]] = {}  # {ref: [{constraint_spec}]}
                 
                 for attr_el in rule_el.findall("attribute"):
-                    attr_name = attr_el.attrib["name"]
-                    attr_idx = int(attr_el.attrib.get("idx", 0))
-                    allowed = []
+                    if "ref" not in attr_el.attrib:
+                        raise ValueError(f"{name}: <abstraction-rules><attribute> must have 'ref' attribute")
                     
+                    ref = attr_el.attrib["ref"]
+                    
+                    # Validate ref exists in derived-from
+                    if ref not in seen_refs:
+                        raise ValueError(f"{name}: rule references unknown ref='{ref}' (not found in <derived-from>)")
+                    
+                    allowed = []
                     for av in attr_el.findall("allowed-value"):
-                        constraint = {"idx": attr_idx}
-                        
-                        # Only 4 valid combinations of attributes
+                        constraint = {}
                         has_equal = "equal" in av.attrib
                         has_min = "min" in av.attrib
                         has_max = "max" in av.attrib
@@ -95,7 +125,6 @@ class Event(TAK):
                         # Validation: reject invalid combinations
                         if has_equal and (has_min or has_max):
                             raise ValueError(f"{name}: <allowed-value> cannot have both 'equal' and 'min'/'max' attributes")
-                        
                         if not (has_equal or has_min or has_max):
                             raise ValueError(f"{name}: <allowed-value> must have at least one of: 'equal', 'min', 'max'")
                         
@@ -116,7 +145,7 @@ class Event(TAK):
                         
                         allowed.append(constraint)
                     
-                    constraints[attr_name] = allowed
+                    constraints[ref] = allowed
                 
                 abs_rules.append(EventAbstractionRule(val, op, constraints))
 
@@ -144,37 +173,36 @@ class Event(TAK):
             if not isinstance(parent_tak, RawConcept):
                 raise ValueError(f"{self.name}: derived_from='{df['name']}' is not a RawConcept (found {parent_tak.family})")
 
-        # 2) Validate abstraction rules
+        # 2) Validate abstraction rules (ref-based)
         if self.abstraction_rules:
             for rule in self.abstraction_rules:
-                # Check operator="and" only for same-source attributes
+                # Check operator="and" only for same-source refs
                 if rule.operator == "and":
-                    attr_sources = set()
-                    for attr_name in rule.constraints.keys():
-                        # Find which derived-from this attribute belongs to
-                        matching_df = next((df for df in self.derived_from if df["name"] == attr_name), None)
-                        if matching_df is None:
-                            raise ValueError(f"{self.name}: rule references unknown attribute '{attr_name}'")
-                        attr_sources.add(matching_df["name"])
+                    ref_sources = set()
+                    for ref in rule.constraints.keys():
+                        df_entry = self.derived_from_map.get(ref)
+                        if df_entry is None:
+                            raise ValueError(f"{self.name}: rule references unknown ref='{ref}'")
+                        ref_sources.add(df_entry["name"])
                     
-                    if len(attr_sources) > 1:
-                        raise ValueError(f"{self.name}: operator='and' requires all attributes from same raw-concept source (found: {attr_sources})")
+                    if len(ref_sources) > 1:
+                        raise ValueError(f"{self.name}: operator='and' requires all refs from same raw-concept source (found: {ref_sources})")
 
-                # Check allowed values are valid for the attribute
-                for attr_name, constraints in rule.constraints.items():
-                    matching_df = next((df for df in self.derived_from if df["name"] == attr_name), None)
-                    if matching_df is None:
+                # Check allowed values are valid for the ref's attribute
+                for ref, constraints in rule.constraints.items():
+                    df_entry = self.derived_from_map.get(ref)
+                    if df_entry is None:
                         continue
                     
-                    parent_tak = repo.get(matching_df["name"])
+                    parent_tak = repo.get(df_entry["name"])
                     if isinstance(parent_tak, RawConcept):
                         # Validate constraints against raw-concept's allowed values
                         if parent_tak.concept_type == "raw":
-                            attr_idx = matching_df["idx"]
+                            attr_idx = df_entry["idx"]
                             if attr_idx >= len(parent_tak.tuple_order):
-                                raise ValueError(f"{self.name}: idx={attr_idx} out of bounds for '{parent_tak.name}' (tuple size={len(parent_tak.tuple_order)})")
-                            attr_name_in_parent = parent_tak.tuple_order[attr_idx]
-                            parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name_in_parent), None)
+                                raise ValueError(f"{self.name}: ref='{ref}' idx={attr_idx} out of bounds for '{parent_tak.name}' (tuple size={len(parent_tak.tuple_order)})")
+                            attr_name = parent_tak.tuple_order[attr_idx]
+                            parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name), None)
                         else:
                             # raw-numeric/nominal/boolean: single attribute
                             parent_attr = parent_tak.attributes[0] if parent_tak.attributes else None
@@ -184,13 +212,10 @@ class Event(TAK):
                             for c in constraints:
                                 if parent_attr["type"] == "nominal":
                                     if c["type"] == "equal" and c["value"] not in parent_attr.get("allowed", []):
-                                        raise ValueError(f"{self.name}: constraint value '{c['value']}' not in allowed values for '{attr_name}'")
-                                elif parent_attr["type"] == "numeric":
-                                    # Numeric constraints are always valid (checked against min/max at runtime)
-                                    pass
+                                        raise ValueError(f"{self.name}: ref='{ref}' constraint value '{c['value']}' not in allowed values")
                                 elif parent_attr["type"] == "boolean":
                                     if c["type"] == "equal" and c["value"] != "True":
-                                        raise ValueError(f"{self.name}: boolean constraint must be 'True'")
+                                        raise ValueError(f"{self.name}: ref='{ref}' boolean constraint must be 'True'")
 
         # If multiple attributes, or any attribute is numeric, or any raw concept idx points to numeric, abstraction_rules must be defined
         num_attrs = len(self.derived_from)
@@ -274,15 +299,13 @@ class Event(TAK):
         for rule in self.abstraction_rules:
             # Build mask for this rule
             masks = []
-            for attr_name, constraint_list in rule.constraints.items():
-                # Find derived-from entry
-                df_entry = next((d for d in self.derived_from if d["name"] == attr_name), None)
+            for ref, constraint_list in rule.constraints.items():
+                df_entry = self.derived_from_map.get(ref)
                 if df_entry is None:
                     masks.append(pd.Series([False] * len(df), index=df.index))
                     continue
                 
-                # Filter rows matching this attribute
-                attr_mask = (df["ConceptName"] == attr_name)
+                attr_mask = (df["ConceptName"] == df_entry["name"])
                 if not attr_mask.any():
                     masks.append(pd.Series([False] * len(df), index=df.index))
                     continue
