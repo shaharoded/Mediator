@@ -2,19 +2,20 @@
 
 ## Table of Contents
 1. [Overview](#overview)
-2. [TAK Families](#tak-families)
+2. [Data Assumptions & Process](#data-assumptions--process)
+3. [TAK Families](#tak-families)
    - [Raw Concepts](#1-raw-concepts)
    - [Events](#2-events)
    - [States](#3-states)
    - [Trends](#4-trends)
    - [Contexts](#5-contexts)
    - [Patterns (Local)](#6-patterns-local)
-3. [XML Schema Reference](#xml-schema-reference)
-4. [Algorithms & Implementation](#algorithms--implementation)
-5. [Validation Rules](#validation-rules)
-6. [External Functions](#external-functions)
-7. [Usage Examples](#usage-examples)
-8. [Pattern Design Best Practices](#pattern-design-best-practices)
+4. [XML Schema Reference](#xml-schema-reference)
+5. [Algorithms & Implementation](#algorithms--implementation)
+6. [Validation Rules](#validation-rules)
+7. [External Functions](#external-functions)
+8. [Usage Examples](#usage-examples)
+9. [Pattern Design Best Practices](#pattern-design-best-practices)
 
 ---
 
@@ -30,6 +31,176 @@ Each TAK family has specific:
 - **XML schema requirements** (enforced by `tak_schema.xsd`)
 - **Business logic validation** (parent dependencies, coverage checks)
 - **Computational algorithms** (discretization, merging, slope calculation)
+
+---
+
+## Data Assumptions & Process
+
+### Input Data Structure
+
+**The Mediator only accepts temporal data in a standardized format:**
+
+```sql
+CREATE TABLE IF NOT EXISTS InputPatientData (
+    RowId INTEGER PRIMARY KEY AUTOINCREMENT, -- automated, not in input.
+    PatientId INTEGER NOT NULL,
+    ConceptName TEXT NOT NULL,
+    StartDateTime TEXT NOT NULL,
+    EndDateTime TEXT NOT NULL,
+    Value TEXT NOT NULL,
+    Unit TEXT,
+    UNIQUE (PatientId, ConceptName, StartDateTime)
+);
+```
+
+**Key Requirements:**
+- **All data must be temporal:** Every record must have `StartDateTime` and `EndDateTime` (even for point-in-time measurements)
+- **ConceptName standardization:** All relevant IDs/codes from the original coding system (e.g., ICD, LOINC) must be mapped to a single `ConceptName` column
+- **Value normalization:** Units and dosages must be pre-normalized to a single scale before input
+- **Multi-attribute concepts:** Handled via RawConcept type `raw` (e.g., medication dosage + route are separate input rows, merged by Mediator)
+
+---
+
+### Research Context: Diabetes in Hospitalization
+
+This TAK knowledge base was developed for analyzing diabetes management during hospital admissions. Key assumptions:
+
+#### Patient ID = Admission ID
+- Each `PatientId` in the dataset represents a **unique hospital admission** (not a unique person)
+- A single patient can have multiple admissions (multiple `PatientId` values)
+- This design allows per-admission analysis and simplifies temporal reasoning
+
+#### Admission/Release/Death Events
+- **All admissions have:**
+  - **`ADMISSION` event** at admission time (marks episode start)
+  - **`RELEASE` or `DEATH` event** at episode end
+- **Death handling:**
+  - If death occurs ≤ 30 days after `RELEASE`, death event **replaces** release
+  - Rationale: Late deaths are considered admission-related outcomes
+
+#### State Threshold Discovery
+**Discretization thresholds were data-driven, not arbitrary:**
+- **Method:** K-means clustering + Kernel Density Estimation (KDE)
+- **Process:** Search for significant peaks/valleys in concept value distributions
+- **Outcome:** Empirically grounded state boundaries (e.g., glucose ranges)
+
+**Examples:**
+- **Simple concepts (e.g., `GLUCOSE_MEASURE`):** Single-attribute thresholds directly applied
+- **Complex concepts (e.g., `STEROIDS`):** Pre-discretized at medication level before Mediator input
+  - Rationale: Too many distinct values (drug-dose combinations) for in-Mediator discretization
+  - Solution: External pre-processing reduces to categorical labels (Low/Medium/High)
+
+#### Meal Event Assumptions
+- **MEAL events are NOT in raw data**
+- **Assumption:** Meals occur at predefined standard hospital times:
+  - Breakfast: 08:00
+  - Lunch: 12:00
+  - Dinner: 18:00
+  - Snack: 21:00 (if applicable)
+- **Implementation:** Synthetic MEAL_EVENT records injected during data preprocessing
+
+#### Prior Hospitaslization Events Assumptions
+- **AdmissionID as PatientID restricts information availability from prior admissions**
+- **Solution:** Relevant measurements (specific concepts and specific time ranges) can be synthetically added to the input data with StartDateTime == Admission time.
+
+#### Medication Orders vs. Actual Administration
+- **Available:** Actual medication administration records only
+- **NOT available:** Prescription orders or instructions
+- **Implication:** Cannot analyze prescription-administration gaps
+
+---
+
+### Design Patterns: When to Use Each TAK Family
+
+#### Events & Contexts: Semantic Unification
+**Use Case:** Multiple concepts represent the same clinical meaning
+
+**Events:** Point-in-time unification
+```xml
+<!-- DISGLYCEMIA can come from glucose lab value OR hypoglycemia flag -->
+<event name="DISGLYCEMIA_EVENT">
+    <derived-from>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="HYPOGLYCEMIA" tak="raw-concept" idx="0" ref="A2"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="Hypoglycemia" operator="or">
+            <attribute ref="A1"><allowed-value max="70"/></attribute>
+            <attribute ref="A2"><allowed-value equal="True"/></attribute>
+        </rule>
+    </abstraction-rules>
+</event>
+```
+
+**Contexts:** Interval-based unification with temporal windows
+```xml
+<!-- BASAL influence can come from SubCutaneous OR IntraVenous routes -->
+<context name="BASAL_BITZUA_CONTEXT">
+    <derived-from>
+        <attribute name="BASAL_BITZUA" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="Low" operator="or">
+            <attribute ref="A1"><allowed-value min="0" max="20"/></attribute>
+        </rule>
+    </abstraction-rules>
+    <context-windows>
+        <persistence value="Low" good-before="0h" good-after="12h"/>
+    </context-windows>
+</context>
+```
+
+**Key Difference from Patterns:**
+- Events/Contexts: Unify attributes at **exact same time** (no temporal gap) using `operator="and"` (if attributes belong to the same RawConcept) or simply pick one of K concepts that occured using `operator="or"` (not limited by number of concepts).
+- Patterns: Relate concepts with **temporal separation** (before/overlap relationships)
+
+#### Patterns: Multi-Concept Temporal Relationships
+**Use Case:** Detect relationships between 2+ concepts across time
+
+**Only Patterns can:**
+- Define temporal relationships (before/overlap with max-distance)
+- Combine concepts from different time points
+- Score compliance with clinical guidelines using fuzzy time/value windows
+
+```xml
+<!-- Pattern: Glucose measured AFTER admission, within reasonable time -->
+<pattern name="GLUCOSE_MEASURE_ON_ADMISSION_PATTERN" concept-type="local-pattern">
+    <derived-from>
+        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <temporal-relation how='before' max-distance='12h'>
+                <anchor><attribute ref="A1">...</attribute></anchor>
+                <event select='first'><attribute ref="E1">...</attribute></event>
+            </temporal-relation>
+        </rule>
+    </abstraction-rules>
+</pattern>
+```
+
+**Design Principle:**
+- **Events/Contexts:** "What happened?" (semantic abstraction)
+- **Patterns:** "What happened **after** what?" (temporal reasoning)
+
+---
+
+### Data Preprocessing Pipeline
+
+**Typical workflow for this research:**
+
+1. **Extract raw EHR data** → ICD codes, lab values, medication records
+2. **Normalize concepts:**
+   - Map all glucose-related LOINC codes → `GLUCOSE_MEASURE`
+   - Convert all insulin dosages to standard units (e.g., IU)
+3. **Discretize complex concepts** (e.g., steroids) → categorical labels
+4. **Inject synthetic events** (e.g., MEAL times)
+5. **Handle Death events** (replace RELEASE if death ≤ 30 days)
+6. **Load to InputPatientData table** (temporal format)
+7. **Run Mediator** → apply TAKs in dependency order
+8. **Output to OutputPatientData** → abstracted intervals + QA scores
+9. **Analize & Predict** → Analyze abstracted intervals (e.g. TIRP discovery) + QA scores per Pattern / group of Patterns, and predict using the abstracted data and/or discovered patterns.
 
 ---
 
