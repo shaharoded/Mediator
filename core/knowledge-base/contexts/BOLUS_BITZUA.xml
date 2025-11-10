@@ -7,45 +7,17 @@
     </derived-from>
 
     <!-- An instance of these will clip the context windows -->
-    <clippers>
-        <clipper name="DEATH" tak="raw-concept" clip-before="0s" clip-after="120y"/>
-        <clipper name="RELEASE" tak="raw-concept" clip-before="0s" clip-after="120y"/>
-    </clippers>
+    <clippers/>
 
     <abstraction-rules>
-        <rule value="Very Low" operator="or">
+        <rule value="True" operator="or">
             <attribute ref="A1">
-                <allowed-value min="0" max="4"/>
+                <allowed-value min="0"/>
             </attribute>
         </rule>
-        <rule value="Low" operator="or">
-            <attribute ref="A1">
-                <allowed-value min="4" max="10"/>
-            </attribute>
-        </rule>
-        <rule value="Medium" operator="or">
-            <attribute ref="A1">
-                <allowed-value min="10" max="20"/>
-            </attribute>
-        </rule>
-        <rule value="High" operator="or">
-            <attribute ref="A1">
-                <allowed-value min="20" max="30"/>
-            </attribute>
-        </rule>
-        <rule value="Very High" operator="or">
-            <attribute ref="A1">
-                <allowed-value min="30"/>
-            </attribute>
-        </rule>
-    <!-- idx="1" (route) is nominal and not required as attribute; no discretization needed -->
     </abstraction-rules>
 
     <context-windows>
-        <persistence value="Very Low" good-before="0h" good-after="4h"/>
-        <persistence value="Low" good-before="0h" good-after="4h"/>
-        <persistence value="Medium" good-before="0h" good-after="8h"/>
-        <persistence value="High" good-before="0h" good-after="8h"/>
-        <persistence value="Very High" good-before="0h" good-after="8h"/>
+        <persistence value="True" good-before="0h" good-after="4h"/>
     </context-windows>
 </context>
