@@ -339,4 +339,237 @@
         </xs:complexType>
     </xs:element>
     
+    <!-- ========================= -->
+    <!-- Pattern TAK (Local) -->
+    <!-- ========================= -->
+    
+    <xs:element name="pattern">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="categories" type="xs:string"/>
+                <xs:element name="description" type="xs:string"/>
+                <xs:element name="derived-from">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="attribute" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:attribute name="name" type="xs:string" use="required"/>
+                                    <xs:attribute name="tak" type="xs:string" use="required"/>
+                                    <xs:attribute name="idx" type="xs:nonNegativeInteger" use="optional"/>
+                                    <xs:attribute name="ref" type="xs:string" use="required"/>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="parameters" minOccurs="0">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="parameter" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:attribute name="name" type="xs:string" use="required"/>
+                                    <xs:attribute name="tak" type="xs:string" use="required"/>
+                                    <xs:attribute name="idx" type="xs:nonNegativeInteger" use="optional"/>
+                                    <xs:attribute name="ref" type="xs:string" use="required"/>
+                                    <xs:attribute name="default" type="xs:string" use="required"/>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="abstraction-rules">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="rule" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:sequence>
+                                        <xs:element name="context" minOccurs="0">
+                                            <xs:complexType>
+                                                <xs:sequence>
+                                                    <xs:element name="attribute" maxOccurs="unbounded">
+                                                        <xs:complexType>
+                                                            <xs:sequence>
+                                                                <xs:element name="allowed-value" maxOccurs="unbounded">
+                                                                    <xs:complexType>
+                                                                        <xs:attribute name="equal" type="xs:string" use="required"/>
+                                                                    </xs:complexType>
+                                                                </xs:element>
+                                                            </xs:sequence>
+                                                            <xs:attribute name="ref" type="xs:string" use="required"/>
+                                                        </xs:complexType>
+                                                    </xs:element>
+                                                </xs:sequence>
+                                            </xs:complexType>
+                                        </xs:element>
+                                        <xs:element name="temporal-relation">
+                                            <xs:complexType>
+                                                <xs:sequence>
+                                                    <xs:element name="anchor">
+                                                        <xs:complexType>
+                                                            <xs:sequence>
+                                                                <xs:element name="attribute" maxOccurs="unbounded">
+                                                                    <xs:complexType>
+                                                                        <xs:sequence>
+                                                                            <xs:element name="allowed-value" maxOccurs="unbounded">
+                                                                                <xs:complexType>
+                                                                                    <xs:attribute name="equal" type="xs:string" use="optional"/>
+                                                                                    <xs:attribute name="min" type="xs:decimal" use="optional"/>
+                                                                                    <xs:attribute name="max" type="xs:decimal" use="optional"/>
+                                                                                </xs:complexType>
+                                                                            </xs:element>
+                                                                        </xs:sequence>
+                                                                        <xs:attribute name="ref" type="xs:string" use="required"/>
+                                                                    </xs:complexType>
+                                                                </xs:element>
+                                                            </xs:sequence>
+                                                            <xs:attribute name="select" use="optional">
+                                                                <xs:simpleType>
+                                                                    <xs:restriction base="xs:string">
+                                                                        <xs:enumeration value="first"/>
+                                                                        <xs:enumeration value="last"/>
+                                                                    </xs:restriction>
+                                                                </xs:simpleType>
+                                                            </xs:attribute>
+                                                        </xs:complexType>
+                                                    </xs:element>
+                                                    <xs:element name="event">
+                                                        <xs:complexType>
+                                                            <xs:sequence>
+                                                                <xs:element name="attribute" maxOccurs="unbounded">
+                                                                    <xs:complexType>
+                                                                        <xs:sequence>
+                                                                            <xs:element name="allowed-value" maxOccurs="unbounded">
+                                                                                <xs:complexType>
+                                                                                    <xs:attribute name="equal" type="xs:string" use="optional"/>
+                                                                                    <xs:attribute name="min" type="xs:decimal" use="optional"/>
+                                                                                    <xs:attribute name="max" type="xs:decimal" use="optional"/>
+                                                                                </xs:complexType>
+                                                                            </xs:element>
+                                                                        </xs:sequence>
+                                                                        <xs:attribute name="ref" type="xs:string" use="required"/>
+                                                                    </xs:complexType>
+                                                                </xs:element>
+                                                            </xs:sequence>
+                                                            <xs:attribute name="select" use="optional">
+                                                                <xs:simpleType>
+                                                                    <xs:restriction base="xs:string">
+                                                                        <xs:enumeration value="first"/>
+                                                                        <xs:enumeration value="last"/>
+                                                                    </xs:restriction>
+                                                                </xs:simpleType>
+                                                            </xs:attribute>
+                                                        </xs:complexType>
+                                                    </xs:element>
+                                                </xs:sequence>
+                                                <xs:attribute name="how" use="required">
+                                                    <xs:simpleType>
+                                                        <xs:restriction base="xs:string">
+                                                            <xs:enumeration value="before"/>
+                                                            <xs:enumeration value="overlap"/>
+                                                        </xs:restriction>
+                                                    </xs:simpleType>
+                                                </xs:attribute>
+                                                <xs:attribute name="max-distance" type="durationString" use="optional"/>
+                                            </xs:complexType>
+                                        </xs:element>
+                                        <xs:element name="compliance-function" minOccurs="0">
+                                            <xs:complexType>
+                                                <xs:sequence>
+                                                    <xs:element name="time-constraint-compliance" minOccurs="0">
+                                                        <xs:complexType>
+                                                            <xs:sequence>
+                                                                <xs:element name="function">
+                                                                    <xs:complexType>
+                                                                        <xs:sequence>
+                                                                            <xs:element name="trapeze">
+                                                                                <xs:complexType>
+                                                                                    <xs:attribute name="trapezeA" type="durationString" use="required"/>
+                                                                                    <xs:attribute name="trapezeB" type="durationString" use="required"/>
+                                                                                    <xs:attribute name="trapezeC" type="durationString" use="required"/>
+                                                                                    <xs:attribute name="trapezeD" type="durationString" use="required"/>
+                                                                                </xs:complexType>
+                                                                            </xs:element>
+                                                                            <xs:element name="parameters" minOccurs="0">
+                                                                                <xs:complexType>
+                                                                                    <xs:sequence>
+                                                                                        <xs:element name="parameter" maxOccurs="unbounded">
+                                                                                            <xs:complexType>
+                                                                                                <xs:attribute name="ref" type="xs:string" use="required"/>
+                                                                                            </xs:complexType>
+                                                                                        </xs:element>
+                                                                                    </xs:sequence>
+                                                                                </xs:complexType>
+                                                                            </xs:element>
+                                                                        </xs:sequence>
+                                                                        <xs:attribute name="name" type="xs:string" use="required"/>
+                                                                    </xs:complexType>
+                                                                </xs:element>
+                                                            </xs:sequence>
+                                                        </xs:complexType>
+                                                    </xs:element>
+                                                    <xs:element name="value-constraint-compliance" minOccurs="0">
+                                                        <xs:complexType>
+                                                            <xs:sequence>
+                                                                <xs:element name="target">
+                                                                    <xs:complexType>
+                                                                        <xs:sequence>
+                                                                            <xs:element name="attribute" maxOccurs="unbounded">
+                                                                                <xs:complexType>
+                                                                                    <xs:attribute name="ref" type="xs:string" use="required"/>
+                                                                                </xs:complexType>
+                                                                            </xs:element>
+                                                                        </xs:sequence>
+                                                                    </xs:complexType>
+                                                                </xs:element>
+                                                                <xs:element name="function">
+                                                                    <xs:complexType>
+                                                                        <xs:sequence>
+                                                                            <xs:element name="trapeze">
+                                                                                <xs:complexType>
+                                                                                    <xs:attribute name="trapezeA" type="xs:decimal" use="required"/>
+                                                                                    <xs:attribute name="trapezeB" type="xs:decimal" use="required"/>
+                                                                                    <xs:attribute name="trapezeC" type="xs:decimal" use="required"/>
+                                                                                    <xs:attribute name="trapezeD" type="xs:decimal" use="required"/>
+                                                                                </xs:complexType>
+                                                                            </xs:element>
+                                                                            <xs:element name="parameters" minOccurs="0">
+                                                                                <xs:complexType>
+                                                                                    <xs:sequence>
+                                                                                        <xs:element name="parameter" maxOccurs="unbounded">
+                                                                                            <xs:complexType>
+                                                                                                <xs:attribute name="ref" type="xs:string" use="required"/>
+                                                                                            </xs:complexType>
+                                                                                        </xs:element>
+                                                                                    </xs:sequence>
+                                                                                </xs:complexType>
+                                                                            </xs:element>
+                                                                        </xs:sequence>
+                                                                        <xs:attribute name="name" type="xs:string" use="required"/>
+                                                                    </xs:complexType>
+                                                                </xs:element>
+                                                            </xs:sequence>
+                                                        </xs:complexType>
+                                                    </xs:element>
+                                                </xs:sequence>
+                                            </xs:complexType>
+                                        </xs:element>
+                                    </xs:sequence>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+            </xs:sequence>
+            <xs:attribute name="name" type="xs:string" use="required"/>
+            <xs:attribute name="concept-type" use="required">
+                <xs:simpleType>
+                    <xs:restriction base="xs:string">
+                        <xs:enumeration value="local-pattern"/>
+                        <xs:enumeration value="global-pattern"/>
+                    </xs:restriction>
+                </xs:simpleType>
+            </xs:attribute>
+        </xs:complexType>
+    </xs:element>
+    
 </xs:schema>

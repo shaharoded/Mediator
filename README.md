@@ -57,7 +57,7 @@ Mediator/
 │   │   ├── state.py                        # State TAK
 │   │   ├── trend.py                        # Trend TAK
 │   │   ├── context.py                      # Context TAK
-│   │   ├── pattern.py                      # Pattern TAK (TODO)
+│   │   ├── pattern.py                      # Pattern TAK - Local (DONE) and Global (TODO)
 │   │   └── utils.py                        # Shared utilities
 │   ├── config.py                           # TAK paths
 │   └── mediator.py                         # Orchestration engine + CLI

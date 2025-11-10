@@ -48,7 +48,7 @@ class Context(TAK):
         """Parse <context> XML with ref mechanism."""
         xml_path = Path(xml_path)
         
-        # NEW: Validate against XSD schema (graceful if lxml not available)
+        # Validate against XSD schema (graceful if lxml not available)
         validate_xml_against_schema(xml_path)
         
         root = ET.parse(xml_path).getroot()
