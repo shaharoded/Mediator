@@ -8,8 +8,7 @@
 
     <!-- An instance of these will clip the context windows -->
     <clippers>
-        <clipper name="DEATH" tak="raw-concept" clip-before="0s" clip-after="120y"/>
-        <clipper name="RELEASE" tak="raw-concept" clip-before="0s" clip-after="120y"/>
+        <clipper name="NORMAL_GLUCOSE_IND" tak="raw-concept" clip-before="0s" clip-after="1s"/>
     </clippers>
 
     <abstraction-rules>

@@ -19,7 +19,7 @@
             </context>
 
             <!-- Relation between 2 KBTA objects -->
-            <temporal-relation how='before' max-distance='8h'>
+            <temporal-relation how='before' max-distance='12h'>
                 <anchor>
                     <attribute ref="A1">
                         <allowed-value equal="True"/>

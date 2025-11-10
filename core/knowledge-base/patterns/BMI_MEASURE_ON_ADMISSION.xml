@@ -11,7 +11,7 @@
     <abstraction-rules>
         <rule>
             <!-- Relation between 2 KBTA objects -->
-            <temporal-relation how='before' max-distance='48h'>
+            <temporal-relation how='before' max-distance='72h'>
                 <anchor>
                     <attribute ref="A1">
                         <allowed-value equal="True"/>
