@@ -336,6 +336,7 @@ class Context(TAK):
                 return val
             df["Value"] = df.apply(extract_value, axis=1)
             df = self._apply_context_window(df)
+            df = self._clip_overlapping_contexts(df)
             df = self._apply_clippers(df, clipper_dfs)
             df["ConceptName"] = self.name
             df["AbstractionType"] = self.family
@@ -345,6 +346,7 @@ class Context(TAK):
         # Apply abstraction rules
         df = self._abstract(df)
         df = self._apply_context_window(df)  # Now uses per-value windows
+        df = self._clip_overlapping_contexts(df)
         df = self._apply_clippers(df, clipper_dfs)
         df["ConceptName"] = self.name
         df["AbstractionType"] = self.family
@@ -391,6 +393,55 @@ class Context(TAK):
             df.loc[mask, "EndDateTime"] = df.loc[mask, "EndDateTime"] + pd.Timedelta(window["after"])
         
         return df
+
+    def _clip_overlapping_contexts(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Clip overlapping context intervals from the same context (regardless of value).
+        
+        When a new context instance starts, any previous active context interval
+        gets clipped at the new instance's start time.
+        
+        Algorithm:
+        - Sort by StartDateTime
+        - Use shift() to get next row's StartDateTime
+        - Vectorized comparison: if EndDateTime > next_StartDateTime → clip
+        - Filter out invalid intervals (start >= end) in single operation
+        
+        Args:
+            df: DataFrame with windowed context intervals
+        
+        Returns:
+            DataFrame with non-overlapping context intervals
+        """
+        if df.empty or len(df) == 1:
+            return df
+        
+        # Sort by StartDateTime (MUST be sorted for clipping logic)
+        df = df.sort_values("StartDateTime").reset_index(drop=True)
+        
+        # Convert timestamps once (ensure datetime64[ns])
+        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
+        df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
+        
+        # VECTORIZED: Get next row's StartDateTime (shift up by 1)
+        df["_next_start"] = df["StartDateTime"].shift(-1)
+        
+        # VECTORIZED: Clip EndDateTime if it overlaps with next interval
+        # If current.EndDateTime > next.StartDateTime → clip to next.StartDateTime
+        mask_overlap = df["EndDateTime"] > df["_next_start"]
+        df.loc[mask_overlap, "EndDateTime"] = df.loc[mask_overlap, "_next_start"]
+        
+        # VECTORIZED: Remove invalid intervals (start >= end)
+        valid_mask = df["StartDateTime"] < df["EndDateTime"]
+        num_removed = (~valid_mask).sum()
+        
+        if num_removed > 0:
+            logger.info("[%s] Removed %d context intervals (invalid after auto-clipping)", self.name, num_removed)
+        
+        # Cleanup: drop helper column
+        df = df[valid_mask].drop(columns=["_next_start"])
+        
+        return df.reset_index(drop=True)
 
     def _apply_clippers(self, df: pd.DataFrame, clipper_dfs: Dict[str, pd.DataFrame] = None) -> pd.DataFrame:
         """

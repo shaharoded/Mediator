@@ -355,6 +355,8 @@ This TAK knowledge base was developed for analyzing diabetes management during h
 
 **Output:** Windowed intervals (e.g., `[08:00 → 20:00, "Low Basal"]`)
 
+NOTE: If 2 contexts's windows overlap, the later one automatically clips the earlier one's window.
+
 ---
 
 ### 6. Patterns (Local)

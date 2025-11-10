@@ -7,7 +7,7 @@
     </derived-from>
 
     <!-- An instance of these will clip the context windows -->
-    <clippers/>
+    </clippers>
 
     <abstraction-rules>
         <rule value="True" operator="or">

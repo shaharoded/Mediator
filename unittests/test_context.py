@@ -441,3 +441,166 @@ def test_context_apply_extracts_value_by_idx(tmp_path: Path):
     df_out = context.apply(df_in)
     assert list(df_out["Value"]) == ["Breakfast", "Lunch"]
     assert all(not isinstance(v, tuple) for v in df_out["Value"])
+
+
+def test_context_auto_clips_overlapping_same_context(repo_with_hypoglycemia_context):
+    """
+    Test that overlapping context intervals from the same context auto-clip each other.
+    
+    Given two context instances at T=08:00 and T=09:30:
+    - First:  windowed [07:00 - 10:00] (08:00 - 1h, 08:00 + 2h)
+    - Second: windowed [08:30 - 11:30] (09:30 - 1h, 09:30 + 2h)
+    
+    Expected: First interval clipped to [07:00 - 08:30] (ends at second's start)
+    """
+    context = repo_with_hypoglycemia_context.get("HYPOGLYCEMIA_CONTEXT")
+    
+    df_in = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (60,), "raw-concept"),  # First
+        (1, "GLUCOSE_MEASURE", make_ts("09:30"), make_ts("09:30"), (55,), "raw-concept"),  # Second (overlaps)
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    
+    df_out = context.apply(df_in)
+    assert len(df_out) == 2
+    
+    # First interval: clipped at second's start
+    row1 = df_out.iloc[0]
+    assert row1["StartDateTime"] == make_ts("07:00")
+    assert row1["EndDateTime"] == make_ts("08:30")  # Clipped (was 10:00)
+    
+    # Second interval: unaffected
+    row2 = df_out.iloc[1]
+    assert row2["StartDateTime"] == make_ts("08:30")
+    assert row2["EndDateTime"] == make_ts("11:30")
+
+
+def test_context_auto_clips_removes_invalid_intervals(repo_with_hypoglycemia_context):
+    """
+    Test that context intervals that become invalid after auto-clipping are removed.
+    
+    Given two context instances at T=08:00 and T=08:05 (very close):
+    - First:  windowed [07:00 - 10:00]
+    - Second: windowed [07:05 - 10:05]
+    
+    If second starts BEFORE first's original start (after windowing), first becomes invalid.
+    """
+    context = repo_with_hypoglycemia_context.get("HYPOGLYCEMIA_CONTEXT")
+    
+    df_in = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (60,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("08:05"), make_ts("08:05"), (65,), "raw-concept"),  # Very close
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    
+    df_out = context.apply(df_in)
+    
+    # First interval: windowed [07:00 - 10:00]
+    # Second interval: windowed [07:05 - 10:05]
+    # Clipping: first's end becomes 07:05 (second's start)
+    # Result: first = [07:00 - 07:05] ✅ VALID
+    # So we expect 2 intervals
+    assert len(df_out) == 2
+    
+    row1 = df_out.iloc[0]
+    assert row1["StartDateTime"] == make_ts("07:00")
+    assert row1["EndDateTime"] == make_ts("07:05")
+    
+    row2 = df_out.iloc[1]
+    assert row2["StartDateTime"] == make_ts("07:05")
+    assert row2["EndDateTime"] == make_ts("10:05")
+
+
+def test_context_auto_clips_multiple_overlaps(repo_with_hypoglycemia_context):
+    """
+    Test that multiple overlapping context intervals are clipped sequentially.
+    
+    Given three context instances:
+    - T=08:00 → windowed [07:00 - 10:00]
+    - T=09:00 → windowed [08:00 - 11:00]
+    - T=10:00 → windowed [09:00 - 12:00]
+    
+    Expected:
+    - First:  [07:00 - 08:00] (clipped by second)
+    - Second: [08:00 - 09:00] (clipped by third)
+    - Third:  [09:00 - 12:00] (no clip)
+    """
+    context = repo_with_hypoglycemia_context.get("HYPOGLYCEMIA_CONTEXT")
+    
+    df_in = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (60,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("09:00"), make_ts("09:00"), (65,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), (58,), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    
+    df_out = context.apply(df_in)
+    assert len(df_out) == 3
+    
+    assert df_out.iloc[0]["EndDateTime"] == make_ts("08:00")  # Clipped
+    assert df_out.iloc[1]["EndDateTime"] == make_ts("09:00")  # Clipped
+    assert df_out.iloc[2]["EndDateTime"] == make_ts("12:00")  # Unclipped
+
+
+def test_context_auto_clips_different_values(tmp_path: Path):
+    """
+    Test that overlapping contexts with DIFFERENT values still clip each other.
+    
+    This is the key requirement: auto-clipping happens regardless of value.
+    """
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    context_xml = CONTEXT_VALUE_SPECIFIC_WINDOW_XML
+    context_path = write_xml(tmp_path, "BASAL_CONTEXT.xml", context_xml)
+    admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
+    
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(admission_path))
+    set_tak_repository(repo)
+    context = Context.parse(context_path)
+    repo.register(context)
+    
+    # Two glucose measurements: first=60 (Low), second=200 (High)
+    df_in = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (60,), "raw-concept"),   # Low
+        (1, "GLUCOSE_MEASURE", make_ts("09:00"), make_ts("09:00"), (200,), "raw-concept"),  # High
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    
+    df_out = context.apply(df_in)
+    assert len(df_out) == 2
+    
+    # First (Low): windowed [07:30 - 10:00] (08:00 - 30m, 08:00 + 2h)
+    # Second (High): windowed [08:00 - 13:00] (09:00 - 1h, 09:00 + 4h)
+    # Clipping: first's end clipped to 08:00 (second's start)
+    
+    row1 = df_out.iloc[0]
+    assert row1["Value"] == "Low"
+    assert row1["StartDateTime"] == make_ts("07:30")
+    assert row1["EndDateTime"] == make_ts("08:00")  # Clipped (was 10:00)
+    
+    row2 = df_out.iloc[1]
+    assert row2["Value"] == "High"
+    assert row2["StartDateTime"] == make_ts("08:00")
+    assert row2["EndDateTime"] == make_ts("13:00")  # Unclipped
+
+
+def test_context_no_overlap_no_clipping(repo_with_hypoglycemia_context):
+    """
+    Test that non-overlapping context intervals are NOT clipped.
+    
+    Given two context instances far apart:
+    - T=08:00 → windowed [07:00 - 10:00]
+    - T=12:00 → windowed [11:00 - 14:00]
+    
+    Expected: Both intervals unchanged (no overlap).
+    """
+    context = repo_with_hypoglycemia_context.get("HYPOGLYCEMIA_CONTEXT")
+    
+    df_in = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (60,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("12:00"), make_ts("12:00"), (65,), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    
+    df_out = context.apply(df_in)
+    assert len(df_out) == 2
+    
+    # No clipping should occur
+    assert df_out.iloc[0]["EndDateTime"] == make_ts("10:00")  # Unchanged
+    assert df_out.iloc[1]["EndDateTime"] == make_ts("14:00")  # Unchanged

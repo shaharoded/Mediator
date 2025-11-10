@@ -7,7 +7,7 @@
     </derived-from>
 
     <!-- An instance of these will clip the context windows -->
-    <clippers/>
+    </clippers>
     
     <context-windows>
         <!-- A DD diagnosis is relevant from the beginning of the hospitalization -->

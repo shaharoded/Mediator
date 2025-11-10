@@ -7,7 +7,7 @@
     </derived-from>
 
     <!-- An instance of these will clip the context windows -->
-    <clippers/>
+    </clippers>
 
     <context-windows>
         <persistence value="Low" good-before="0h" good-after="6h"/>
