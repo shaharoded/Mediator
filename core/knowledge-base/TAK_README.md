@@ -737,7 +737,7 @@ else:
 
 **Purpose:** Transform compliance function trapezoid values dynamically using patient-specific parameters.
 
-**Registration:** All external functions are registered in `core/tak/external_functions.py`:
+**Registration:** All external functions are registered in `core/tak/external_functions.py` using the `@register()` decorator:
 
 ```python
 # filepath: core/tak/external_functions.py
@@ -762,38 +762,69 @@ def identity(x, *args):
 
 @register("mul")
 def multiply(x, *args):
-    """Multiply x by first parameter."""
-    if not args:
-        raise ValueError("mul() requires at least one parameter")
-    return x * args[0]
+    """Multiply x by all parameters."""
+    result = x
+    for arg in args:
+        result *= arg
+    return result
+
+@register("add")
+def add(x, *args):
+    """Add all parameters to x."""
+    result = x
+    for arg in args:
+        result += arg
+    return result
 ```
 
 ### Creating Custom External Functions
 
-**Step 1: Define the function**
+**Step 1: Define and register the function**
 
 ```python
 # filepath: core/tak/external_functions.py
 
 @register("custom_dosage")
-def custom_dosage_adjustment(x, weight, age):
+def custom_dosage_adjustment(x, *args):
     """
     Custom dosage adjustment based on weight and age.
     
+    The function is called ONCE per trapez value (A, B, C, or D).
+    Parameters are passed as *args in the order declared in XML.
+    
     Args:
-        x: Base trapez value
-        weight: Patient weight in kg
-        age: Patient age in years
+        x: Single trapez value (e.g., trapezeA=0 or trapezeB=0.2)
+        *args: Variable parameters in declaration order
+               args[0] = weight (from P1)
+               args[1] = age (from P2)
     
     Returns:
-        Adjusted trapez value
+        Transformed trapez value (must preserve ordering: A <= B <= C <= D)
+    
+    Example:
+        If trapez=(0, 0.2, 0.6, 1) and weight=72, age=70:
+        - custom_dosage(0, 72, 70) → 0 * 72 * 0.8 = 0
+        - custom_dosage(0.2, 72, 70) → 0.2 * 72 * 0.8 = 11.52
+        - custom_dosage(0.6, 72, 70) → 0.6 * 72 * 0.8 = 34.56
+        - custom_dosage(1, 72, 70) → 1 * 72 * 0.8 = 57.6
+        Result trapez: (0, 11.52, 34.56, 57.6)
     """
-    # Example: adjust by weight, with age correction
+    # Extract parameters (function trusts caller to provide correct order/count)
+    if len(args) < 2:
+        raise ValueError("custom_dosage requires 2 parameters: weight, age")
+    
+    weight = args[0]
+    age = args[1]
+    
+    # Apply transformation
     adjusted = x * weight
     if age > 65:
         adjusted *= 0.8  # 20% reduction for elderly patients
+    
     return adjusted
 ```
+
+**That's it!** The `@register()` decorator automatically adds the function to `REPO`. No manual registration needed.
 
 **Step 2: Use in pattern XML**
 
@@ -803,8 +834,8 @@ def custom_dosage_adjustment(x, weight, age):
         <attribute ref="E1"/>  <!-- BASAL dosage -->
     </target>
     <function name="custom_dosage">
-        <parameter ref="P1"/>  <!-- Weight -->
-        <parameter ref="P2"/>  <!-- Age -->
+        <parameter ref="P1"/>  <!-- Weight (args[0]) -->
+        <parameter ref="P2"/>  <!-- Age (args[1]) -->
         <trapeze trapezeA="0" trapezeB="0.2" trapezeC="0.6" trapezeD="1"/>
     </function>
 </value-constraint-compliance>
@@ -826,20 +857,39 @@ def custom_dosage_adjustment(x, weight, age):
 ```python
 def my_function(trapez_value: float, *params) -> float:
     """
+    External function contract for compliance calculations.
+    
+    The function is called FOUR times per compliance calculation:
+    - Once for trapezeA
+    - Once for trapezeB
+    - Once for trapezeC
+    - Once for trapezeD
+    
     Args:
-        trapez_value: One value from trapezoid (A, B, C, or D)
-        *params: Variable number of resolved parameter values
+        trapez_value: Single trapez value (A, B, C, or D)
+        *params: Resolved parameter values in XML declaration order
+                 (patient-specific values or defaults)
     
     Returns:
-        Transformed trapez value (must preserve ordering: A <= B <= C <= D)
+        Transformed trapez value
+    
+    Requirements:
+        1. Must accept (trapez_value, *params) signature
+        2. Return type must be float (or time-duration compatible)
+        3. Must preserve ordering: f(A) <= f(B) <= f(C) <= f(D)
+        4. Should validate parameter count/types internally
     """
     pass
 ```
 
 **Requirements:**
-- Function must accept `(trapez_value, *params)`
+- Function must accept `(trapez_value, *params)` signature
 - Return type must be `float` (for value-constraint) or compatible with `parse_duration()` (for time-constraint, returned as float seconds)
 - **Ordering constraint:** `f(A) <= f(B) <= f(C) <= f(D)` (enforced at validation time)
+- **Parameter trust model:** The function is responsible for:
+  - Checking parameter count (`len(params)`)
+  - Extracting parameters in correct order (`weight = params[0], age = params[1]`)
+  - Type validation (if needed)
 
 **Error Handling:**
 - Raise `ValueError` if parameter count is incorrect
@@ -852,7 +902,6 @@ def my_function(trapez_value: float, *params) -> float:
 
 ```python
 # filepath: unittests/test_external_functions.py
-import pytest
 from core.tak.external_functions import REPO
 
 def test_custom_dosage_adjustment():
@@ -867,7 +916,18 @@ def test_custom_dosage_adjustment():
     # Test ordering preservation
     results = [func(x, 72, 50) for x in [0, 0.2, 0.6, 1]]
     assert results == sorted(results), "Function must preserve ordering"
+    
+    # Test parameter validation
+    import pytest
+    with pytest.raises(ValueError, match="requires 2 parameters"):
+        func(10, 70)  # Missing age parameter
 ```
+
+**Key Testing Points:**
+1. ✅ Correct transformation for normal cases
+2. ✅ Correct transformation for edge cases (e.g., elderly)
+3. ✅ Ordering preservation: `f(A) <= f(B) <= f(C) <= f(D)`
+4. ✅ Parameter validation (count/type checks)
 
 ---
 
