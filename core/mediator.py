@@ -1,8 +1,6 @@
 """
 TO-DO:
  - write_output_thread function needs to split Pattern output and write properly to the 2 different tables
- - Add test_repository.py unittests for repository dependency graph extraction (emphasize complex cases like RC -> Event -> State and LocalPattern -> LocalPattern -> GlobalPattern).
- - Can I make the pattern rule really inherit from TAKRule (with matches method) instead of the current find_matches?
  """
 
 from __future__ import annotations
@@ -19,7 +17,7 @@ from tqdm.asyncio import tqdm as async_tqdm
 from tqdm import tqdm
 
 from .tak.tak import TAK
-from tak.repository import TAKRepository, set_tak_repository
+from .tak.repository import TAKRepository, set_tak_repository
 from .tak.raw_concept import RawConcept
 from .tak.event import Event
 from .tak.state import State
