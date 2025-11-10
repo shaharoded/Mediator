@@ -34,6 +34,8 @@ class TAKRepository:
     Does not cache .df (computed on-demand to save memory).
     """
     taks: Dict[str, TAK] = field(default_factory=dict)  # {tak_name: TAK_instance}
+    graph: Dict[str, Set[str]] = field(default_factory=dict)  # Dependency graph
+    execution_order: List[str] = field(default_factory=list)  # Topological sort result
 
     def register(self, tak: TAK) -> None:
         """Register a TAK by name."""
@@ -52,28 +54,30 @@ class TAKRepository:
         (Individual TAK validation already happens in each TAK's .parse() method.)
         """
         # 1) Build dependency graph and detect circular references
-        dep_graph = self._build_dependency_graph()
-        self._detect_circular_references(dep_graph)
+        self.graph = self._build_dependency_graph()  # Store as instance attribute
+        self._detect_circular_references(self.graph)
 
         # 2) Compute topological sort order
-        self.execution_order = self._topological_sort(dep_graph)
+        self.execution_order = self._topological_sort(self.graph)
         logger.info(f"TAK execution order: {self.execution_order}")
 
     def _build_dependency_graph(self) -> Dict[str, Set[str]]:
         """
         Build a dependency graph: {tak_name: set_of_dependent_tak_names}
         A TAK depends on all TAKs it references (derived-from, parameters, clippers, etc.)
+        
+        Returns deduplicated dependency sets (Pattern references same TAK twice → appears once).
         """
         graph: Dict[str, Set[str]] = {name: set() for name in self.taks}
 
         for tak_name, tak in self.taks.items():
             dependencies = self._extract_dependencies(tak)
-            graph[tak_name] = dependencies
+            graph[tak_name] = dependencies  # set() automatically deduplicates
 
         return graph
 
     def _extract_dependencies(self, tak: TAK) -> Set[str]:
-        """Extract all TAK names that this TAK depends on."""
+        """Extract all TAK names that this TAK depends on (deduplicated)."""
         # Import here to avoid circular imports
         from .raw_concept import RawConcept
         from .event import Event
