@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="BOLUS_BITZUA" concept-type="raw">
     <categories>Medications</categories>
-    <description>Raw concept to manage the administration of BOLUS insulin</description>
+    <description>Raw concept to manage the administration of BOLUS (short term) insulin</description>
     <attributes>
         <attribute name="BOLUS_DOSAGE" type="numeric">
             <numeric-allowed-values>
