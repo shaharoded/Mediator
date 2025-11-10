@@ -8,7 +8,10 @@
 
     <!-- An instance of these will clip the context windows -->
     <clippers>
+        <!-- Instance of non-high glucose immediately terminates the context window -->
         <clipper name="NORMAL_GLUCOSE_IND" tak="raw-concept" clip-before="0s" clip-after="1s"/>
+        <!-- Admission of BOLUS before HIGH GLUCOSE gives "quiet" of 4 hours -->
+        <clipper name="BOLUS_BITZUA" tak="raw-concept" clip-before="0s" clip-after="4h"/>
     </clippers>
 
     <abstraction-rules>

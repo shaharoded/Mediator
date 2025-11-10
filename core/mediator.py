@@ -1,7 +1,7 @@
 """
 TO-DO:
  - write_output_thread function needs to split Pattern output and write properly to the 2 different tables
- - define that max-distance=0 for 'before' will also capture 'overlap', so that if context window overlaps with event, it is included
+ - define that max-distance=0 for 'before' will also capture 'overlap', so that if context window overlaps with event, it is included. As long as anchor.StartTime < event.StartTime, we can treat "before" as inclusive of overlap.
  """
 
 from __future__ import annotations

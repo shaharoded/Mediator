@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="MEAL_CONTEXT">
+    <categories>Events</categories>
+    <description>Meal event, with context window around meal times</description>
+    <derived-from>
+        <attribute name="MEAL" tak="raw-concept" idx="0"/>
+    </derived-from>
+
+    <!-- An instance of these will clip the context windows -->
+    </clippers>
+    
+    <context-windows>
+        <persistence good-before="2h" good-after="2h"/>
+    </context-windows>
+</context>
