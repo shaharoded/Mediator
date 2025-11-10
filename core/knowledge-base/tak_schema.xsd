@@ -489,15 +489,9 @@
                                                                                     <xs:attribute name="trapezeD" type="durationString" use="required"/>
                                                                                 </xs:complexType>
                                                                             </xs:element>
-                                                                            <xs:element name="parameters" minOccurs="0">
+                                                                            <xs:element name="parameter" minOccurs="0" maxOccurs="unbounded">
                                                                                 <xs:complexType>
-                                                                                    <xs:sequence>
-                                                                                        <xs:element name="parameter" maxOccurs="unbounded">
-                                                                                            <xs:complexType>
-                                                                                                <xs:attribute name="ref" type="xs:string" use="required"/>
-                                                                                            </xs:complexType>
-                                                                                        </xs:element>
-                                                                                    </xs:sequence>
+                                                                                    <xs:attribute name="ref" type="xs:string" use="required"/>
                                                                                 </xs:complexType>
                                                                             </xs:element>
                                                                         </xs:sequence>
@@ -524,23 +518,17 @@
                                                                 <xs:element name="function">
                                                                     <xs:complexType>
                                                                         <xs:sequence>
+                                                                            <xs:element name="parameter" minOccurs="0" maxOccurs="unbounded">
+                                                                                <xs:complexType>
+                                                                                    <xs:attribute name="ref" type="xs:string" use="required"/>
+                                                                                </xs:complexType>
+                                                                            </xs:element>
                                                                             <xs:element name="trapeze">
                                                                                 <xs:complexType>
                                                                                     <xs:attribute name="trapezeA" type="xs:decimal" use="required"/>
                                                                                     <xs:attribute name="trapezeB" type="xs:decimal" use="required"/>
                                                                                     <xs:attribute name="trapezeC" type="xs:decimal" use="required"/>
                                                                                     <xs:attribute name="trapezeD" type="xs:decimal" use="required"/>
-                                                                                </xs:complexType>
-                                                                            </xs:element>
-                                                                            <xs:element name="parameters" minOccurs="0">
-                                                                                <xs:complexType>
-                                                                                    <xs:sequence>
-                                                                                        <xs:element name="parameter" maxOccurs="unbounded">
-                                                                                            <xs:complexType>
-                                                                                                <xs:attribute name="ref" type="xs:string" use="required"/>
-                                                                                            </xs:complexType>
-                                                                                        </xs:element>
-                                                                                    </xs:sequence>
                                                                                 </xs:complexType>
                                                                             </xs:element>
                                                                         </xs:sequence>

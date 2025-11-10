@@ -420,8 +420,10 @@ Patterns use **ref-based indexing** to reference attributes/parameters (similar 
      ```
 
 6. **Output Generation:**
+    - **Input NOT found:** Output for the pattern is only calculated if the patient has any records related to that pattern (anchor / event / parameters / context) otherwise - an empty df is returned.
    - **Pattern found:** One or more intervals with `Value="True"/"Partial"/"False"`, compliance scores in separate columns
-   - **Pattern NOT found:** Single row with `Value="False"`, `StartDateTime/EndDateTime=NaT`
+   - **Pattern NOT found:** Single row with `Value="False"`, `StartDateTime/EndDateTime=NaT`,
+   compliance scores in seperate columns will be 0, if compliance function is defined for the Pattern.
 
 #### Compliance Functions
 
@@ -433,8 +435,8 @@ Score
     |       /                    \
 0.5 |      /                      \
     |     /                        \
-0.0 |____/                          \____
-        A    B              C    D       (time or value)
+0.0 |____/                          \_________
+        A    B                  C    D  (time or value)
 ```
 - **[A, B]:** Score linearly increases 0 → 1
 - **[B, C]:** Score = 1 (full compliance)

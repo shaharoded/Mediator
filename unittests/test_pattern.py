@@ -17,10 +17,8 @@ from pathlib import Path
 
 from core.tak.pattern import LocalPattern
 from core.tak.raw_concept import RawConcept
-from core.tak.event import Event
 from core.tak.context import Context
 from core.tak.repository import set_tak_repository, TAKRepository
-from core.tak.external_functions import REPO, register
 
 
 # -----------------------------
@@ -280,7 +278,7 @@ PATTERN_MULTIPLE_RULES_XML = """\
     </derived-from>
     <abstraction-rules>
         <rule>
-            <temporal-relation how='before' max-distance='8h'>
+            <temporal-relation how='before' max-distance='12h'>
                 <anchor>
                     <attribute ref="A1">
                         <allowed-value equal="True"/>
@@ -301,7 +299,7 @@ PATTERN_MULTIPLE_RULES_XML = """\
             </compliance-function>
         </rule>
         <rule>
-            <temporal-relation how='before' max-distance='24h'>
+            <temporal-relation how='before' max-distance='36h'>
                 <anchor>
                     <attribute ref="A1">
                         <allowed-value equal="True"/>
@@ -974,22 +972,25 @@ def test_overlap_pattern_not_found(repo_overlap_pattern):
 # -----------------------------
 
 def test_pattern_empty_input_returns_false(repo_simple_pattern):
-    """Empty input → pattern not found (False with NaT times)."""
+    """Empty input → empty output (no PatientId to emit False for)."""
     pattern_tak = repo_simple_pattern.get("GLUCOSE_ON_ADMISSION_SIMPLE")
     df_empty = pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    
+
     df_out = pattern_tak.apply(df_empty)
-    
-    assert len(df_out) == 1
-    assert df_out.iloc[0]["Value"] == "False"
-    assert pd.isna(df_out.iloc[0]["StartDateTime"])
+
+    # FIXED: Empty input returns empty DataFrame (no PatientId for False row)
+    assert len(df_out) == 0
+    assert df_out.empty
 
 
-def test_pattern_select_last_prefers_latest_event(repo_simple_pattern):
+def test_pattern_select_last_prefers_latest_event(repo_simple_pattern, tmp_path):
     """select='last' prefers latest event."""
-    # Modify pattern to use select='last' for event
-    pattern_xml_last = PATTERN_SIMPLE_XML.replace("select='first'", "select='last'")
-    pattern_path = write_xml(Path("/tmp"), "PATTERN_LAST.xml", pattern_xml_last)
+    # Modify pattern to use select='last' for event AND change name to avoid duplicate
+    pattern_xml_last = PATTERN_SIMPLE_XML.replace("select='first'", "select='last'").replace(
+        'name="GLUCOSE_ON_ADMISSION_SIMPLE"',
+        'name="GLUCOSE_ON_ADMISSION_LAST"'
+    )
+    pattern_path = write_xml(tmp_path, "PATTERN_LAST.xml", pattern_xml_last)
     
     repo = repo_simple_pattern
     pattern_tak = LocalPattern.parse(pattern_path)
@@ -997,26 +998,26 @@ def test_pattern_select_last_prefers_latest_event(repo_simple_pattern):
     
     admission_tak = repo.get("ADMISSION_EVENT")
     glucose_tak = repo.get("GLUCOSE_MEASURE")
-    
+
     df_raw = pd.DataFrame([
         (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
         (1, "GLUCOSE_LAB", make_ts("09:00"), make_ts("09:00"), 100),
         (1, "GLUCOSE_LAB", make_ts("11:00"), make_ts("11:00"), 120),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
-    
+
     df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
     df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
     df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
-    
+
     df_out = pattern_tak.apply(df_input)
-    
+
     assert len(df_out) == 1
     # select='last' → picks glucose at 11:00 (not 09:00)
     assert df_out.iloc[0]["EndDateTime"] == make_ts("11:00")
 
 
-def test_pattern_combined_score_averages_time_and_value(repo_value_compliance):
-    """Combined score: average of time (1.0) + value (0.5) = 0.75 → Partial."""
+def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, tmp_path):
+    """Combined score: average of time (1.0) + value (0.694) = 0.847 → Partial."""
     # Modify pattern to include BOTH time and value compliance
     pattern_xml_combined = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -1064,7 +1065,7 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance):
     </abstraction-rules>
 </pattern>
 """
-    pattern_path = write_xml(Path("/tmp"), "PATTERN_COMBINED.xml", pattern_xml_combined)
+    pattern_path = write_xml(tmp_path, "PATTERN_COMBINED.xml", pattern_xml_combined)  # FIX: use tmp_path
     
     repo = repo_value_compliance
     pattern_tak = LocalPattern.parse(pattern_path)
@@ -1089,9 +1090,11 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance):
     
     assert len(df_out) == 1
     row = df_out.iloc[0]
-    # Time score: 2h in [0h, 24h] → 1.0
-    # Value score: 10 units = 0.14 units/kg → in [0, 14.4] → score = (14.4 - 10) / (14.4 - 0) ≈ 0.31
-    # Combined: (1.0 + 0.31) / 2 = 0.65 → Partial
+    # Time score: 2h in [0h, 24h] → 1.0 (in plateau zone [B, C])
+    # Value score: 10 units, weight=72 kg → trapez=[0, 14.4, 43.2, 72]
+    #   10 is in ramp-up zone [A=0, B=14.4]
+    #   score = (10 - 0) / (14.4 - 0) = 10/14.4 ≈ 0.694
+    # Combined: (1.0 + 0.694) / 2 = 0.847 → Partial
     assert row["Value"] == "Partial"
     assert row["TimeConstraintScore"] == 1.0
-    assert 0.3 < row["ValueConstraintScore"] < 0.35
+    assert 0.68 < row["ValueConstraintScore"] < 0.71  # Correct range for 0.694
