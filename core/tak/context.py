@@ -311,25 +311,29 @@ class Context(TAK):
                 if rule_val not in window_values and not default_window_exists:
                     raise ValueError(f"{self.name}: abstraction rule value='{rule_val}' has no value-specific window and no default window defined")
 
-    def apply(self, df: pd.DataFrame, clipper_dfs: Dict[str, pd.DataFrame] = None) -> pd.DataFrame:
+    def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Apply context abstraction to input data (from one or more derived-from raw-concepts).
-        Input:  PatientId, ConceptName(any derived-from), StartDateTime, EndDateTime, Value(tuple), AbstractionType
+        Input:  PatientId, ConceptName(any derived-from OR clipper), StartDateTime, EndDateTime, Value(tuple), AbstractionType
         Output: PatientId, ConceptName(self.name), StartDateTime, EndDateTime(windowed+clipped), Value(context_label), AbstractionType
         
         Args:
-            df: Input DataFrame from raw-concepts
-            clipper_dfs: Dict of {clipper_name: DataFrame} for clipping boundaries (optional)
+            df: Input DataFrame containing BOTH derived-from concepts AND clippers (filtered by Mediator)
         """
         if df.empty:
             return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
 
         logger.info("[%s] apply() start | input_rows=%d", self.name, len(df))
 
-        # Filter to only relevant derived-from concepts
+        # Separate derived-from concepts from clippers
         valid_concepts = {df_item["name"] for df_item in self.derived_from}
-        df = df[df["ConceptName"].isin(valid_concepts)].copy()
-        if df.empty:
+        clipper_names = {clipper["name"] for clipper in self.clippers}
+        
+        # Split input DataFrame
+        df_main = df[df["ConceptName"].isin(valid_concepts)].copy()
+        df_clippers = df[df["ConceptName"].isin(clipper_names)].copy()
+        
+        if df_main.empty:
             logger.info("[%s] apply() end | post-filter=0 rows", self.name)
             return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
 
@@ -343,25 +347,25 @@ class Context(TAK):
                 if isinstance(val, tuple):
                     return val[idx] if idx < len(val) else None
                 return val
-            df["Value"] = df.apply(extract_value, axis=1)
-            df = self._apply_context_window(df)
-            df = self._clip_overlapping_contexts(df)
-            df = self._apply_clippers(df, clipper_dfs)
-            df["ConceptName"] = self.name
-            df["AbstractionType"] = self.family
-            logger.info("[%s] apply() end (no rules) | output_rows=%d", self.name, len(df))
-            return df[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
+            df_main["Value"] = df_main.apply(extract_value, axis=1)
+            df_main = self._apply_context_window(df_main)
+            df_main = self._clip_overlapping_contexts(df_main)
+            df_main = self._apply_clippers(df_main, df_clippers)
+            df_main["ConceptName"] = self.name
+            df_main["AbstractionType"] = self.family
+            logger.info("[%s] apply() end (no rules) | output_rows=%d", self.name, len(df_main))
+            return df_main[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
 
         # Apply abstraction rules
-        df = self._abstract(df)
-        df = self._apply_context_window(df)  # Now uses per-value windows
-        df = self._clip_overlapping_contexts(df)
-        df = self._apply_clippers(df, clipper_dfs)
-        df["ConceptName"] = self.name
-        df["AbstractionType"] = self.family
+        df_main = self._abstract(df_main)
+        df_main = self._apply_context_window(df_main)  # Now uses per-value windows
+        df_main = self._clip_overlapping_contexts(df_main)
+        df_main = self._apply_clippers(df_main, df_clippers)
+        df_main["ConceptName"] = self.name
+        df_main["AbstractionType"] = self.family
 
-        logger.info("[%s] apply() end | output_rows=%d", self.name, len(df))
-        return df[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
+        logger.info("[%s] apply() end | output_rows=%d", self.name, len(df_main))
+        return df_main[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
 
     def _abstract(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply abstraction rules to input tuples → context labels."""
@@ -452,17 +456,23 @@ class Context(TAK):
         
         return df.reset_index(drop=True)
 
-    def _apply_clippers(self, df: pd.DataFrame, clipper_dfs: Dict[str, pd.DataFrame] = None) -> pd.DataFrame:
+    def _apply_clippers(self, df: pd.DataFrame, clipper_df: pd.DataFrame) -> pd.DataFrame:
         """
         Clip intervals using clipper boundaries.
         Processes each context row to find overlapping clippers and adjust start times.
+        
+        Args:
+            df: Context output DataFrame
+            clipper_df: DataFrame with clipper intervals (extracted from input)
         """
-        if df.empty or not self.clippers or clipper_dfs is None:
+        if df.empty or clipper_df.empty:
             return df
 
         # Convert timestamps once
         df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
         df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
+        clipper_df["StartDateTime"] = pd.to_datetime(clipper_df["StartDateTime"])
+        clipper_df["EndDateTime"] = pd.to_datetime(clipper_df["EndDateTime"])
 
         # Track indices to drop
         indices_to_drop = set()
@@ -472,17 +482,11 @@ class Context(TAK):
             clipper_before = clipper_spec.get("clip_before")
             clipper_after = clipper_spec.get("clip_after")
             
-            if clipper_name not in clipper_dfs:
-                logger.warning("[%s] Clipper '%s' not found in clipper_dfs (skipping)", self.name, clipper_name)
-                continue
-            
-            clipper_df = clipper_dfs[clipper_name].copy()
+            # Filter to this specific clipper
+            clipper_df = clipper_df[clipper_df["ConceptName"] == clipper_name]
             if clipper_df.empty:
+                logger.warning("[%s] Clipper '%s' not found in input (skipping)", self.name, clipper_name)
                 continue
-
-            # Convert clipper timestamps
-            clipper_df["StartDateTime"] = pd.to_datetime(clipper_df["StartDateTime"])
-            clipper_df["EndDateTime"] = pd.to_datetime(clipper_df["EndDateTime"])
 
             # For each context row, find ALL overlapping clippers
             for idx, ctx_row in df.iterrows():

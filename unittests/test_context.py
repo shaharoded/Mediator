@@ -113,7 +113,7 @@ CONTEXT_WITH_CLIPPER_XML = """\
     </derived-from>
 
     <clippers>
-        <clipper name="ADMISSION" clip-before="30m" clip-after="1h"/>
+        <clipper name="ADMISSION" tak="raw-concept" clip-before="30m" clip-after="1h"/>
     </clippers>
     
     <context-windows>
@@ -149,7 +149,7 @@ CONTEXT_VALUE_SPECIFIC_WINDOW_XML = """\
     </derived-from>
 
     <clippers>
-        <clipper name="ADMISSION" clip-before="0h" clip-after="1h"/>
+        <clipper name="ADMISSION" tak="raw-concept" clip-before="0h" clip-after="1h"/>
     </clippers>
     
     <abstraction-rules>
@@ -235,34 +235,21 @@ def test_context_with_clippers(repo_with_clipped_context):
     """Context clipping produces valid output when context doesn't fully overlap clipper."""
     context = repo_with_clipped_context.get("CLIPPED_CONTEXT")
     
-    # CORRECTED TEST CASE: Input glucose @ 05:00 (earlier, so windowed interval extends beyond clipper)
+    # Input: MEAL @ 05:00 + ADMISSION clipper @ 06:30-08:00
     df_in = pd.DataFrame([
         (1, "MEAL", make_ts("05:00"), make_ts("05:00"), ("Breakfast",), "raw-concept"),
+        (1, "ADMISSION", make_ts("06:30"), make_ts("08:00"), ("True",), "raw-concept"),  # Clipper
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     
-    # Clipper: admission interval [06:30 - 08:00]
-    clipper_df = pd.DataFrame([
-        (1, "ADMISSION", make_ts("06:30"), make_ts("08:00"), ("True",), "raw-concept"),
-    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    
-    df_out = context.apply(df_in, clipper_dfs={"ADMISSION": clipper_df})
+    # FIXED: No clipper_dfs parameter — Context separates internally
+    df_out = context.apply(df_in)
     
     # Windowed: [04:00 - 07:00] (05:00 - 1h, 05:00 + 2h)
     # Clipped:
     #   - clip-before=30m: Context starts BEFORE clipper (04:00 < 06:30) → new start = 06:30 + 30m = 07:00
-    #   - clip-after=1h: Context start (07:00) >= clipper end (08:00)? NO (07:00 < 08:00) → delay to 08:00 + 1h = 09:00
+    #   - clip-after=1h: Context start (07:00) < clipper end (08:00) → delay to 08:00 + 1h = 09:00
     # Result: [09:00 - 07:00] → INVALID (flipped) → removed
-    # WAIT, let me recalculate...
-    
-    # Actually:
-    # - Windowed: [04:00 - 07:00]
-    # - Clipper [06:30 - 08:00] overlaps (clipper.start <= context.end AND clipper.end >= context.start)
-    # - Apply clip-before: context starts BEFORE clipper (04:00 < 06:30) → new start = 06:30 + 30m = 07:00
-    # - Apply clip-after: context overlaps clipper (07:00 < 08:00) → delay start to 08:00 + 1h = 09:00
-    # - Result: [09:00 - 07:00] → INVALID → removed
-    
-    # Let me use a better test case where output is VALID
-    assert len(df_out) == 0  # This scenario removes context (correct behavior)
+    assert len(df_out) == 0
 
 
 def test_context_clipping_valid_output(repo_with_clipped_context):
@@ -272,22 +259,16 @@ def test_context_clipping_valid_output(repo_with_clipped_context):
     # Input glucose @ 04:00 (early start, long window)
     df_in = pd.DataFrame([
         (1, "MEAL", make_ts("04:00"), make_ts("04:00"), ("Breakfast",), "raw-concept"),
+        (1, "ADMISSION", make_ts("05:30"), make_ts("06:00"), ("True",), "raw-concept"),  # Clipper
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     
-    # Clipper: admission interval [05:30 - 06:00] (short clipper)
-    clipper_df = pd.DataFrame([
-        (1, "ADMISSION", make_ts("05:30"), make_ts("06:00"), ("True",), "raw-concept"),
-    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    
-    df_out = context.apply(df_in, clipper_dfs={"ADMISSION": clipper_df})
+    df_out = context.apply(df_in)
     
     # Windowed: [03:00 - 06:00] (04:00 - 1h, 04:00 + 2h)
     # Clipped:
     #   - clip-before=30m: Context starts BEFORE clipper (03:00 < 05:30) → new start = 05:30 + 30m = 06:00
     #   - clip-after=1h: Context start (06:00) >= clipper end (06:00)? YES → no delay
     # Result: [06:00 - 06:00] → INVALID (start == end) → removed
-    
-    # STILL REMOVED! Let me use an even better case...
     assert len(df_out) == 0
 
 
@@ -298,14 +279,10 @@ def test_context_clipping_really_valid_output(repo_with_clipped_context):
     # Input glucose @ 10:00
     df_in = pd.DataFrame([
         (1, "MEAL", make_ts("10:00"), make_ts("10:00"), ("Breakfast",), "raw-concept"),
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:30"), ("True",), "raw-concept"),  # Clipper
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     
-    # Clipper: admission interval [08:00 - 08:30] (early clipper, no overlap)
-    clipper_df = pd.DataFrame([
-        (1, "ADMISSION", make_ts("08:00"), make_ts("08:30"), ("True",), "raw-concept"),
-    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    
-    df_out = context.apply(df_in, clipper_dfs={"ADMISSION": clipper_df})
+    df_out = context.apply(df_in)
     
     # Windowed: [09:00 - 12:00] (10:00 - 1h, 10:00 + 2h)
     # Clipper [08:00 - 08:30]: no overlap (clipper.end < context.start) → no clipping
@@ -320,18 +297,14 @@ def test_context_multiple_clippers_applied(repo_with_clipped_context):
     """Multiple clippers: only first clipper overlaps."""
     context = repo_with_clipped_context.get("CLIPPED_CONTEXT")
     
-    # Input glucose @ 05:00
+    # Input glucose @ 05:00 + two clippers
     df_in = pd.DataFrame([
         (1, "MEAL", make_ts("05:00"), make_ts("05:00"), ("Breakfast",), "raw-concept"),
-    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    
-    # Two admission clippers
-    clipper_df = pd.DataFrame([
         (1, "ADMISSION", make_ts("06:00"), make_ts("06:30"), ("True",), "raw-concept"),
         (1, "ADMISSION", make_ts("10:00"), make_ts("11:00"), ("True",), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     
-    df_out = context.apply(df_in, clipper_dfs={"ADMISSION": clipper_df})
+    df_out = context.apply(df_in)
     
     # Windowed: [04:00 - 07:00] (05:00 - 1h, 05:00 + 2h)
     # Clipper 1 [06:00-06:30]: overlaps

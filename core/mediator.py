@@ -5,7 +5,7 @@ TO-DO:
  """
 
 from __future__ import annotations
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from pathlib import Path
 import asyncio
 import json
@@ -345,26 +345,17 @@ class Mediator:
                 
                 dfs.append(df_parent)
             
-            # Resolve clippers (also RawConcepts)
+            # Resolve clippers (can be ANY TAK type now)
             if tak.clippers:
                 for clipper in tak.clippers:
                     clipper_name = clipper["name"]
-                    clipper_tak = self.repo.get(clipper_name)
-                    if clipper_tak is None:
-                        logger.warning(f"[{tak.name}] Clipper '{clipper_name}' not found")
-                        continue
                     
+                    # Check cache (clipper should already be computed)
                     if clipper_name in tak_outputs:
                         df_clipper = tak_outputs[clipper_name]
+                        dfs.append(df_clipper)
                     else:
-                        df_clipper = self.get_input_for_raw_concept(patient_id, clipper_tak)
-                        tak_outputs[clipper_name] = df_clipper
-                    
-                    dfs.append(df_clipper)
-            
-            if not dfs:
-                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
-            return pd.concat(dfs, ignore_index=True)
+                        logger.warning(f"[{tak.name}] Clipper '{clipper_name}' not found in cache")
         
         # CASE 6: Pattern → resolve derived_from + parameters (Events, States, Trends, Contexts, Patterns)
         if isinstance(tak, Pattern):
@@ -592,10 +583,10 @@ class Mediator:
         
         return df[valid_mask]
     
-    def _process_patient_sync(self, patient_id: int) -> Dict[str, int]:
+    def _process_patient_sync(self, patient_id: int) -> Dict[str, Union[int, str]]:
         """
-        Process a single patient using pre-computed topological execution order.
-        TAKs are already sorted so dependencies are guaranteed to be calculated first.
+        Process a single patient through all TAKs in dependency order.
+        Returns per-TAK output row counts for stats tracking.
         """
         # Create new DB connection for this thread (SQLite thread safety)
         thread_da = DataAccess(db_path=self.db_path)
@@ -628,11 +619,14 @@ class Mediator:
                     # Apply global clippers BEFORE caching/writing
                     df_output = self._apply_global_clippers(df_output, clipper_df)
                     
+                    # Cache ALL TAK outputs (before Pattern split)
+                    tak_outputs[tak_name] = df_output
+                    
                     # Handle Pattern outputs (split into OutputPatientData + PatientQAScores)
                     if isinstance(tak, Pattern):
                         df_output_main, df_output_scores = self._split_pattern_output(df_output)
                         
-                        # Cache only main output (for downstream patterns)
+                        # Update cache with main output (for downstream patterns)
                         tak_outputs[tak_name] = df_output_main
                         
                         # Write main output to OutputPatientData
@@ -654,6 +648,7 @@ class Mediator:
                             rows_written = self.write_output_thread(df_output, thread_da)
                         else:
                             rows_written = len(df_output)
+                        
                         stats[tak.name] = rows_written
                     
                 except Exception as e:
@@ -804,22 +799,17 @@ class Mediator:
                 
                 dfs.append(df_parent)
             
-            # Resolve clippers (also RawConcepts)
+            # Resolve clippers (can be ANY TAK type)
             if tak.clippers:
                 for clipper in tak.clippers:
                     clipper_name = clipper["name"]
-                    clipper_tak = self.repo.get(clipper_name)
-                    if clipper_tak is None:
-                        logger.warning(f"[{tak.name}] Clipper '{clipper_name}' not found")
-                        continue
                     
+                    # Check cache (clipper should already be computed)
                     if clipper_name in tak_outputs:
                         df_clipper = tak_outputs[clipper_name]
+                        dfs.append(df_clipper)
                     else:
-                        df_clipper = self.get_input_for_raw_concept_thread(patient_id, clipper_tak, da)
-                        tak_outputs[clipper_name] = df_clipper
-                    
-                    dfs.append(df_clipper)
+                        logger.warning(f"[{tak.name}] Clipper '{clipper_name}' not found in cache")
             
             if not dfs:
                 return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
