@@ -220,11 +220,16 @@ class Mediator:
             rows = self.da.fetch_records(query, ())
             return [int(r[0]) for r in rows]
     
-    def get_input_for_raw_concept(self, patient_id: int, raw_concept: RawConcept) -> pd.DataFrame:
+    def get_input_for_raw_concept(self, patient_id: int, raw_concept: RawConcept, da: Optional[DataAccess] = None) -> pd.DataFrame:
         """
-        Query InputPatientData for a RawConcept's df by its attributes.
+        Query InputPatientData for a RawConcept's data by its attributes.
+        Thread-safe: uses provided DataAccess instance if given, otherwise uses self.da.
+        
         Returns DataFrame with columns: PatientId, ConceptName, StartDateTime, EndDateTime, Value, AbstractionType
         """
+        # Use provided connection or default
+        db = da if da is not None else self.da
+        
         concept_names = [a["name"] for a in raw_concept.attributes]
         table = "InputPatientData"
         
@@ -237,181 +242,203 @@ class Mediator:
         query = query.replace("{CONCEPT_PLACEHOLDERS}", placeholders)
         
         params = (patient_id, *concept_names)
-        rows = self.da.fetch_records(query, params)
+        rows = db.fetch_records(query, params)
         
         if not rows:
             return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
         
         df = pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
-        df["AbstractionType"] = "raw-concept"  # dummy value for input data
+        df["AbstractionType"] = "raw-concept"
         return df
     
-    def get_input_for_tak(self, patient_id: int, tak: TAK, tak_outputs: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    def get_input_for_tak(self, patient_id: int, tak: TAK, tak_outputs: Dict[str, pd.DataFrame], da: DataAccess) -> pd.DataFrame:
         """
-        Recursively resolve dependencies and build input DataFrame for a TAK.
-        Uses cached tak_outputs to provide TAK DataFrames to derived TAKs (avoids redundant computation).
+        Resolve TAK input dependencies (READ-ONLY cache access).
+        
+        BASE CASE (RawConcept):
+            - Check cache first (if TAK was already applied)
+            - If not cached: query InputPatientData (caller will cache after TAK.apply())
+        
+        RECURSIVE CASE (Event/State/Trend/Context/Pattern):
+            - All dependencies MUST be in cache (guaranteed by topological execution order)
+            - Concatenate cached DataFrames
         
         Args:
             patient_id: Patient ID
             tak: TAK instance to prepare input for
-            tak_outputs: Cache of {tak_name: DataFrame} for ALL TAK families
+            tak_outputs: Cache of {tak_name: DataFrame} (OUTPUT of tak.apply())
+            da: DataAccess instance (thread-safe)
         
         Returns:
             DataFrame ready for tak.apply()
         """
-        # CASE 1: RawConcept → query InputPatientData (or use cache)
+        # BASE CASE: RawConcept
         if isinstance(tak, RawConcept):
-            # Add caching for RawConcepts
+            # Check cache (if TAK was already applied)
             if tak.name in tak_outputs:
                 return tak_outputs[tak.name]
             
-            df = self.get_input_for_raw_concept(patient_id, tak)
-            tak_outputs[tak.name] = df  # Cache the result
-            return df
+            # Not cached → query InputPatientData (caller will cache AFTER apply())
+            return self.get_input_for_raw_concept(patient_id, tak, da)
         
-        # CASE 2: Event → resolve derived_from (list of raw-concepts)
+        # RECURSIVE CASE: All other TAKs (cache-only lookups)
+        
+        # Helper to get dependency from cache (with error handling)
+        def get_cached_dependency(dep_name: str) -> pd.DataFrame:
+            if dep_name not in tak_outputs:
+                raise RuntimeError(
+                    f"TAK '{tak.name}' dependency '{dep_name}' not in cache for patient {patient_id}. "
+                    f"This indicates incorrect execution order."
+                )
+            return tak_outputs[dep_name]
+        
+        # CASE: Event → derived_from is list of RawConcepts
         if isinstance(tak, Event):
-            dfs = []
-            for df_spec in tak.derived_from:
-                parent_name = df_spec["name"]
-                parent_tak = self.repo.get(parent_name)
-                
-                # Get from cache or compute
-                if parent_name in tak_outputs:
-                    df_parent = tak_outputs[parent_name]
-                else:
-                    df_parent = self.get_input_for_raw_concept(patient_id, parent_tak)
-                    tak_outputs[parent_name] = df_parent
-                
-                dfs.append(df_parent)
-            
-            if not dfs:
-                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+            dfs = [get_cached_dependency(df_spec["name"]) for df_spec in tak.derived_from]
             return pd.concat(dfs, ignore_index=True)
         
-        # CASE 3: State → resolve single derived_from (RawConcept OR Event)
+        # CASE: State → single derived_from (RawConcept or Event)
         if isinstance(tak, State):
-            parent_name = tak.derived_from
-            parent_tak = self.repo.get(parent_name)
-            
-            if isinstance(parent_tak, RawConcept):
-                if parent_name in tak_outputs:
-                    return tak_outputs[parent_name]
-                df_parent = self.get_input_for_raw_concept(patient_id, parent_tak)
-                tak_outputs[parent_name] = df_parent
-                return df_parent
-            elif isinstance(parent_tak, Event):
-                # Check cache first (Event should already be computed)
-                if parent_name in tak_outputs:
-                    return tak_outputs[parent_name]
-                # Compute Event if not cached (shouldn't happen with correct execution order)
-                df_event_input = self.get_input_for_tak(patient_id, parent_tak, tak_outputs)
-                df_event_output = parent_tak.apply(df_event_input)
-                tak_outputs[parent_name] = df_event_output
-                return df_event_output
-            else:
-                # Never happens due to prior validation
-                raise RuntimeError(f"[{tak.name}] States can only derive from RawConcepts or Events")
+            return get_cached_dependency(tak.derived_from)
         
-        # CASE 4: Trend → resolve single derived_from (RawConcept only)
+        # CASE: Trend → single derived_from (RawConcept only)
         if isinstance(tak, Trend):
-            parent_name = tak.derived_from
-            parent_tak = self.repo.get(parent_name)
-            
-            if parent_name in tak_outputs:
-                return tak_outputs[parent_name]
-            df_parent = self.get_input_for_raw_concept(patient_id, parent_tak)
-            tak_outputs[parent_name] = df_parent
-            return df_parent
+            return get_cached_dependency(tak.derived_from)
         
-        # CASE 5: Context → resolve derived_from (list of RawConcepts only) + clippers
+        # CASE: Context → derived_from (RawConcepts) + clippers (any TAK type)
         if isinstance(tak, Context):
-            dfs = []
-            
-            # Resolve parent (derived_from) — ALL must be RawConcepts
-            for df_spec in tak.derived_from:
-                parent_name = df_spec["name"]
-                parent_tak = self.repo.get(parent_name)
-                if parent_tak is None:
-                    logger.warning(f"[{tak.name}] Derived-from '{parent_name}' not found")
-                    continue
-                
-                # Get from cache or compute
-                if parent_name in tak_outputs:
-                    df_parent = tak_outputs[parent_name]
-                else:
-                    df_parent = self.get_input_for_raw_concept(patient_id, parent_tak)
-                    tak_outputs[parent_name] = df_parent
-                
-                dfs.append(df_parent)
-            
-            # Resolve clippers (can be ANY TAK type now)
-            if tak.clippers:
-                for clipper in tak.clippers:
-                    clipper_name = clipper["name"]
-                    
-                    # Check cache (clipper should already be computed)
-                    if clipper_name in tak_outputs:
-                        df_clipper = tak_outputs[clipper_name]
-                        dfs.append(df_clipper)
-                    else:
-                        logger.warning(f"[{tak.name}] Clipper '{clipper_name}' not found in cache")
-        
-        # CASE 6: Pattern → resolve derived_from + parameters (Events, States, Trends, Contexts, Patterns)
-        if isinstance(tak, Pattern):
-            dfs = []
-            
-            # Resolve derived-from attributes
-            for df_spec in tak.derived_from:
-                parent_name = df_spec["name"]
-                
-                # Check cache (all dependencies should be computed by now)
-                if parent_name not in tak_outputs:
-                    logger.warning(f"[{tak.name}] Parent '{parent_name}' not found in cache (should be computed earlier)")
-                    continue
-                
-                dfs.append(tak_outputs[parent_name])
-            
-            # Resolve parameters (can be ANY TAK type, not just RawConcepts)
-            if hasattr(tak, 'parameters') and tak.parameters:
-                for param_spec in tak.parameters:
-                    param_name = param_spec["name"]
-                    
-                    # Check if parameter TAK is already in cache
-                    if param_name not in tak_outputs:
-                        # Parameter not computed yet → check if it's a RawConcept (query InputPatientData)
-                        param_tak = self.repo.get(param_name)
-                        if isinstance(param_tak, RawConcept):
-                            df_param = self.get_input_for_raw_concept(patient_id, param_tak)
-                            tak_outputs[param_name] = df_param
-                            dfs.append(df_param)
-                        else:
-                            # Non-RawConcept parameter → should already be in cache (from earlier execution)
-                            logger.warning(
-                                f"[{tak.name}] Parameter '{param_name}' (type={param_tak.family if param_tak else 'Unknown'}) "
-                                f"not found in cache. Parameters must be computed before patterns that use them."
-                            )
-                    else:
-                        # Use cached parameter data
-                        dfs.append(tak_outputs[param_name])
-            
-            if not dfs:
-                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+            dfs = [get_cached_dependency(spec["name"]) for spec in tak.derived_from + tak.clippers]
             return pd.concat(dfs, ignore_index=True)
+        
+        # CASE: Pattern → derived_from + parameters
+        if isinstance(tak, Pattern):
+            dfs = [get_cached_dependency(spec["name"]) for spec in tak.derived_from + tak.parameters]
+            return pd.concat(dfs, ignore_index=True)
+        
+        # Fallback (should never reach here)
+        raise RuntimeError(f"Unknown TAK type: {tak.family}")
+
+    def _process_patient_sync(self, patient_id: int) -> Dict[str, Union[int, str]]:
+        """
+        Process a single patient through all TAKs in dependency order.
+        Returns per-TAK output row counts for stats tracking.
+        """
+        # Create new DB connection for this thread (SQLite thread safety)
+        thread_da = DataAccess(db_path=self.db_path)
+        
+        logger.info(f"[Patient {patient_id}] Processing start")
+        stats = {}
+        tak_outputs = {}  # Cache ALL TAK outputs for this patient_id
+        
+        try:
+            # Phase 0: Query global clipper times ONCE per patient
+            clipper_df = self._get_global_clipper_times(patient_id, thread_da)
+            execution_order = getattr(self.repo, 'execution_order', list(self.repo.taks.keys()))
+
+            # Process TAKs in topological order
+            for tak_name in execution_order:
+                tak = self.repo.get(tak_name)
+                try:
+                    # --- Step 1: Get input data (READ-ONLY cache access) ---
+                    df_input = self.get_input_for_tak(patient_id, tak, tak_outputs, thread_da)
+                    
+                    if df_input.empty:
+                        continue
+                    
+                    # --- Step 2: Apply TAK ---
+                    df_output = tak.apply(df_input)
+
+                    # --- Step 3: Apply global clippers ---
+                    df_output = self._apply_global_clippers(df_output, clipper_df)
+                    
+                    # --- Step 4: Cache output (UNIFIED: all TAKs cached AFTER apply()) ---
+                    tak_outputs[tak_name] = df_output
+                    
+                    # --- Step 5: Write to DB ---
+                    if isinstance(tak, Pattern):
+                        # Patterns: split into main output + QA scores
+                        df_output_main, df_output_scores = self._split_pattern_output(df_output)
+                        
+                        # Update cache with main output (for downstream patterns)
+                        tak_outputs[tak_name] = df_output_main
+                        
+                        rows_written_main = self.write_output(df_output_main, thread_da)
+                        rows_written_scores = self.write_qa_scores(df_output_scores, thread_da)
+                        
+                        stats[tak.name] = {
+                            "output_rows": rows_written_main,
+                            "qa_scores": rows_written_scores
+                        }
+                    else:
+                        # All other TAKs: write to OutputPatientData (skip RawConcepts)
+                        if not isinstance(tak, RawConcept):
+                            rows_written = self.write_output(df_output, thread_da)
+                        else:
+                            rows_written = len(df_output)
+                        
+                        stats[tak.name] = rows_written
+                    
+                except Exception as e:
+                    logger.error(f"[Patient {patient_id}][{tak_name}] Error: {e}")
+                    stats[tak_name] = {"error": str(e)}
+            
+            logger.info(f"[Patient {patient_id}] Processing complete | stats={stats}")
+            return stats
+            
+        except Exception as e:
+            logger.error(f"[Patient {patient_id}] Critical error: {e}", exc_info=True)
+            return {"error": str(e)}
+        finally:
+            # Close thread-local connection
+            thread_da.conn.close()
+
+    def _get_global_clipper_times(self, patient_id: int) -> Optional[pd.DataFrame]:
+        """
+        Query InputPatientData for global clipper events (once per patient, before TAK processing).
+        Returns DataFrame with columns: ConceptName, StartDateTime, or None if no clippers found.
+        """
+        if not self.global_clippers:
+            return None
+        
+        clipper_names = list(self.global_clippers.keys())
+        table = "InputPatientData"
+        
+        # Load query template and replace placeholders
+        with open(GET_DATA_BY_PATIENT_CONCEPTS_QUERY, 'r') as f:
+            query_template = f.read()
+        
+        query = query_template.replace("{table}", table)
+        placeholders = ','.join('?' * len(clipper_names))
+        query = query.replace("{CONCEPT_PLACEHOLDERS}", placeholders)
+        
+        params = (patient_id, *clipper_names)
+        rows = self.da.fetch_records(query, params)
+        
+        if not rows:
+            return None
+        
+        # Return DataFrame with ConceptName and StartDateTime (clippers are point events)
+        df = pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
+        return df[["ConceptName", "StartDateTime"]]
     
-    def write_output(self, df: pd.DataFrame) -> int:
+    def write_output(self, df: pd.DataFrame, da: Optional[DataAccess] = None) -> int:
         """
         Write TAK output to OutputPatientData.
-        Uses INSERT OR IGNORE to skip duplicates.
+        Thread-safe: uses provided DataAccess instance if given.
         
         Args:
             df: DataFrame with columns: PatientId, ConceptName, StartDateTime, EndDateTime, Value, AbstractionType
+            da: Optional DataAccess instance (for thread safety)
         
         Returns:
             Number of rows actually inserted (excluding duplicates)
         """
         if df.empty:
             return 0
+        
+        # Use provided connection or default
+        db = da if da is not None else self.da
         
         # Convert to tuples for executemany
         rows = [
@@ -427,25 +454,20 @@ class Mediator:
         ]
         
         # Use INSERT OR IGNORE to skip duplicates
-        return self.da.insert_many(INSERT_ABSTRACTED_MEASUREMENT_QUERY, rows, batch_size=1000)
+        return db.insert_many(INSERT_ABSTRACTED_MEASUREMENT_QUERY, rows, batch_size=1000)
     
-    def write_qa_scores(self, df_scores: pd.DataFrame) -> int:
+    def write_qa_scores(self, df_scores: pd.DataFrame, da: Optional[DataAccess] = None) -> int:
         """
         Write Pattern compliance scores to PatientQAScores table.
-        Unpivots TimeConstraintScore and ValueConstraintScore columns using vectorized melt.
-        
-        Args:
-            df_scores: DataFrame with columns: PatientId, ConceptName, StartDateTime, EndDateTime,
-                      TimeConstraintScore, ValueConstraintScore
-        
-        Returns:
-            Number of rows inserted
+        Thread-safe: uses provided DataAccess instance if given.
         """
         if df_scores.empty:
             return 0
         
-        # OPTIMIZED: Vectorized unpivot using pd.melt (replaces row-by-row iteration)
-        # Melt TimeConstraintScore and ValueConstraintScore into rows
+        # Use provided connection or default
+        db = da if da is not None else self.da
+        
+        # OPTIMIZED: Vectorized unpivot using pd.melt
         df_melted = df_scores.melt(
             id_vars=["PatientId", "ConceptName", "StartDateTime", "EndDateTime"],
             value_vars=["TimeConstraintScore", "ValueConstraintScore"],
@@ -453,19 +475,16 @@ class Mediator:
             value_name="ComplianceScore"
         )
         
-        # Drop rows where ComplianceScore is None (not all patterns have both compliance types)
         df_melted = df_melted.dropna(subset=["ComplianceScore"])
         
         if df_melted.empty:
             return 0
         
-        # Map column names to ComplianceType values
         df_melted["ComplianceType"] = df_melted["ComplianceType"].map({
             "TimeConstraintScore": "TimeConstraint",
             "ValueConstraintScore": "ValueConstraint"
         })
         
-        # Convert to tuples for executemany
         rows = [
             (
                 int(row["PatientId"]),
@@ -478,8 +497,7 @@ class Mediator:
             for _, row in df_melted.iterrows()
         ]
         
-        # Use INSERT OR IGNORE to skip duplicates
-        return self.da.insert_many(INSERT_QA_SCORE_QUERY, rows, batch_size=1000)
+        return db.insert_many(INSERT_QA_SCORE_QUERY, rows, batch_size=1000)
 
     async def process_patient_async(self, patient_id: int, semaphore: asyncio.Semaphore) -> Dict[str, int]:
         """
@@ -583,295 +601,6 @@ class Mediator:
         
         return df[valid_mask]
     
-    def _process_patient_sync(self, patient_id: int) -> Dict[str, Union[int, str]]:
-        """
-        Process a single patient through all TAKs in dependency order.
-        Returns per-TAK output row counts for stats tracking.
-        """
-        # Create new DB connection for this thread (SQLite thread safety)
-        thread_da = DataAccess(db_path=self.db_path)
-        
-        logger.info(f"[Patient {patient_id}] Processing start")
-        stats = {}
-        tak_outputs = {}  # Cache ALL TAK outputs for this patient_id
-        
-        try:
-            # Phase 0: Query global clipper times ONCE per patient
-            clipper_df = self._get_global_clipper_times_thread(patient_id, thread_da)
-            execution_order = getattr(self.repo, 'execution_order', list(self.repo.taks.keys()))
-
-            # Process TAKs in topological order
-            for tak_name in execution_order:
-                tak = self.repo.get(tak_name)
-                try:
-                    # Get input data for this TAK
-                    if isinstance(tak, RawConcept):
-                        df_input = self.get_input_for_raw_concept_thread(patient_id, tak, thread_da)
-                    else:
-                        df_input = self.get_input_for_tak_thread(patient_id, tak, tak_outputs, thread_da)
-                    
-                    if df_input.empty:
-                        continue
-                    
-                    # Apply TAK
-                    df_output = tak.apply(df_input)
-
-                    # Apply global clippers BEFORE caching/writing
-                    df_output = self._apply_global_clippers(df_output, clipper_df)
-                    
-                    # Cache ALL TAK outputs (before Pattern split)
-                    tak_outputs[tak_name] = df_output
-                    
-                    # Handle Pattern outputs (split into OutputPatientData + PatientQAScores)
-                    if isinstance(tak, Pattern):
-                        df_output_main, df_output_scores = self._split_pattern_output(df_output)
-                        
-                        # Update cache with main output (for downstream patterns)
-                        tak_outputs[tak_name] = df_output_main
-                        
-                        # Write main output to OutputPatientData
-                        rows_written_main = self.write_output_thread(df_output_main, thread_da)
-                        
-                        # Write QA scores to PatientQAScores
-                        rows_written_scores = self.write_qa_scores_thread(df_output_scores, thread_da)
-                        
-                        stats[tak.name] = {
-                            "output_rows": rows_written_main,
-                            "qa_scores": rows_written_scores
-                        }
-                    else:
-                        # Store output for downstream TAKs
-                        tak_outputs[tak_name] = df_output # Cache
-
-                        if not isinstance(tak, RawConcept):
-                            # Write to DB
-                            rows_written = self.write_output_thread(df_output, thread_da)
-                        else:
-                            rows_written = len(df_output)
-                        
-                        stats[tak.name] = rows_written
-                    
-                except Exception as e:
-                    logger.error(f"[Patient {patient_id}][{tak_name}] Error: {e}")
-                    stats[tak_name] = {"error": str(e)}
-            
-            logger.info(f"[Patient {patient_id}] Processing complete | stats={stats}")
-            return stats
-            
-        except Exception as e:
-            logger.error(f"[Patient {patient_id}] Critical error: {e}", exc_info=True)
-            return {"error": str(e)}
-        finally:
-            # Close thread-local connection
-            thread_da.conn.close()
-    
-    def _get_global_clipper_times_thread(self, patient_id: int, da: DataAccess) -> Optional[pd.DataFrame]:
-        """Thread-safe version using provided DataAccess instance."""
-        if not self.global_clippers:
-            return None
-        
-        clipper_names = list(self.global_clippers.keys())
-        table = "InputPatientData"
-        
-        with open(GET_DATA_BY_PATIENT_CONCEPTS_QUERY, 'r') as f:
-            query_template = f.read()
-        
-        query = query_template.replace("{table}", table)
-        placeholders = ','.join('?' * len(clipper_names))
-        query = query.replace("{CONCEPT_PLACEHOLDERS}", placeholders)
-        
-        params = (patient_id, *clipper_names)
-        rows = da.fetch_records(query, params)
-        
-        if not rows:
-            return None
-        
-        df = pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
-        return df[["ConceptName", "StartDateTime"]]
-    
-    def get_input_for_raw_concept_thread(self, patient_id: int, raw_concept: RawConcept, da: DataAccess) -> pd.DataFrame:
-        """Thread-safe version using provided DataAccess instance."""
-        concept_names = [a["name"] for a in raw_concept.attributes]
-        table = "InputPatientData"
-        
-        with open(GET_DATA_BY_PATIENT_CONCEPTS_QUERY, 'r') as f:
-            query_template = f.read()
-        
-        query = query_template.replace("{table}", table)
-        placeholders = ','.join('?' * len(concept_names))
-        query = query.replace("{CONCEPT_PLACEHOLDERS}", placeholders)
-        
-        params = (patient_id, *concept_names)
-        rows = da.fetch_records(query, params)
-        
-        if not rows:
-            return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
-        
-        df = pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
-        df["AbstractionType"] = "raw-concept"
-        return df
-    
-    def get_input_for_tak_thread(self, patient_id: int, tak: TAK, tak_outputs: Dict[str, pd.DataFrame], da: DataAccess) -> pd.DataFrame:
-        """Thread-safe version using provided DataAccess instance."""
-        # CASE 1: RawConcept → query InputPatientData (or use cache)
-        if isinstance(tak, RawConcept):
-            if tak.name in tak_outputs:
-                return tak_outputs[tak.name]
-            
-            df = self.get_input_for_raw_concept_thread(patient_id, tak, da)
-            tak_outputs[tak.name] = df
-            return df
-        
-        # CASE 2: Event → resolve derived_from (list of raw-concepts)
-        if isinstance(tak, Event):
-            dfs = []
-            for df_spec in tak.derived_from:
-                parent_name = df_spec["name"]
-                parent_tak = self.repo.get(parent_name)
-                
-                # Get from cache or compute
-                if parent_name in tak_outputs:
-                    df_parent = tak_outputs[parent_name]
-                else:
-                    df_parent = self.get_input_for_raw_concept_thread(patient_id, parent_tak, da)
-                    tak_outputs[parent_name] = df_parent
-                
-                dfs.append(df_parent)
-            
-            if not dfs:
-                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
-            return pd.concat(dfs, ignore_index=True)
-        
-        # CASE 3: State → resolve single derived_from (RawConcept OR Event)
-        if isinstance(tak, State):
-            parent_name = tak.derived_from
-            parent_tak = self.repo.get(parent_name)
-            
-            if isinstance(parent_tak, RawConcept):
-                if parent_name in tak_outputs:
-                    return tak_outputs[parent_name]
-                df_parent = self.get_input_for_raw_concept_thread(patient_id, parent_tak, da)
-                tak_outputs[parent_name] = df_parent
-                return df_parent
-            elif isinstance(parent_tak, Event):
-                # Check cache first (Event should already be computed)
-                if parent_name in tak_outputs:
-                    return tak_outputs[parent_name]
-                # Compute Event if not cached (shouldn't happen with correct execution order)
-                df_event_input = self.get_input_for_tak_thread(patient_id, parent_tak, tak_outputs, da)
-                df_event_output = parent_tak.apply(df_event_input)
-                tak_outputs[parent_name] = df_event_output
-                return df_event_output
-            else:
-                # Never happens due to prior validation
-                raise RuntimeError(f"[{tak.name}] States can only derive from RawConcepts or Events")
-        
-        # CASE 4: Trend → resolve single derived_from (RawConcept only)
-        if isinstance(tak, Trend):
-            parent_name = tak.derived_from
-            parent_tak = self.repo.get(parent_name)
-            
-            if parent_name in tak_outputs:
-                return tak_outputs[parent_name]
-            df_parent = self.get_input_for_raw_concept_thread(patient_id, parent_tak, da)
-            tak_outputs[parent_name] = df_parent
-            return df_parent
-        
-        # CASE 5: Context → resolve derived_from (list of RawConcepts only) + clippers
-        if isinstance(tak, Context):
-            dfs = []
-            
-            # Resolve parent (derived_from) — ALL must be RawConcepts
-            for df_spec in tak.derived_from:
-                parent_name = df_spec["name"]
-                parent_tak = self.repo.get(parent_name)
-                if parent_tak is None:
-                    logger.warning(f"[{tak.name}] Derived-from '{parent_name}' not found")
-                    continue
-                
-                # Get from cache or compute
-                if parent_name in tak_outputs:
-                    df_parent = tak_outputs[parent_name]
-                else:
-                    df_parent = self.get_input_for_raw_concept_thread(patient_id, parent_tak, da)
-                    tak_outputs[parent_name] = df_parent
-                
-                dfs.append(df_parent)
-            
-            # Resolve clippers (can be ANY TAK type)
-            if tak.clippers:
-                for clipper in tak.clippers:
-                    clipper_name = clipper["name"]
-                    
-                    # Check cache (clipper should already be computed)
-                    if clipper_name in tak_outputs:
-                        df_clipper = tak_outputs[clipper_name]
-                        dfs.append(df_clipper)
-                    else:
-                        logger.warning(f"[{tak.name}] Clipper '{clipper_name}' not found in cache")
-            
-            if not dfs:
-                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
-            return pd.concat(dfs, ignore_index=True)
-        
-        # CASE 6: Pattern → resolve derived_from + parameters
-        if isinstance(tak, Pattern):
-            dfs = []
-            
-            # Resolve derived-from attributes
-            for df_spec in tak.derived_from:
-                parent_name = df_spec["name"]
-                
-                # Check cache (all dependencies should be computed by now)
-                if parent_name not in tak_outputs:
-                    logger.warning(f"[{tak.name}] Parent '{parent_name}' not found in cache (should be computed earlier)")
-                    continue
-                
-                dfs.append(tak_outputs[parent_name])
-            
-            # Resolve parameters (can be ANY TAK type)
-            if hasattr(tak, 'parameters') and tak.parameters:
-                for param_spec in tak.parameters:
-                    param_name = param_spec["name"]
-                    
-                    if param_name not in tak_outputs:
-                        param_tak = self.repo.get(param_name)
-                        if isinstance(param_tak, RawConcept):
-                            df_param = self.get_input_for_raw_concept_thread(patient_id, param_tak, da)
-                            tak_outputs[param_name] = df_param
-                            dfs.append(df_param)
-                        else:
-                            logger.warning(
-                                f"[{tak.name}] Parameter '{param_name}' not found in cache. "
-                                f"Ensure parameters are computed before patterns."
-                            )
-                    else:
-                        dfs.append(tak_outputs[param_name])
-            
-            if not dfs:
-                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
-            return pd.concat(dfs, ignore_index=True)
-    
-    def write_output_thread(self, df: pd.DataFrame, da: DataAccess) -> int:
-        """Thread-safe version using provided DataAccess instance."""
-        if df.empty:
-            return 0
-        
-        rows = [
-            (
-                int(row["PatientId"]),
-                str(row["ConceptName"]),
-                str(row["StartDateTime"]),
-                str(row["EndDateTime"]),
-                str(row["Value"]),
-                str(row["AbstractionType"])
-            )
-            for _, row in df.iterrows()
-        ]
-        
-        return da.insert_many(INSERT_ABSTRACTED_MEASUREMENT_QUERY, rows, batch_size=1000)
-
     async def process_all_patients_async(
         self,
         max_concurrent: int = 4,
