@@ -121,7 +121,7 @@ class TAKRepository:
             for df in tak.derived_from:
                 deps.add(df["name"])
             for param in tak.parameters:
-                deps.add(param["tak"])
+                deps.add(param["name"])
             return deps
 
         return deps

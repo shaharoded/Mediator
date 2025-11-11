@@ -232,6 +232,56 @@ PATTERN2_XML = """\
 </pattern>
 """
 
+# NEW XML: Pattern with parameters (to test parameter dependency extraction)
+PATTERN_WITH_PARAMS_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="INSULIN_PATTERN" concept-type="local-pattern">
+    <categories>test</categories>
+    <description>Pattern with parameters</description>
+    <derived-from>
+        <attribute name="EVENT1" tak="event" ref="A1"/>
+        <attribute name="RC2" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+    
+    <!-- NEW: Parameters that depend on WEIGHT_MEASURE -->
+    <parameters>
+        <parameter name="WEIGHT_MEASURE" tak="raw-concept" idx="0" ref="P1" default="72"/>
+    </parameters>
+    
+    <abstraction-rules>
+        <rule>
+            <temporal-relation how='before' max-distance='24h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+
+WEIGHT_MEASURE_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="WEIGHT_MEASURE" concept-type="raw-numeric">
+    <categories>test</categories>
+    <description>Weight measurement</description>
+    <attributes>
+        <attribute name="WEIGHT" type="numeric">
+            <numeric-allowed-values>
+                <allowed-value min="0" max="500"/>
+            </numeric-allowed-values>
+        </attribute>
+    </attributes>
+</raw-concept>
+"""
+
 
 # ============================
 # Fixtures
@@ -437,6 +487,120 @@ def test_pattern_from_pattern_dependency(temp_kb, repo):
     )
     
     print(f"  → PATTERN2 dependencies (deduplicated): {pattern2_deps}")
+
+
+def test_pattern_with_parameters_dependency(temp_kb, repo):
+    """Test that Pattern parameters are correctly added to dependency graph."""
+    # Write XMLs
+    weight_path = write_xml(temp_kb / "raw-concepts", "weight.xml", WEIGHT_MEASURE_XML)
+    rc1_path = write_xml(temp_kb / "raw-concepts", "rc1.xml", RC1_XML)
+    rc2_path = write_xml(temp_kb / "raw-concepts", "rc2.xml", RC2_XML)
+    event_path = write_xml(temp_kb / "events", "event1.xml", EVENT_XML.replace("RAW_CONCEPT", "RC1").replace("EVENT", "EVENT1"))
+    pattern_path = write_xml(temp_kb / "patterns", "insulin_pattern.xml", PATTERN_WITH_PARAMS_XML)
+    
+    # Parse and register
+    weight = RawConcept.parse(weight_path)
+    repo.register(weight)
+    
+    rc1 = RawConcept.parse(rc1_path)
+    repo.register(rc1)
+    
+    rc2 = RawConcept.parse(rc2_path)
+    repo.register(rc2)
+    
+    event = Event.parse(event_path)
+    repo.register(event)
+    
+    pattern = LocalPattern.parse(pattern_path)
+    repo.register(pattern)
+    
+    # Finalize
+    repo.finalize_repository()
+    
+    # Verify execution order
+    order = repo.execution_order
+    assert len(order) == 5
+    
+    # Check that WEIGHT_MEASURE comes before INSULIN_PATTERN
+    assert order.index("WEIGHT_MEASURE") < order.index("INSULIN_PATTERN"), (
+        f"WEIGHT_MEASURE must be processed before INSULIN_PATTERN (order: {order})"
+    )
+    
+    # Check that all dependencies are satisfied
+    assert order.index("RC1") < order.index("EVENT1")
+    assert order.index("EVENT1") < order.index("INSULIN_PATTERN")
+    assert order.index("RC2") < order.index("INSULIN_PATTERN")
+    
+    print(f"✓ Pattern with parameters: {order}")
+    
+    # NEW: Verify dependency graph contains correct parameter dependency
+    pattern_deps = repo.graph.get("INSULIN_PATTERN", set())
+    assert "WEIGHT_MEASURE" in pattern_deps, (
+        f"INSULIN_PATTERN should depend on WEIGHT_MEASURE (parameter), "
+        f"but dependencies are: {pattern_deps}"
+    )
+    
+    print(f"  → INSULIN_PATTERN dependencies: {pattern_deps}")
+
+
+def test_repository_extract_dependencies_internal_method(temp_kb, repo):
+    """
+    Test _extract_dependencies() method directly (unit test for internal helper).
+    This would have caught the param["tak"] bug immediately.
+    """
+    # Setup: Create pattern with parameters
+    weight_path = write_xml(temp_kb / "raw-concepts", "weight.xml", WEIGHT_MEASURE_XML)
+    rc1_path = write_xml(temp_kb / "raw-concepts", "rc1.xml", RC1_XML)
+    rc2_path = write_xml(temp_kb / "raw-concepts", "rc2.xml", RC2_XML)
+    
+    # FIX: Need to create EVENT1 (pattern references it in derived-from)
+    event1_path = write_xml(temp_kb / "events", "event1.xml", EVENT_XML.replace("RAW_CONCEPT", "RC1").replace("EVENT", "EVENT1"))
+    pattern_path = write_xml(temp_kb / "patterns", "insulin_pattern.xml", PATTERN_WITH_PARAMS_XML)
+    
+    # Register dependencies (validation requires them to exist)
+    weight = RawConcept.parse(weight_path)
+    repo.register(weight)
+    
+    rc1 = RawConcept.parse(rc1_path)
+    repo.register(rc1)
+    
+    rc2 = RawConcept.parse(rc2_path)
+    repo.register(rc2)
+    
+    # FIX: Register EVENT1 (pattern validation needs it)
+    event1 = Event.parse(event1_path)
+    repo.register(event1)
+    
+    # Parse pattern (validation now succeeds)
+    pattern = LocalPattern.parse(pattern_path)
+    
+    # Call _extract_dependencies() directly
+    deps = repo._extract_dependencies(pattern)
+    
+    # Verify dependencies
+    # Should include: EVENT1 (derived-from), RC2 (derived-from), WEIGHT_MEASURE (parameter)
+    # Should NOT include: "raw-concept" (TAK type, not TAK name)
+    assert "WEIGHT_MEASURE" in deps, (
+        f"Expected WEIGHT_MEASURE (parameter), got: {deps}"
+    )
+    assert "RC2" in deps, f"Expected RC2 (derived-from), got: {deps}"
+    assert "EVENT1" in deps, f"Expected EVENT1 (derived-from), got: {deps}"  # FIX: Add this check
+    
+    # BUG CHECK: Verify "raw-concept" (TAK type) is NOT in dependencies
+    assert "raw-concept" not in deps, (
+        f"BUG: Found 'raw-concept' (TAK type) in dependencies! "
+        f"This means param['tak'] was used instead of param['name']. "
+        f"Dependencies: {deps}"
+    )
+    
+    # BUG CHECK: Verify "event" (TAK type) is NOT in dependencies
+    assert "event" not in deps, (
+        f"BUG: Found 'event' (TAK type) in dependencies! "
+        f"This means derived_from['tak'] was used instead of derived_from['name']. "
+        f"Dependencies: {deps}"
+    )
+    
+    print(f"✓ _extract_dependencies() correct: {deps}")
 
 
 if __name__ == "__main__":
