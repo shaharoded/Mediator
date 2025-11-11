@@ -6,9 +6,6 @@
         <attribute name="ANTIDIABETIC_DRUGS_IV_BITZUA" tak="raw-concept" idx="0"/>
     </derived-from>
 
-    <!-- An instance of these will clip the context windows -->
-    </clippers>
-
     <context-windows>
         <persistence value="Low" good-before="0h" good-after="6h"/>
         <persistence value="Medium" good-before="0h" good-after="8h"/>

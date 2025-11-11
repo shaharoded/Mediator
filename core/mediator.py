@@ -34,7 +34,9 @@ from backend.dataaccess import DataAccess
 from backend.config import (
     DB_PATH,
     INSERT_ABSTRACTED_MEASUREMENT_QUERY,
-    GET_DATA_BY_PATIENT_CONCEPTS_QUERY)
+    GET_DATA_BY_PATIENT_CONCEPTS_QUERY,
+    INSERT_QA_SCORE_QUERY
+)
 
 
 logger = logging.getLogger(__name__)
@@ -364,10 +366,11 @@ class Mediator:
                 return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
             return pd.concat(dfs, ignore_index=True)
         
-        # CASE 6: Pattern → resolve derived_from (Events, States, Trends, Contexts)
+        # CASE 6: Pattern → resolve derived_from + parameters (Events, States, Trends, Contexts, Patterns)
         if isinstance(tak, Pattern):
             dfs = []
             
+            # Resolve derived-from attributes
             for df_spec in tak.derived_from:
                 parent_name = df_spec["name"]
                 
@@ -377,6 +380,29 @@ class Mediator:
                     continue
                 
                 dfs.append(tak_outputs[parent_name])
+            
+            # Resolve parameters (can be ANY TAK type, not just RawConcepts)
+            if hasattr(tak, 'parameters') and tak.parameters:
+                for param_spec in tak.parameters:
+                    param_name = param_spec["name"]
+                    
+                    # Check if parameter TAK is already in cache
+                    if param_name not in tak_outputs:
+                        # Parameter not computed yet → check if it's a RawConcept (query InputPatientData)
+                        param_tak = self.repo.get(param_name)
+                        if isinstance(param_tak, RawConcept):
+                            df_param = self.get_input_for_raw_concept(patient_id, param_tak)
+                            tak_outputs[param_name] = df_param
+                            dfs.append(df_param)
+                        else:
+                            # Non-RawConcept parameter → should already be in cache (from earlier execution)
+                            logger.warning(
+                                f"[{tak.name}] Parameter '{param_name}' (type={param_tak.family if param_tak else 'Unknown'}) "
+                                f"not found in cache. Parameters must be computed before patterns that use them."
+                            )
+                    else:
+                        # Use cached parameter data
+                        dfs.append(tak_outputs[param_name])
             
             if not dfs:
                 return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
@@ -412,6 +438,58 @@ class Mediator:
         # Use INSERT OR IGNORE to skip duplicates
         return self.da.insert_many(INSERT_ABSTRACTED_MEASUREMENT_QUERY, rows, batch_size=1000)
     
+    def write_qa_scores(self, df_scores: pd.DataFrame) -> int:
+        """
+        Write Pattern compliance scores to PatientQAScores table.
+        Unpivots TimeConstraintScore and ValueConstraintScore columns using vectorized melt.
+        
+        Args:
+            df_scores: DataFrame with columns: PatientId, ConceptName, StartDateTime, EndDateTime,
+                      TimeConstraintScore, ValueConstraintScore
+        
+        Returns:
+            Number of rows inserted
+        """
+        if df_scores.empty:
+            return 0
+        
+        # OPTIMIZED: Vectorized unpivot using pd.melt (replaces row-by-row iteration)
+        # Melt TimeConstraintScore and ValueConstraintScore into rows
+        df_melted = df_scores.melt(
+            id_vars=["PatientId", "ConceptName", "StartDateTime", "EndDateTime"],
+            value_vars=["TimeConstraintScore", "ValueConstraintScore"],
+            var_name="ComplianceType",
+            value_name="ComplianceScore"
+        )
+        
+        # Drop rows where ComplianceScore is None (not all patterns have both compliance types)
+        df_melted = df_melted.dropna(subset=["ComplianceScore"])
+        
+        if df_melted.empty:
+            return 0
+        
+        # Map column names to ComplianceType values
+        df_melted["ComplianceType"] = df_melted["ComplianceType"].map({
+            "TimeConstraintScore": "TimeConstraint",
+            "ValueConstraintScore": "ValueConstraint"
+        })
+        
+        # Convert to tuples for executemany
+        rows = [
+            (
+                int(row["PatientId"]),
+                str(row["ConceptName"]),
+                str(row["StartDateTime"]) if pd.notna(row["StartDateTime"]) else None,
+                str(row["EndDateTime"]) if pd.notna(row["EndDateTime"]) else None,
+                str(row["ComplianceType"]),
+                float(row["ComplianceScore"])
+            )
+            for _, row in df_melted.iterrows()
+        ]
+        
+        # Use INSERT OR IGNORE to skip duplicates
+        return self.da.insert_many(INSERT_QA_SCORE_QUERY, rows, batch_size=1000)
+
     async def process_patient_async(self, patient_id: int, semaphore: asyncio.Semaphore) -> Dict[str, int]:
         """
         Process a single patient through the entire TAK pipeline (async).
@@ -550,15 +628,33 @@ class Mediator:
                     # Apply global clippers BEFORE caching/writing
                     df_output = self._apply_global_clippers(df_output, clipper_df)
                     
-                    # Store output for downstream TAKs
-                    tak_outputs[tak_name] = df_output # Cache
-
-                    if not isinstance(tak, RawConcept):
-                        # Write to DB
-                        rows_written = self.write_output_thread(df_output, thread_da)
+                    # Handle Pattern outputs (split into OutputPatientData + PatientQAScores)
+                    if isinstance(tak, Pattern):
+                        df_output_main, df_output_scores = self._split_pattern_output(df_output)
+                        
+                        # Cache only main output (for downstream patterns)
+                        tak_outputs[tak_name] = df_output_main
+                        
+                        # Write main output to OutputPatientData
+                        rows_written_main = self.write_output_thread(df_output_main, thread_da)
+                        
+                        # Write QA scores to PatientQAScores
+                        rows_written_scores = self.write_qa_scores_thread(df_output_scores, thread_da)
+                        
+                        stats[tak.name] = {
+                            "output_rows": rows_written_main,
+                            "qa_scores": rows_written_scores
+                        }
                     else:
-                        rows_written = len(df_output)
-                    stats[tak.name] = rows_written
+                        # Store output for downstream TAKs
+                        tak_outputs[tak_name] = df_output # Cache
+
+                        if not isinstance(tak, RawConcept):
+                            # Write to DB
+                            rows_written = self.write_output_thread(df_output, thread_da)
+                        else:
+                            rows_written = len(df_output)
+                        stats[tak.name] = rows_written
                     
                 except Exception as e:
                     logger.error(f"[Patient {patient_id}][{tak_name}] Error: {e}")
@@ -729,10 +825,11 @@ class Mediator:
                 return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
             return pd.concat(dfs, ignore_index=True)
         
-        # CASE 6: Pattern → resolve derived_from (Events, States, Trends, Contexts)
+        # CASE 6: Pattern → resolve derived_from + parameters
         if isinstance(tak, Pattern):
             dfs = []
             
+            # Resolve derived-from attributes
             for df_spec in tak.derived_from:
                 parent_name = df_spec["name"]
                 
@@ -742,6 +839,25 @@ class Mediator:
                     continue
                 
                 dfs.append(tak_outputs[parent_name])
+            
+            # Resolve parameters (can be ANY TAK type)
+            if hasattr(tak, 'parameters') and tak.parameters:
+                for param_spec in tak.parameters:
+                    param_name = param_spec["name"]
+                    
+                    if param_name not in tak_outputs:
+                        param_tak = self.repo.get(param_name)
+                        if isinstance(param_tak, RawConcept):
+                            df_param = self.get_input_for_raw_concept_thread(patient_id, param_tak, da)
+                            tak_outputs[param_name] = df_param
+                            dfs.append(df_param)
+                        else:
+                            logger.warning(
+                                f"[{tak.name}] Parameter '{param_name}' not found in cache. "
+                                f"Ensure parameters are computed before patterns."
+                            )
+                    else:
+                        dfs.append(tak_outputs[param_name])
             
             if not dfs:
                 return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])

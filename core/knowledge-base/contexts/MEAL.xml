@@ -5,9 +5,6 @@
     <derived-from>
         <attribute name="MEAL" tak="raw-concept" idx="0"/>
     </derived-from>
-
-    <!-- An instance of these will clip the context windows -->
-    </clippers>
     
     <context-windows>
         <persistence good-before="2h" good-after="2h"/>

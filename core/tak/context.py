@@ -215,13 +215,12 @@ class Context(TAK):
             if not isinstance(parent_tak, RawConcept):
                 raise ValueError(f"{self.name}: derived_from='{df['name']}' is not a RawConcept (found {parent_tak.family})")
 
-        # 2) Check clippers exist and are RawConcepts
+        # 2) Check clippers exist (ANY TAK type allowed)
         for clipper in self.clippers:
             clipper_tak = repo.get(clipper["name"])
             if clipper_tak is None:
                 raise ValueError(f"{self.name}: clipper='{clipper['name']}' not found in TAK repository")
-            if not isinstance(clipper_tak, RawConcept):
-                raise ValueError(f"{self.name}: clipper='{clipper['name']}' is not a RawConcept (found {clipper_tak.family})")
+            # No restriction on clipper TAK type (can be raw-concept, event, state, context, etc.)
 
         # 3) Validate abstraction rules (same as Event)
         if self.abstraction_rules:

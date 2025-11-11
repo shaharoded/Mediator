@@ -6,9 +6,6 @@
         <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
 
-    <!-- An instance of these will clip the context windows -->
-    </clippers>
-
     <abstraction-rules>
         <rule value="True" operator="or">
             <attribute ref="A1">
