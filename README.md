@@ -45,7 +45,7 @@ Mediator/
 │   │   ├── states/                         # Interval-based states
 │   │   ├── trends/                         # Slope-based trends
 │   │   ├── contexts/                       # Background contexts
-│   │   ├── patterns/                       # Temporal patterns (TODO)
+│   │   ├── patterns/                       # Temporal patterns
 │   │   ├── global_clippers.json            # Global START/END clippers
 │   │   ├── tak_schema.xsd                  # XSD validation schema
 │   │   └── TAK_README.md                   # TAK documentation
