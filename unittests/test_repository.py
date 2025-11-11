@@ -357,8 +357,34 @@ def test_pattern_from_pattern_dependency(temp_kb, repo):
     event1_path = write_xml(temp_kb / "events", "event1.xml", EVENT_XML.replace("RAW_CONCEPT", "RC1").replace("EVENT", "EVENT1"))
     event2_path = write_xml(temp_kb / "events", "event2.xml", EVENT_XML.replace("RAW_CONCEPT", "RC2").replace("EVENT", "EVENT2"))
     
-    # PATTERN1: depends on EVENT1 + EVENT2
-    pattern1_xml = PATTERN_XML.replace("EVENT", "EVENT1").replace("RC2", "EVENT2").replace("PATTERN1", "PATTERN1").replace("E1", "E2")
+    # PATTERN1: depends on EVENT1 + EVENT2 (FIXED: no idx for events)
+    pattern1_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="PATTERN1" concept-type="local-pattern">
+    <categories>test</categories>
+    <description>Test pattern</description>
+    <derived-from>
+        <attribute name="EVENT1" tak="event" ref="A1"/>
+        <attribute name="EVENT2" tak="event" ref="E1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <temporal-relation how='before' max-distance='24h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="Low"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value equal="High"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
     pattern1_path = write_xml(temp_kb / "patterns", "pattern1.xml", pattern1_xml)
     
     # PATTERN2: depends on PATTERN1 twice

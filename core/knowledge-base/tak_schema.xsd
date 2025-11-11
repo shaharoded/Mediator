@@ -272,7 +272,8 @@
                                 <xs:complexType>
                                     <xs:attribute name="name" type="xs:string" use="required"/>
                                     <xs:attribute name="tak" type="xs:string" use="required"/>
-                                    <xs:attribute name="idx" type="xs:nonNegativeInteger" default="0"/>
+                                    <!-- idx only required if tak="raw-concept" -->
+                                    <xs:attribute name="idx" type="xs:nonNegativeInteger" use="optional"/>
                                     <xs:attribute name="ref" type="xs:string" use="optional"/>
                                 </xs:complexType>
                             </xs:element>
@@ -285,6 +286,7 @@
                             <xs:element name="clipper" minOccurs="0" maxOccurs="unbounded">
                                 <xs:complexType>
                                     <xs:attribute name="name" type="xs:string" use="required"/>
+                                    <xs:attribute name="tak" type="xs:string" use="required"/>
                                     <xs:attribute name="clip-before" type="durationString" use="optional"/>
                                     <xs:attribute name="clip-after" type="durationString" use="optional"/>
                                 </xs:complexType>
@@ -354,6 +356,7 @@
                                 <xs:complexType>
                                     <xs:attribute name="name" type="xs:string" use="required"/>
                                     <xs:attribute name="tak" type="xs:string" use="required"/>
+                                    <!-- idx only required if tak="raw-concept" -->
                                     <xs:attribute name="idx" type="xs:nonNegativeInteger" use="optional"/>
                                     <xs:attribute name="ref" type="xs:string" use="required"/>
                                 </xs:complexType>
@@ -368,6 +371,7 @@
                                 <xs:complexType>
                                     <xs:attribute name="name" type="xs:string" use="required"/>
                                     <xs:attribute name="tak" type="xs:string" use="required"/>
+                                    <!-- idx only required if tak="raw-concept" -->
                                     <xs:attribute name="idx" type="xs:nonNegativeInteger" use="optional"/>
                                     <xs:attribute name="ref" type="xs:string" use="required"/>
                                     <xs:attribute name="default" type="xs:string" use="required"/>

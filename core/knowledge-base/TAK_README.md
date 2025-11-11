@@ -348,6 +348,7 @@ This TAK knowledge base was developed for analyzing diabetes management during h
    - **Default window:** Applies to values without specific windows
 
 3. **Clipping:**
+   - Clippers can be all TAK objects.
    - For each clipper event (e.g., DEATH at `t_death`):
      - **clip-before:** If context starts before clipper, trim start to `t_clipper + clip_before`
      - **clip-after:** If context overlaps clipper, delay start to `t_clipper_end + clip_after`
@@ -475,7 +476,7 @@ Compliance functions can transform trapez values dynamically using external func
 
 #### Parameter Types
 
-Parameters can be numeric, time-duration strings, or arbitrary strings:
+Parameters can be numeric, time-duration strings, or arbitrary strings (from all TAK types, points to "Value" column):
 
 - **Numeric:** `default="72"` → 72.0
 - **Time-duration:** `default="1h"` → 3600.0 seconds (converted by `parse_duration()`)

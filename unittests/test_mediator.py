@@ -484,3 +484,385 @@ def test_benchmark_10_patients(prod_db, prod_kb, small_patient_subset):
     # Cleanup
     for pid in test_patients:
         prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (pid,))
+
+
+# -----------------------------
+# Tests: Pattern Output (NEW)
+# -----------------------------
+
+def test_pattern_output_split(prod_db, prod_kb, small_patient_subset):
+    """Test that Pattern outputs are correctly split into OutputPatientData + PatientQAScores."""
+    mediator = Mediator(prod_kb, prod_db)
+    mediator.build_repository()
+    
+    if not mediator.patterns:
+        pytest.skip("No patterns in KB")
+    
+    patient_id = small_patient_subset[0]
+    
+    # Clear output for test patient
+    prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (patient_id,))
+    prod_db.execute_query("DELETE FROM PatientQAScores WHERE PatientId = ?", (patient_id,))
+    
+    # Process patient
+    stats = mediator._process_patient_sync(patient_id)
+    
+    # Check that at least one pattern was processed
+    pattern_stats = {k: v for k, v in stats.items() if k in [p.name for p in mediator.patterns]}
+    
+    if not pattern_stats:
+        pytest.skip(f"No pattern data for patient {patient_id}")
+    
+    # Verify OutputPatientData writes (only rows with valid timestamps)
+    output_rows = prod_db.fetch_records(
+        """SELECT ConceptName, StartDateTime, EndDateTime, Value 
+           FROM OutputPatientData 
+           WHERE PatientId = ? AND AbstractionType = 'local-pattern'""",
+        (patient_id,)
+    )
+    
+    # Verify PatientQAScores writes (all rows including "False" patterns)
+    qa_rows = prod_db.fetch_records(
+        """SELECT PatternName, ComplianceType, ComplianceScore 
+           FROM PatientQAScores 
+           WHERE PatientId = ?""",
+        (patient_id,)
+    )
+    
+    print(f"\n✅ Pattern output split test (patient {patient_id}):")
+    print(f"   - OutputPatientData rows: {len(output_rows)}")
+    print(f"   - PatientQAScores rows: {len(qa_rows)}")
+    
+    if output_rows:
+        print(f"   - Example output: {output_rows[0]}")
+    if qa_rows:
+        print(f"   - Example QA score: {qa_rows[0]}")
+    
+    # Verify structure
+    for row in qa_rows:
+        pattern_name, compliance_type, score = row
+        assert compliance_type in ("TimeConstraint", "ValueConstraint"), f"Invalid compliance type: {compliance_type}"
+        assert 0.0 <= score <= 1.0, f"Score out of range: {score}"
+    
+    # Cleanup
+    prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (patient_id,))
+    prod_db.execute_query("DELETE FROM PatientQAScores WHERE PatientId = ?", (patient_id,))
+
+
+def test_pattern_false_instances_only_in_qa_scores(prod_db, prod_kb, small_patient_subset):
+    """Test that 'False' patterns (no match) only appear in PatientQAScores, not OutputPatientData."""
+    mediator = Mediator(prod_kb, prod_db)
+    mediator.build_repository()
+    
+    if not mediator.patterns:
+        pytest.skip("No patterns in KB")
+    
+    patient_id = small_patient_subset[0]
+    
+    # Clear output
+    prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (patient_id,))
+    prod_db.execute_query("DELETE FROM PatientQAScores WHERE PatientId = ?", (patient_id,))
+    
+    # Process patient
+    mediator._process_patient_sync(patient_id)
+    
+    # Check OutputPatientData: should have NO rows with NaT timestamps
+    output_rows = prod_db.fetch_records(
+        """SELECT ConceptName, StartDateTime 
+           FROM OutputPatientData 
+           WHERE PatientId = ? AND AbstractionType = 'local-pattern'""",
+        (patient_id,)
+    )
+    
+    for concept_name, start_dt in output_rows:
+        assert start_dt is not None, f"Pattern {concept_name} has NULL StartDateTime in OutputPatientData (should be filtered out)"
+    
+    # Check PatientQAScores: may have rows with NULL StartDateTime (for "False" patterns)
+    qa_rows = prod_db.fetch_records(
+        """SELECT PatternName, StartDateTime, ComplianceScore 
+           FROM PatientQAScores 
+           WHERE PatientId = ? AND StartDateTime IS NULL""",
+        (patient_id,)
+    )
+    
+    if qa_rows:
+        print(f"\n✅ Found {len(qa_rows)} 'False' pattern instances (NULL timestamps in QA scores):")
+        for pattern_name, start_dt, score in qa_rows[:3]:  # Show first 3
+            print(f"   - {pattern_name}: score={score}")
+    
+    # Cleanup
+    prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (patient_id,))
+    prod_db.execute_query("DELETE FROM PatientQAScores WHERE PatientId = ?", (patient_id,))
+
+
+def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb, small_patient_subset):
+    """Test that Pattern compliance scores are correctly unpivoted (2 rows per pattern instance)."""
+    mediator = Mediator(prod_kb, prod_db)
+    mediator.build_repository()
+    
+    if not mediator.patterns:
+        pytest.skip("No patterns in KB")
+    
+    patient_id = small_patient_subset[0]
+    
+    # Clear output
+    prod_db.execute_query("DELETE FROM PatientQAScores WHERE PatientId = ?", (patient_id,))
+    
+    # Process patient
+    mediator._process_patient_sync(patient_id)
+    
+    # Get QA scores grouped by (PatternName, StartDateTime)
+    qa_rows = prod_db.fetch_records(
+        """SELECT PatternName, StartDateTime, ComplianceType, ComplianceScore 
+           FROM PatientQAScores 
+           WHERE PatientId = ?
+           ORDER BY PatternName, StartDateTime, ComplianceType""",
+        (patient_id,)
+    )
+    
+    if not qa_rows:
+        pytest.skip(f"No QA scores for patient {patient_id}")
+    
+    # Group by (PatternName, StartDateTime) and check that each group has 1-2 rows
+    from itertools import groupby
+    
+    grouped = {}
+    for key, group in groupby(qa_rows, key=lambda r: (r[0], r[1])):
+        grouped[key] = list(group)
+    
+    print(f"\n✅ QA score unpivoting test (patient {patient_id}):")
+    print(f"   - Total unique pattern instances: {len(grouped)}")
+    
+    for (pattern_name, start_dt), rows in list(grouped.items())[:3]:  # Show first 3
+        compliance_types = [r[2] for r in rows]
+        scores = [r[3] for r in rows]
+        print(f"   - {pattern_name} @ {start_dt}: {len(rows)} compliance scores")
+        print(f"     Types: {compliance_types}, Scores: {scores}")
+        
+        # Each instance should have 1-2 rows (TimeConstraint and/or ValueConstraint)
+        assert len(rows) <= 2, f"Too many rows for pattern instance: {len(rows)}"
+        
+        # Check that compliance types are unique
+        assert len(set(compliance_types)) == len(compliance_types), "Duplicate compliance types found"
+    
+    # Cleanup
+    prod_db.execute_query("DELETE FROM PatientQAScores WHERE PatientId = ?", (patient_id,))
+
+
+def test_pattern_deduplication(prod_db, prod_kb, small_patient_subset):
+    """Test that duplicate pattern outputs are handled by INSERT OR IGNORE."""
+    mediator = Mediator(prod_kb, prod_db)
+    mediator.build_repository()
+    
+    if not mediator.patterns:
+        pytest.skip("No patterns in KB")
+    
+    patient_id = small_patient_subset[0]
+    
+    # Clear output
+    prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (patient_id,))
+    prod_db.execute_query("DELETE FROM PatientQAScores WHERE PatientId = ?", (patient_id,))
+    
+    # Process patient TWICE
+    stats1 = mediator._process_patient_sync(patient_id)
+    stats2 = mediator._process_patient_sync(patient_id)
+    
+    # Second run should have 0 writes (all duplicates ignored)
+    pattern_stats = {k: v for k, v in stats2.items() if k in [p.name for p in mediator.patterns]}
+    
+    if pattern_stats:
+        for pattern_name, stat_dict in pattern_stats.items():
+            if isinstance(stat_dict, dict):
+                output_rows = stat_dict.get("output_rows", 0)
+                qa_rows = stat_dict.get("qa_scores", 0)
+                print(f"   - {pattern_name}: {output_rows} output rows, {qa_rows} QA rows (second run)")
+                
+                # Both should be 0 (duplicates ignored)
+                assert output_rows == 0, f"Duplicate output rows written for {pattern_name}"
+                assert qa_rows == 0, f"Duplicate QA scores written for {pattern_name}"
+    
+    print(f"\n✅ Pattern deduplication works (patient {patient_id})")
+    
+    # Cleanup
+    prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (patient_id,))
+    prod_db.execute_query("DELETE FROM PatientQAScores WHERE PatientId = ?", (patient_id,))
+
+
+# -----------------------------
+# Tests: Patient Processing
+# -----------------------------
+
+def test_process_patient_single(prod_db, prod_kb, small_patient_subset):
+    """Test single patient processing (read from production DB, write to OutputPatientData)."""
+    mediator = Mediator(prod_kb, prod_db)
+    mediator.build_repository()
+    
+    patient_id = small_patient_subset[0]
+    
+    # Clear output for this patient before test
+    prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (patient_id,))
+    
+    # Process patient
+    stats = mediator._process_patient_sync(patient_id)
+    
+    # Check that stats were returned (some TAKs should have produced output)
+    assert isinstance(stats, dict)
+    assert "error" not in stats, f"Patient processing failed: {stats.get('error')}"
+    
+    # Verify DB writes (should have at least some output)
+    rows = prod_db.fetch_records(
+        "SELECT COUNT(*) FROM OutputPatientData WHERE PatientId = ?",
+        (patient_id,)
+    )
+    total_rows = rows[0][0]
+    
+    print(f"\n✅ Patient {patient_id} processed:")
+    print(f"   - Stats: {stats}")
+    print(f"   - Total output rows: {total_rows}")
+    
+    # Cleanup: delete test output
+    prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (patient_id,))
+
+
+def test_process_multiple_patients_async(prod_db, prod_kb, small_patient_subset):
+    """Test async multi-patient processing (small subset)."""
+    mediator = Mediator(prod_kb, prod_db)
+    mediator.build_repository()
+    
+    # Use first 3 patients only
+    test_patients = small_patient_subset[:3]
+    
+    # Clear output for test patients
+    for pid in test_patients:
+        prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (pid,))
+    
+    # Process async
+    patient_stats = asyncio.run(
+        mediator.process_all_patients_async(
+            max_concurrent=4,
+            patient_subset=test_patients
+        )
+    )
+    
+    assert len(patient_stats) == len(test_patients)
+    assert all(pid in patient_stats for pid in test_patients)
+    
+    # Verify no errors
+    errors = [pid for pid, stats in patient_stats.items() if "error" in stats]
+    assert len(errors) == 0, f"Errors for patients: {errors}"
+    
+    print(f"\n✅ Processed {len(test_patients)} patients async:")
+    for pid, stats in patient_stats.items():
+        total = sum(v for k, v in stats.items() if k != "error" and isinstance(v, int))
+        print(f"   - Patient {pid}: {total} rows written")
+    
+    # Cleanup
+    for pid in test_patients:
+        prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (pid,))
+
+
+def test_run_full_pipeline_with_subset(prod_db, prod_kb, small_patient_subset):
+    """Test full run() pipeline with patient subset (integration test)."""
+    mediator = Mediator(prod_kb, prod_db)
+    
+    # Use first 5 patients
+    test_patients = small_patient_subset[:5]
+    
+    # Clear output for test patients
+    for pid in test_patients:
+        prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (pid,))
+    
+    # Run pipeline
+    patient_stats = mediator.run(max_concurrent=4, patient_subset=test_patients)
+    
+    assert len(patient_stats) == len(test_patients)
+    
+    # Verify DB writes
+    for pid in test_patients:
+        rows = prod_db.fetch_records(
+            "SELECT COUNT(*) FROM OutputPatientData WHERE PatientId = ?",
+            (pid,)
+        )
+        row_count = rows[0][0]
+        print(f"   - Patient {pid}: {row_count} output rows")
+    
+    print(f"\n✅ Full pipeline run successful ({len(test_patients)} patients)")
+    
+    # Cleanup
+    for pid in test_patients:
+        prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (pid,))
+
+
+# -----------------------------
+# Tests: Error Handling
+# -----------------------------
+
+def test_process_patient_handles_errors(prod_db, prod_kb):
+    """Test graceful error handling for nonexistent patient."""
+    mediator = Mediator(prod_kb, prod_db)
+    mediator.build_repository()
+    
+    # Process nonexistent patient (should not crash)
+    stats = mediator._process_patient_sync(999999)
+    
+    # Should return empty stats (no crashes)
+    assert isinstance(stats, dict)
+    print(f"\n✅ Nonexistent patient handled gracefully: {stats}")
+
+
+def test_empty_subset_returns_empty(prod_db, prod_kb):
+    """Test that empty patient subset returns empty results."""
+    mediator = Mediator(prod_kb, prod_db)
+    mediator.build_repository()
+    
+    patient_stats = asyncio.run(
+        mediator.process_all_patients_async(
+            max_concurrent=4,
+            patient_subset=[]
+        )
+    )
+    
+    assert len(patient_stats) == 0
+    print("\n✅ Empty subset handled correctly")
+
+
+# -----------------------------
+# Performance Benchmark (Optional)
+# -----------------------------
+
+def test_benchmark_10_patients(prod_db, prod_kb, small_patient_subset):
+    """Benchmark: process 10 patients and report timing."""
+    import time
+    
+    mediator = Mediator(prod_kb, prod_db)
+    mediator.build_repository()
+    
+    test_patients = small_patient_subset[:10]
+    
+    # Clear output
+    for pid in test_patients:
+        prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (pid,))
+    
+    # Time processing
+    start = time.time()
+    patient_stats = asyncio.run(
+        mediator.process_all_patients_async(
+            max_concurrent=4,
+            patient_subset=test_patients
+        )
+    )
+    elapsed = time.time() - start
+    
+    total_rows = sum(
+        sum(v for k, v in stats.items() if k != "error" and isinstance(v, int))
+        for stats in patient_stats.values()
+    )
+    
+    print(f"\n✅ Benchmark (10 patients):")
+    print(f"   - Total time: {elapsed:.2f}s")
+    print(f"   - Rows written: {total_rows}")
+    print(f"   - Throughput: {total_rows / elapsed:.1f} rows/sec")
+    
+    # Cleanup
+    for pid in test_patients:
+        prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (pid,))

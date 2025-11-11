@@ -10,9 +10,6 @@
         <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
     </derived-from>
 
-    <!-- Will use the closest instance to the beginning of the pattern -->
-    </parameters>
-
     <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
     <abstraction-rules>
         <rule>

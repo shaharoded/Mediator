@@ -24,7 +24,7 @@ from .tak.event import Event
 from .tak.state import State
 from .tak.trend import Trend
 from .tak.context import Context
-from .tak.pattern import Pattern
+from .tak.pattern import Pattern, LocalPattern
 from .config import TAK_FOLDER
 
 # Add parent directory to path for backend imports
@@ -135,7 +135,7 @@ class Mediator:
             ("States", self.kb_path / "states", State, self.states),
             ("Trends", self.kb_path / "trends", Trend, self.trends),
             ("Contexts", self.kb_path / "contexts", Context, self.contexts),
-            ("Patterns", self.kb_path / "patterns", Pattern, self.patterns)
+            ("Patterns", self.kb_path / "patterns", LocalPattern, self.patterns)  # CHANGED: Pattern → LocalPattern
         ]
         
         total_files = sum(len(list(path.glob("*.xml"))) for _, path, _, _ in phases if path.exists())

@@ -75,10 +75,19 @@ class Context(TAK):
             if tak_type != "raw-concept":
                 raise ValueError(f"{name}: Contexts can only be derived from 'raw-concept'.")
             
+            # idx only required for raw-concept
+            if tak_type == 'raw-concept':
+                idx = int(attr_el.attrib.get("idx")) if attr_el.attrib.get("idx") is not None else None
+                if idx is None:
+                    raise ValueError(f"{name}: 'raw-concept' attributes must declare idx")
+            else:
+                # Non-RawConcept: default idx=0 (single-value output)
+                idx = 0
+            
             df_spec = {
                 "name": attr_el.attrib["name"],
                 "tak_type": tak_type,
-                "idx": int(attr_el.attrib.get("idx", 0))
+                "idx": idx
             }
             
             if "ref" in attr_el.attrib:
@@ -118,8 +127,9 @@ class Context(TAK):
         clippers_el = root.find("clippers")
         if clippers_el is not None:
             for clip_el in clippers_el.findall("clipper"):
-                if "name" not in clip_el.attrib:
-                    raise ValueError(f"{name}: <clipper> must have 'name' attribute")
+                # UPDATED: Require both name and tak attributes
+                if "name" not in clip_el.attrib or "tak" not in clip_el.attrib:
+                    raise ValueError(f"{name}: <clipper> must have 'name' and 'tak' attributes")
                 
                 clip_spec = {"name": clip_el.attrib["name"]}
                 
