@@ -145,61 +145,66 @@ class Context(TAK):
                 
                 clippers.append(clip_spec)
 
-        # --- abstraction-rules (optional) ---
-        abs_rules: List[EventAbstractionRule] = []
+        # --- abstraction-rules (REQUIRED) ---
         abs_el = root.find("abstraction-rules")
+        if abs_el is None:
+            raise ValueError(f"{name}: missing <abstraction-rules> block (abstraction rules are now mandatory for all Contexts)")
         
-        if abs_el is not None:
-            missing_refs = [df["name"] for df in derived_from if "ref" not in df]
-            if missing_refs:
-                raise ValueError(
-                    f"{name}: <abstraction-rules> present but some <derived-from> attributes missing 'ref': {missing_refs}"
-                )
+        # All derived-from entries MUST have refs (since abstraction-rules exist)
+        missing_refs = [df["name"] for df in derived_from if "ref" not in df]
+        if missing_refs:
+            raise ValueError(
+                f"{name}: <abstraction-rules> present but some <derived-from> attributes missing 'ref': {missing_refs}"
+            )
+        
+        abs_rules: List[EventAbstractionRule] = []
+        for rule_el in abs_el.findall("rule"):
+            val = rule_el.attrib["value"]
+            op = rule_el.attrib.get("operator", "or")
+            constraints: Dict[str, List[Dict[str, Any]]] = {}
             
-            for rule_el in abs_el.findall("rule"):
-                val = rule_el.attrib["value"]
-                op = rule_el.attrib.get("operator", "or")
-                constraints: Dict[str, List[Dict[str, Any]]] = {}
+            for attr_el in rule_el.findall("attribute"):
+                if "ref" not in attr_el.attrib:
+                    raise ValueError(f"{name}: <abstraction-rules><attribute> must have 'ref' attribute")
                 
-                for attr_el in rule_el.findall("attribute"):
-                    if "ref" not in attr_el.attrib:
-                        raise ValueError(f"{name}: <abstraction-rules><attribute> must have 'ref' attribute")
-                    
-                    ref = attr_el.attrib["ref"]
-                    if ref not in seen_refs:
-                        raise ValueError(f"{name}: rule references unknown ref='{ref}'")
-                    
-                    allowed = []
-                    for av in attr_el.findall("allowed-value"):
-                        constraint = {"idx": attr_el.attrib.get("idx", 0)}
-                        has_equal = "equal" in av.attrib
-                        has_min = "min" in av.attrib
-                        has_max = "max" in av.attrib
-                        
-                        if has_equal and (has_min or has_max):
-                            raise ValueError(f"{name}: <allowed-value> cannot have both 'equal' and 'min'/'max' attributes")
-                        if not (has_equal or has_min or has_max):
-                            raise ValueError(f"{name}: <allowed-value> must have at least one of: 'equal', 'min', 'max'")
-                        
-                        if has_equal:
-                            constraint["type"] = "equal"
-                            constraint["value"] = av.attrib["equal"]
-                        elif has_min and has_max:
-                            constraint["type"] = "range"
-                            constraint["min"] = float(av.attrib["min"])
-                            constraint["max"] = float(av.attrib["max"])
-                        elif has_min:
-                            constraint["type"] = "min"
-                            constraint["value"] = float(av.attrib["min"])
-                        elif has_max:
-                            constraint["type"] = "max"
-                            constraint["value"] = float(av.attrib["max"])
-                        
-                        allowed.append(constraint)
-                    
-                    constraints[ref] = allowed
+                ref = attr_el.attrib["ref"]
+                if ref not in seen_refs:
+                    raise ValueError(f"{name}: rule references unknown ref='{ref}'")
                 
-                abs_rules.append(EventAbstractionRule(val, op, constraints))
+                allowed = []
+                for av in attr_el.findall("allowed-value"):
+                    constraint = {"idx": attr_el.attrib.get("idx", 0)}
+                    has_equal = "equal" in av.attrib
+                    has_min = "min" in av.attrib
+                    has_max = "max" in av.attrib
+                    
+                    if has_equal and (has_min or has_max):
+                        raise ValueError(f"{name}: <allowed-value> cannot have both 'equal' and 'min'/'max' attributes")
+                    if not (has_equal or has_min or has_max):
+                        raise ValueError(f"{name}: <allowed-value> must have at least one of: 'equal', 'min', 'max'")
+                    
+                    if has_equal:
+                        constraint["type"] = "equal"
+                        constraint["value"] = av.attrib["equal"]
+                    elif has_min and has_max:
+                        constraint["type"] = "range"
+                        constraint["min"] = float(av.attrib["min"])
+                        constraint["max"] = float(av.attrib["max"])
+                    elif has_min:
+                        constraint["type"] = "min"
+                        constraint["value"] = float(av.attrib["min"])
+                    elif has_max:
+                        constraint["type"] = "max"
+                        constraint["value"] = float(av.attrib["max"])
+                    
+                    allowed.append(constraint)
+                
+                constraints[ref] = allowed
+            
+            abs_rules.append(EventAbstractionRule(val, op, constraints))
+
+        if not abs_rules:
+            raise ValueError(f"{name}: <abstraction-rules> block is empty (must contain at least one <rule>)")
 
         context = cls(
             name=name,
@@ -230,44 +235,43 @@ class Context(TAK):
             clipper_tak = repo.get(clipper["name"])
             if clipper_tak is None:
                 raise ValueError(f"{self.name}: clipper='{clipper['name']}' not found in TAK repository")
-            # No restriction on clipper TAK type (can be raw-concept, event, state, context, etc.)
 
         # 3) Validate abstraction rules (same as Event)
-        if self.abstraction_rules:
-            for rule in self.abstraction_rules:
-                if rule.operator == "and":
-                    attr_sources = set()
-                    for attr_name in rule.constraints.keys():
-                        matching_df = next((df for df in self.derived_from if df["name"] == attr_name), None)
-                        if matching_df is None:
-                            raise ValueError(f"{self.name}: rule references unknown attribute '{attr_name}'")
-                        attr_sources.add(matching_df["name"])
-                    if len(attr_sources) > 1:
-                        raise ValueError(f"{self.name}: operator='and' requires all attributes from same raw-concept source (found: {attr_sources})")
-
-                for attr_name, constraints in rule.constraints.items():
+        # REMOVED: No longer check "if self.abstraction_rules" — rules are now mandatory
+        for rule in self.abstraction_rules:
+            if rule.operator == "and":
+                attr_sources = set()
+                for attr_name in rule.constraints.keys():
                     matching_df = next((df for df in self.derived_from if df["name"] == attr_name), None)
                     if matching_df is None:
-                        continue
-                    parent_tak = repo.get(matching_df["name"])
-                    if isinstance(parent_tak, RawConcept):
-                        if parent_tak.concept_type == "raw":
-                            attr_idx = matching_df["idx"]
-                            if attr_idx >= len(parent_tak.tuple_order):
-                                raise ValueError(f"{self.name}: idx={attr_idx} out of bounds for '{parent_tak.name}'")
-                            attr_name_in_parent = parent_tak.tuple_order[attr_idx]
-                            parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name_in_parent), None)
-                        else:
-                            parent_attr = parent_tak.attributes[0] if parent_tak.attributes else None
-                        
-                        if parent_attr:
-                            for c in constraints:
-                                if parent_attr["type"] == "nominal":
-                                    if c["type"] == "equal" and c["value"] not in parent_attr.get("allowed", []):
-                                        raise ValueError(f"{self.name}: constraint value '{c['value']}' not in allowed values for '{attr_name}'")
-                                elif parent_attr["type"] == "boolean":
-                                    if c["type"] == "equal" and c["value"] not in ("True", "False"):
-                                        raise ValueError(f"{self.name}: boolean constraint must be 'True' or 'False'")
+                        raise ValueError(f"{self.name}: rule references unknown attribute '{attr_name}'")
+                    attr_sources.add(matching_df["name"])
+                if len(attr_sources) > 1:
+                    raise ValueError(f"{self.name}: operator='and' requires all attributes from same raw-concept source (found: {attr_sources})")
+
+            for attr_name, constraints in rule.constraints.items():
+                matching_df = next((df for df in self.derived_from if df["name"] == attr_name), None)
+                if matching_df is None:
+                    continue
+                parent_tak = repo.get(matching_df["name"])
+                if isinstance(parent_tak, RawConcept):
+                    if parent_tak.concept_type == "raw":
+                        attr_idx = matching_df["idx"]
+                        if attr_idx >= len(parent_tak.tuple_order):
+                            raise ValueError(f"{self.name}: idx={attr_idx} out of bounds for '{parent_tak.name}'")
+                        attr_name_in_parent = parent_tak.tuple_order[attr_idx]
+                        parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name_in_parent), None)
+                    else:
+                        parent_attr = parent_tak.attributes[0] if parent_tak.attributes else None
+                
+                if parent_attr:
+                    for c in constraints:
+                        if parent_attr["type"] == "nominal":
+                            if c["type"] == "equal" and c["value"] not in parent_attr.get("allowed", []):
+                                raise ValueError(f"{self.name}: constraint value '{c['value']}' not in allowed values for '{attr_name}'")
+                        elif parent_attr["type"] == "boolean":
+                            if c["type"] == "equal" and c["value"] not in ("True", "False"):
+                                raise ValueError(f"{self.name}: boolean constraint must be 'True' or 'False'")
 
         # If multiple attributes, or any attribute is numeric, or any raw concept idx points to numeric, abstraction_rules must be defined
         num_attrs = len(self.derived_from)
@@ -295,21 +299,21 @@ class Context(TAK):
                     "must define abstraction rules."
                 )
 
-        # Validate context windows vs abstraction rules (bidirectional)
-        if self.abstraction_rules:
-            rule_values = {rule.value for rule in self.abstraction_rules}
-            window_values = {v for v in self.context_windows.keys() if v is not None}
-            
-            # Check 1: Windows defined for non-existent rule values (typo detection)
-            for window_val in window_values:
-                if window_val not in rule_values:
-                    raise ValueError(f"{self.name}: context-window for value='{window_val}' does not match any abstraction rule value (possible typo)")
-            
-            # Check 2: Rules without value-specific windows AND no default
-            default_window_exists = None in self.context_windows
-            for rule_val in rule_values:
-                if rule_val not in window_values and not default_window_exists:
-                    raise ValueError(f"{self.name}: abstraction rule value='{rule_val}' has no value-specific window and no default window defined")
+        # 4) Validate context windows vs abstraction rules (bidirectional)
+        # UPDATED: Now that rules are mandatory, this always runs
+        rule_values = {rule.value for rule in self.abstraction_rules}
+        window_values = {v for v in self.context_windows.keys() if v is not None}
+        
+        # Check 1: Windows defined for non-existent rule values (typo detection)
+        for window_val in window_values:
+            if window_val not in rule_values:
+                raise ValueError(f"{self.name}: context-window for value='{window_val}' does not match any abstraction rule value (possible typo)")
+        
+        # Check 2: Rules without value-specific windows AND no default
+        default_window_exists = None in self.context_windows
+        for rule_val in rule_values:
+            if rule_val not in window_values and not default_window_exists:
+                raise ValueError(f"{self.name}: abstraction rule value='{rule_val}' has no value-specific window and no default window defined")
 
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -337,28 +341,9 @@ class Context(TAK):
             logger.info("[%s] apply() end | post-filter=0 rows", self.name)
             return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
 
-        # If no abstraction rules: emit raw values as-is (with windowing using default window)
-        if not self.abstraction_rules:
-            # Extract value using idx for each row
-            def extract_value(row):
-                df_spec = next((d for d in self.derived_from if d["name"] == row["ConceptName"]), None)
-                idx = df_spec.get("idx", 0) if df_spec else 0
-                val = row["Value"]
-                if isinstance(val, tuple):
-                    return val[idx] if idx < len(val) else None
-                return val
-            df_main["Value"] = df_main.apply(extract_value, axis=1)
-            df_main = self._apply_context_window(df_main)
-            df_main = self._clip_overlapping_contexts(df_main)
-            df_main = self._apply_clippers(df_main, df_clippers)
-            df_main["ConceptName"] = self.name
-            df_main["AbstractionType"] = self.family
-            logger.info("[%s] apply() end (no rules) | output_rows=%d", self.name, len(df_main))
-            return df_main[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
-
-        # Apply abstraction rules
+        # Apply abstraction rules (always)
         df_main = self._abstract(df_main)
-        df_main = self._apply_context_window(df_main)  # Now uses per-value windows
+        df_main = self._apply_context_window(df_main)
         df_main = self._clip_overlapping_contexts(df_main)
         df_main = self._apply_clippers(df_main, df_clippers)
         df_main["ConceptName"] = self.name

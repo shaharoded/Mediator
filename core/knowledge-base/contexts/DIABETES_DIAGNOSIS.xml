@@ -3,12 +3,20 @@
     <categories>Diagnosis</categories>
     <description>DIABETES context</description>
     <derived-from>
-        <attribute name="DIABETES_DIAGNOSIS" tak="raw-concept" idx="0"/>
+        <attribute name="DIABETES_DIAGNOSIS" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
+
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
     
     <context-windows>
         <!-- A DD diagnosis is relevant from the beginning of the hospitalization -->
-        <persistence good-before="14d" good-after="120y"/>
+        <persistence value="True" good-before="14d" good-after="120y"/>
     </context-windows>
 
 </context>

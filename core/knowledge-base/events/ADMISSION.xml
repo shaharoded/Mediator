@@ -3,6 +3,14 @@
     <categories>Events</categories>
     <description>Admission event</description>
     <derived-from>
-        <attribute name="ADMISSION" tak="raw-concept" idx="0"/>
+        <attribute name="ADMISSION" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
+
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
 </event>

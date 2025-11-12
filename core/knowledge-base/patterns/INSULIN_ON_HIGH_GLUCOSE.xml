@@ -16,7 +16,9 @@
             <!-- OPTIONAL: Contextual Information relevant if begins at / before the last event of the pattern starts-->
             <context>
                 <attribute ref="C1">
-                    <allowed-value equal="True"/>
+                    <allowed-value equal="Breakfast"/>
+                    <allowed-value equal="Lunch"/>
+                    <allowed-value equal="Dinner"/>
                 </attribute>
             </context>
 

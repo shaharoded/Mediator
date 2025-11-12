@@ -128,7 +128,7 @@
                         </xs:sequence>
                     </xs:complexType>
                 </xs:element>
-                <xs:element name="abstraction-rules" minOccurs="0">
+                <xs:element name="abstraction-rules">
                     <xs:complexType>
                         <xs:sequence>
                             <xs:element name="rule" maxOccurs="unbounded">
@@ -294,7 +294,7 @@
                         </xs:sequence>
                     </xs:complexType>
                 </xs:element>
-                <xs:element name="abstraction-rules" minOccurs="0">
+                <xs:element name="abstraction-rules">
                     <xs:complexType>
                         <xs:sequence>
                             <xs:element name="rule" maxOccurs="unbounded">

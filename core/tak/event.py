@@ -88,66 +88,70 @@ class Event(TAK):
         if not derived_from:
             raise ValueError(f"{name}: <derived-from> must contain at least one <attribute>")
 
-        # --- abstraction-rules (optional) ---
-        abs_rules: List[EventAbstractionRule] = []
+        # --- abstraction-rules (REQUIRED) ---
         abs_el = root.find("abstraction-rules")
+        if abs_el is None:
+            raise ValueError(f"{name}: missing <abstraction-rules> block (abstraction rules are now mandatory for all Events)")
         
-        if abs_el is not None:
-            # If abstraction-rules exist, all derived-from entries MUST have refs
-            missing_refs = [df["name"] for df in derived_from if "ref" not in df]
-            if missing_refs:
-                raise ValueError(
-                    f"{name}: <abstraction-rules> present but some <derived-from> attributes missing 'ref': {missing_refs}"
-                )
+        # All derived-from entries MUST have refs (since abstraction-rules exist)
+        missing_refs = [df["name"] for df in derived_from if "ref" not in df]
+        if missing_refs:
+            raise ValueError(
+                f"{name}: <abstraction-rules> present but some <derived-from> attributes missing 'ref': {missing_refs}"
+            )
+        
+        abs_rules: List[EventAbstractionRule] = []
+        for rule_el in abs_el.findall("rule"):
+            val = rule_el.attrib["value"]
+            op = rule_el.attrib.get("operator", "or")
+            constraints: Dict[str, List[Dict[str, Any]]] = {}  # {ref: [{constraint_spec}]}
             
-            for rule_el in abs_el.findall("rule"):
-                val = rule_el.attrib["value"]
-                op = rule_el.attrib.get("operator", "or")
-                constraints: Dict[str, List[Dict[str, Any]]] = {}  # {ref: [{constraint_spec}]}
+            for attr_el in rule_el.findall("attribute"):
+                if "ref" not in attr_el.attrib:
+                    raise ValueError(f"{name}: <abstraction-rules><attribute> must have 'ref' attribute")
                 
-                for attr_el in rule_el.findall("attribute"):
-                    if "ref" not in attr_el.attrib:
-                        raise ValueError(f"{name}: <abstraction-rules><attribute> must have 'ref' attribute")
-                    
-                    ref = attr_el.attrib["ref"]
-                    
-                    # Validate ref exists in derived-from
-                    if ref not in seen_refs:
-                        raise ValueError(f"{name}: rule references unknown ref='{ref}' (not found in <derived-from>)")
-                    
-                    allowed = []
-                    for av in attr_el.findall("allowed-value"):
-                        constraint = {}
-                        has_equal = "equal" in av.attrib
-                        has_min = "min" in av.attrib
-                        has_max = "max" in av.attrib
-                        
-                        # Validation: reject invalid combinations
-                        if has_equal and (has_min or has_max):
-                            raise ValueError(f"{name}: <allowed-value> cannot have both 'equal' and 'min'/'max' attributes")
-                        if not (has_equal or has_min or has_max):
-                            raise ValueError(f"{name}: <allowed-value> must have at least one of: 'equal', 'min', 'max'")
-                        
-                        # Parse constraint type
-                        if has_equal:
-                            constraint["type"] = "equal"
-                            constraint["value"] = av.attrib["equal"]
-                        elif has_min and has_max:
-                            constraint["type"] = "range"  # Internal representation only
-                            constraint["min"] = float(av.attrib["min"])
-                            constraint["max"] = float(av.attrib["max"])
-                        elif has_min:
-                            constraint["type"] = "min"
-                            constraint["value"] = float(av.attrib["min"])
-                        elif has_max:
-                            constraint["type"] = "max"
-                            constraint["value"] = float(av.attrib["max"])
-                        
-                        allowed.append(constraint)
-                    
-                    constraints[ref] = allowed
+                ref = attr_el.attrib["ref"]
                 
-                abs_rules.append(EventAbstractionRule(val, op, constraints))
+                # Validate ref exists in derived-from
+                if ref not in seen_refs:
+                    raise ValueError(f"{name}: rule references unknown ref='{ref}' (not found in <derived-from>)")
+                
+                allowed = []
+                for av in attr_el.findall("allowed-value"):
+                    constraint = {}
+                    has_equal = "equal" in av.attrib
+                    has_min = "min" in av.attrib
+                    has_max = "max" in av.attrib
+                    
+                    # Validation: reject invalid combinations
+                    if has_equal and (has_min or has_max):
+                        raise ValueError(f"{name}: <allowed-value> cannot have both 'equal' and 'min'/'max' attributes")
+                    if not (has_equal or has_min or has_max):
+                        raise ValueError(f"{name}: <allowed-value> must have at least one of: 'equal', 'min', 'max'")
+                    
+                    # Parse constraint type
+                    if has_equal:
+                        constraint["type"] = "equal"
+                        constraint["value"] = av.attrib["equal"]
+                    elif has_min and has_max:
+                        constraint["type"] = "range"  # Internal representation only
+                        constraint["min"] = float(av.attrib["min"])
+                        constraint["max"] = float(av.attrib["max"])
+                    elif has_min:
+                        constraint["type"] = "min"
+                        constraint["value"] = float(av.attrib["min"])
+                    elif has_max:
+                        constraint["type"] = "max"
+                        constraint["value"] = float(av.attrib["max"])
+                    
+                    allowed.append(constraint)
+                
+                constraints[ref] = allowed
+            
+            abs_rules.append(EventAbstractionRule(val, op, constraints))
+
+        if not abs_rules:
+            raise ValueError(f"{name}: <abstraction-rules> block is empty (must contain at least one <rule>)")
 
         event = cls(
             name=name,
@@ -174,48 +178,47 @@ class Event(TAK):
                 raise ValueError(f"{self.name}: derived_from='{df['name']}' is not a RawConcept (found {parent_tak.family})")
 
         # 2) Validate abstraction rules (ref-based)
-        if self.abstraction_rules:
-            for rule in self.abstraction_rules:
-                # Check operator="and" only for same-source refs
-                if rule.operator == "and":
-                    ref_sources = set()
-                    for ref in rule.constraints.keys():
-                        df_entry = self.derived_from_map.get(ref)
-                        if df_entry is None:
-                            raise ValueError(f"{self.name}: rule references unknown ref='{ref}'")
-                        ref_sources.add(df_entry["name"])
-                    
-                    if len(ref_sources) > 1:
-                        raise ValueError(f"{self.name}: operator='and' requires all refs from same raw-concept source (found: {ref_sources})")
-
-                # Check allowed values are valid for the ref's attribute
-                for ref, constraints in rule.constraints.items():
+        for rule in self.abstraction_rules:
+            # Check operator="and" only for same-source refs
+            if rule.operator == "and":
+                ref_sources = set()
+                for ref in rule.constraints.keys():
                     df_entry = self.derived_from_map.get(ref)
                     if df_entry is None:
-                        continue
+                        raise ValueError(f"{self.name}: rule references unknown ref='{ref}'")
+                    ref_sources.add(df_entry["name"])
+                
+                if len(ref_sources) > 1:
+                    raise ValueError(f"{self.name}: operator='and' requires all refs from same raw-concept source (found: {ref_sources})")
+
+            # Check allowed values are valid for the ref's attribute
+            for ref, constraints in rule.constraints.items():
+                df_entry = self.derived_from_map.get(ref)
+                if df_entry is None:
+                    continue
+                
+                parent_tak = repo.get(df_entry["name"])
+                if isinstance(parent_tak, RawConcept):
+                    # Validate constraints against raw-concept's allowed values
+                    if parent_tak.concept_type == "raw":
+                        attr_idx = df_entry["idx"]
+                        if attr_idx >= len(parent_tak.tuple_order):
+                            raise ValueError(f"{self.name}: ref='{ref}' idx={attr_idx} out of bounds for '{parent_tak.name}' (tuple size={len(parent_tak.tuple_order)})")
+                        attr_name = parent_tak.tuple_order[attr_idx]
+                        parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name), None)
+                    else:
+                        # raw-numeric/nominal/boolean: single attribute
+                        parent_attr = parent_tak.attributes[0] if parent_tak.attributes else None
                     
-                    parent_tak = repo.get(df_entry["name"])
-                    if isinstance(parent_tak, RawConcept):
-                        # Validate constraints against raw-concept's allowed values
-                        if parent_tak.concept_type == "raw":
-                            attr_idx = df_entry["idx"]
-                            if attr_idx >= len(parent_tak.tuple_order):
-                                raise ValueError(f"{self.name}: ref='{ref}' idx={attr_idx} out of bounds for '{parent_tak.name}' (tuple size={len(parent_tak.tuple_order)})")
-                            attr_name = parent_tak.tuple_order[attr_idx]
-                            parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name), None)
-                        else:
-                            # raw-numeric/nominal/boolean: single attribute
-                            parent_attr = parent_tak.attributes[0] if parent_tak.attributes else None
-                        
-                        if parent_attr:
-                            # Validate constraint values against attribute type
-                            for c in constraints:
-                                if parent_attr["type"] == "nominal":
-                                    if c["type"] == "equal" and c["value"] not in parent_attr.get("allowed", []):
-                                        raise ValueError(f"{self.name}: ref='{ref}' constraint value '{c['value']}' not in allowed values")
-                                elif parent_attr["type"] == "boolean":
-                                    if c["type"] == "equal" and c["value"] != "True":
-                                        raise ValueError(f"{self.name}: ref='{ref}' boolean constraint must be 'True'")
+                    if parent_attr:
+                        # Validate constraint values against attribute type
+                        for c in constraints:
+                            if parent_attr["type"] == "nominal":
+                                if c["type"] == "equal" and c["value"] not in parent_attr.get("allowed", []):
+                                    raise ValueError(f"{self.name}: ref='{ref}' constraint value '{c['value']}' not in allowed values")
+                            elif parent_attr["type"] == "boolean":
+                                if c["type"] == "equal" and c["value"] != "True":
+                                    raise ValueError(f"{self.name}: ref='{ref}' boolean constraint must be 'True'")
 
         # If multiple attributes, or any attribute is numeric, or any raw concept idx points to numeric, abstraction_rules must be defined
         num_attrs = len(self.derived_from)
@@ -261,26 +264,8 @@ class Event(TAK):
             logger.info("[%s] apply() end | post-filter=0 rows", self.name)
             return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
 
-        # If no abstraction rules: emit raw values as-is, but always extract the value using idx
-        if not self.abstraction_rules:
-            df["ConceptName"] = self.name
-            df["AbstractionType"] = self.family
-            # Extract value using idx for each row
-            def extract_value(row):
-                # Find the derived_from spec for this ConceptName
-                df_spec = next((d for d in self.derived_from if d["name"] == row["ConceptName"]), None)
-                idx = df_spec.get("idx", 0) if df_spec else 0
-                val = row["Value"]
-                if isinstance(val, tuple):
-                    return val[idx] if idx < len(val) else None
-                return val
-            df["Value"] = df.apply(extract_value, axis=1)
-            logger.info("[%s] apply() end (no rules) | output_rows=%d", self.name, len(df))
-            return df[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
-
-        # Apply abstraction rules
+        # Apply abstraction rules (always)
         df = self._abstract(df)
-        # Keep input EndDateTime (preserve time range)
         df["ConceptName"] = self.name
         df["AbstractionType"] = self.family
 

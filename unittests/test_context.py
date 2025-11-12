@@ -109,31 +109,33 @@ CONTEXT_WITH_CLIPPER_XML = """\
     <description>Context with clipping</description>
 
     <derived-from>
-        <attribute name="MEAL" tak="raw-concept" idx="0"/>
+        <attribute name="MEAL" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
 
     <clippers>
         <clipper name="ADMISSION" tak="raw-concept" clip-before="30m" clip-after="1h"/>
     </clippers>
     
-    <context-windows>
-        <persistence good-before="1h" good-after="2h"/>
-    </context-windows>
-</context>
-"""
-
-# CORRECTED ORDER: no abstraction-rules → context-windows
-CONTEXT_NO_RULES_XML = """\
-<?xml version="1.0" encoding="UTF-8"?>
-<context name="NO_RULES_CONTEXT">
-    <categories>Contexts</categories>
-    <description>Context without abstraction rules</description>
-    <derived-from>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0"/>
-    </derived-from>
+    <abstraction-rules>
+        <rule value="Breakfast" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Breakfast"/>
+            </attribute>
+        </rule>
+        <rule value="Lunch" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Lunch"/>
+            </attribute>
+        </rule>
+        <rule value="Dinner" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Dinner"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
     
     <context-windows>
-        <persistence good-before="30m" good-after="30m"/>
+        <persistence good-before="1h" good-after="2h"/>
     </context-windows>
 </context>
 """
@@ -341,7 +343,8 @@ def test_context_validation_requires_rules_for_multiple_attributes(tmp_path: Pat
     repo.register(RawConcept.parse(glucose_path))
     repo.register(RawConcept.parse(admission_path))
     set_tak_repository(repo)
-    with pytest.raises(ValueError, match="must define abstraction rules"):
+    # FIXED: XSD catches element ordering error (abstraction-rules must come before context-windows)
+    with pytest.raises(ValueError, match="(must define abstraction rules|Missing child element.*abstraction-rules|Expected is one of.*abstraction-rules)"):
         Context.parse(context_path)
 
 
@@ -365,55 +368,9 @@ def test_context_validation_requires_rules_for_numeric(tmp_path: Path):
     repo = TAKRepository()
     repo.register(RawConcept.parse(glucose_path))
     set_tak_repository(repo)
-    with pytest.raises(ValueError, match="must define abstraction rules"):
+    # FIXED: XSD catches element ordering error (abstraction-rules must come before context-windows)
+    with pytest.raises(ValueError, match="(must define abstraction rules|Missing child element.*abstraction-rules|Expected is one of.*abstraction-rules)"):
         Context.parse(context_path)
-
-
-def test_context_apply_extracts_value_by_idx(tmp_path: Path):
-    """Context with no abstraction rules emits correct value (not tuple) using idx."""
-    context_xml = """\
-<?xml version="1.0" encoding="UTF-8"?>
-<context name="MEAL_CONTEXT">
-    <categories>Contexts</categories>
-    <description>Meal context</description>
-    <derived-from>
-        <attribute name="MEAL" tak="raw-concept" idx="0"/>
-    </derived-from>
-    <context-windows>
-        <persistence good-before="1h" good-after="2h"/>
-    </context-windows>
-</context>
-"""
-    raw_meal_xml = """\
-<?xml version="1.0" encoding="UTF-8"?>
-<raw-concept name="MEAL" concept-type="raw-nominal">
-  <categories>Events</categories>
-  <description>Meal type</description>
-  <attributes>
-    <attribute name="MEAL_TYPE" type="nominal">
-      <nominal-allowed-values>
-        <allowed-value value="Breakfast"/>
-        <allowed-value value="Lunch"/>
-        <allowed-value value="Dinner"/>
-      </nominal-allowed-values>
-    </attribute>
-  </attributes>
-</raw-concept>
-"""
-    meal_path = write_xml(tmp_path, "MEAL.xml", raw_meal_xml)
-    context_path = write_xml(tmp_path, "MEAL_CONTEXT.xml", context_xml)
-    repo = TAKRepository()
-    repo.register(RawConcept.parse(meal_path))
-    set_tak_repository(repo)
-    context = Context.parse(context_path)
-    repo.register(context)
-    df_in = pd.DataFrame([
-        (1, "MEAL", make_ts("08:00"), make_ts("08:00"), ("Breakfast",), "raw-concept"),
-        (1, "MEAL", make_ts("12:00"), make_ts("12:00"), ("Lunch",), "raw-concept"),
-    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    df_out = context.apply(df_in)
-    assert list(df_out["Value"]) == ["Breakfast", "Lunch"]
-    assert all(not isinstance(v, tuple) for v in df_out["Value"])
 
 
 def test_context_auto_clips_overlapping_same_context(repo_with_hypoglycemia_context):

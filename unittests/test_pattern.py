@@ -454,6 +454,305 @@ def repo_overlap_pattern(tmp_path: Path) -> TAKRepository:
 
 
 # -----------------------------
+# End-to-End Pattern Tests (Using Actual KB Patterns)
+# -----------------------------
+
+@pytest.fixture
+def repo_actual_kb(tmp_path: Path) -> TAKRepository:
+    """
+    Setup: Load ACTUAL knowledge base patterns + dependencies.
+    This fixture creates a mini-KB with real patterns from knowledge-base.
+    """
+    # Write actual TAK XMLs (copy from knowledge-base/)
+    raw_admission_xml = Path("core/knowledge-base/raw-concepts/ADMISSION.xml").read_text()
+    raw_glucose_xml = Path("core/knowledge-base/raw-concepts/GLUCOSE_MEASURE.xml").read_text()
+    raw_bmi_xml = Path("core/knowledge-base/raw-concepts/BMI_MEASURE.xml").read_text()
+    raw_weight_xml = Path("core/knowledge-base/raw-concepts/WEIGHT_MEASURE.xml").read_text()
+    raw_basal_xml = Path("core/knowledge-base/raw-concepts/BASAL_BITZUA.xml").read_text()
+    raw_bolus_xml = Path("core/knowledge-base/raw-concepts/BOLUS_BITZUA.xml").read_text()
+    raw_diabetes_xml = Path("core/knowledge-base/raw-concepts/DIABETES_DIAGNOSIS.xml").read_text()
+    
+    event_admission_xml = Path("core/knowledge-base/events/ADMISSION.xml").read_text()
+    
+    context_diabetes_xml = Path("core/knowledge-base/contexts/DIABETES_DIAGNOSIS.xml").read_text()
+    
+    pattern_glucose_xml = Path("core/knowledge-base/patterns/GLUCOSE_MEASURE_ON_ADMISSION.xml").read_text()
+    pattern_bmi_xml = Path("core/knowledge-base/patterns/BMI_MEASURE_ON_ADMISSION.xml").read_text()
+    pattern_insulin_xml = Path("core/knowledge-base/patterns/INSULIN_ON_ADMISSION.xml").read_text()
+    
+    # Write to tmp_path
+    write_xml(tmp_path, "ADMISSION_RAW.xml", raw_admission_xml)
+    write_xml(tmp_path, "GLUCOSE_MEASURE.xml", raw_glucose_xml)
+    write_xml(tmp_path, "BMI_MEASURE.xml", raw_bmi_xml)
+    write_xml(tmp_path, "WEIGHT_MEASURE.xml", raw_weight_xml)
+    write_xml(tmp_path, "BASAL_BITZUA.xml", raw_basal_xml)
+    write_xml(tmp_path, "BOLUS_BITZUA.xml", raw_bolus_xml)
+    write_xml(tmp_path, "DIABETES_DIAGNOSIS.xml", raw_diabetes_xml)
+    
+    write_xml(tmp_path, "ADMISSION_EVENT.xml", event_admission_xml)
+    
+    write_xml(tmp_path, "DIABETES_CONTEXT.xml", context_diabetes_xml)
+    
+    write_xml(tmp_path, "PATTERN_GLUCOSE.xml", pattern_glucose_xml)
+    write_xml(tmp_path, "PATTERN_BMI.xml", pattern_bmi_xml)
+    write_xml(tmp_path, "PATTERN_INSULIN.xml", pattern_insulin_xml)
+    
+    # Build repository
+    repo = TAKRepository()
+    
+    # Register raw-concepts
+    repo.register(RawConcept.parse(tmp_path / "ADMISSION_RAW.xml"))
+    repo.register(RawConcept.parse(tmp_path / "GLUCOSE_MEASURE.xml"))
+    repo.register(RawConcept.parse(tmp_path / "BMI_MEASURE.xml"))
+    repo.register(RawConcept.parse(tmp_path / "WEIGHT_MEASURE.xml"))
+    repo.register(RawConcept.parse(tmp_path / "BASAL_BITZUA.xml"))
+    repo.register(RawConcept.parse(tmp_path / "BOLUS_BITZUA.xml"))
+    repo.register(RawConcept.parse(tmp_path / "DIABETES_DIAGNOSIS.xml"))
+    
+    set_tak_repository(repo)
+    
+    # Register event
+    from core.tak.event import Event
+    repo.register(Event.parse(tmp_path / "ADMISSION_EVENT.xml"))
+    
+    # Register context
+    repo.register(Context.parse(tmp_path / "DIABETES_CONTEXT.xml"))
+    
+    # Register patterns
+    repo.register(LocalPattern.parse(tmp_path / "PATTERN_GLUCOSE.xml"))
+    repo.register(LocalPattern.parse(tmp_path / "PATTERN_BMI.xml"))
+    repo.register(LocalPattern.parse(tmp_path / "PATTERN_INSULIN.xml"))
+    
+    return repo
+
+
+def test_actual_pattern_glucose_on_admission_found(repo_actual_kb):
+    """
+    Test GLUCOSE_MEASURE_ON_ADMISSION_PATTERN with controlled data.
+    Expected: Pattern found with time compliance score.
+    """
+    # Get TAKs
+    admission_raw = repo_actual_kb.get("ADMISSION")
+    admission_event = repo_actual_kb.get("ADMISSION_EVENT")
+    glucose_raw = repo_actual_kb.get("GLUCOSE_MEASURE")
+    diabetes_raw = repo_actual_kb.get("DIABETES_DIAGNOSIS")
+    diabetes_context = repo_actual_kb.get("DIABETES_DIAGNOSIS_CONTEXT")
+    pattern = repo_actual_kb.get("GLUCOSE_MEASURE_ON_ADMISSION_PATTERN")
+    
+    # Synthetic input data
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB_MEASURE", make_ts("10:00"), make_ts("10:00"), 120),  # 2h after admission
+        (1, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    # Apply TAK pipeline
+    df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_admission_event = admission_event.apply(df_admission_raw)
+    
+    df_glucose = glucose_raw.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB_MEASURE"])
+    
+    df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
+    df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
+    
+    # Combine for pattern input
+    df_pattern_input = pd.concat([df_admission_event, df_glucose, df_diabetes_context], ignore_index=True)
+    
+    # Apply pattern
+    df_out = pattern.apply(df_pattern_input)
+    
+    # Assertions
+    assert len(df_out) == 1, "Pattern should be found (glucose at 2h within 12h window)"
+    row = df_out.iloc[0]
+    assert row["Value"] == "True", "Pattern should match (within compliance window)"
+    assert row["TimeConstraintScore"] == 1.0, "Time compliance: 2h in [0h, 8h] plateau → score=1.0"
+    assert pd.isna(row["ValueConstraintScore"]), "No value constraint defined"
+
+
+def test_actual_pattern_glucose_on_admission_partial_compliance(repo_actual_kb):
+    """
+    Test GLUCOSE_MEASURE_ON_ADMISSION_PATTERN with partial compliance.
+    Expected: Pattern found but with partial time compliance score.
+    """
+    admission_raw = repo_actual_kb.get("ADMISSION")
+    admission_event = repo_actual_kb.get("ADMISSION_EVENT")
+    glucose_raw = repo_actual_kb.get("GLUCOSE_MEASURE")
+    diabetes_raw = repo_actual_kb.get("DIABETES_DIAGNOSIS")
+    diabetes_context = repo_actual_kb.get("DIABETES_DIAGNOSIS_CONTEXT")
+    pattern = repo_actual_kb.get("GLUCOSE_MEASURE_ON_ADMISSION_PATTERN")
+    
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB_MEASURE", make_ts("18:00"), make_ts("18:00"), 150),  # 10h after admission (in ramp-down zone)
+        (1, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_admission_event = admission_event.apply(df_admission_raw)
+    df_glucose = glucose_raw.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB_MEASURE"])
+    df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
+    df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
+    
+    df_pattern_input = pd.concat([df_admission_event, df_glucose, df_diabetes_context], ignore_index=True)
+    df_out = pattern.apply(df_pattern_input)
+    
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["Value"] == "Partial", "Pattern should have partial compliance (10h in ramp-down zone)"
+    # Trapez: [A=0h, B=0h, C=8h, D=12h] → 10h in ramp-down [C, D]
+    # Score = (D - x) / (D - C) = (12 - 10) / (12 - 8) = 2/4 = 0.5
+    assert row["TimeConstraintScore"] == pytest.approx(0.5)
+
+
+def test_actual_pattern_bmi_on_admission_found(repo_actual_kb):
+    """
+    Test BMI_MEASURE_ON_ADMISSION with controlled data.
+    Expected: Pattern found with time compliance.
+    """
+    admission_raw = repo_actual_kb.get("ADMISSION")
+    admission_event = repo_actual_kb.get("ADMISSION_EVENT")
+    bmi_raw = repo_actual_kb.get("BMI_MEASURE")
+    pattern = repo_actual_kb.get("BMI_MEASURE_ON_ADMISSION")
+    
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "BMI_MEASURE", make_ts("09:00"), make_ts("09:00"), 26.5),  # 1h after admission
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_admission_event = admission_event.apply(df_admission_raw)
+    df_bmi = bmi_raw.apply(df_raw[df_raw["ConceptName"] == "BMI_MEASURE"])
+    
+    df_pattern_input = pd.concat([df_admission_event, df_bmi], ignore_index=True)
+    df_out = pattern.apply(df_pattern_input)
+    
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["Value"] == "True"
+    # Trapez: [0h, 0h, 48h, 72h] → 1h in plateau → score=1.0
+    assert row["TimeConstraintScore"] == 1.0
+
+
+def test_actual_pattern_insulin_on_admission_with_parameters(repo_actual_kb):
+    """
+    Test INSULIN_ON_ADMISSION_PATTERN with weight parameter.
+    Expected: Pattern found with both time and value compliance.
+    """
+    admission_raw = repo_actual_kb.get("ADMISSION")
+    admission_event = repo_actual_kb.get("ADMISSION_EVENT")
+    basal_raw = repo_actual_kb.get("BASAL_BITZUA")
+    bolus_raw = repo_actual_kb.get("BOLUS_BITZUA")
+    weight_raw = repo_actual_kb.get("WEIGHT_MEASURE")
+    diabetes_raw = repo_actual_kb.get("DIABETES_DIAGNOSIS")
+    diabetes_context = repo_actual_kb.get("DIABETES_DIAGNOSIS_CONTEXT")
+    pattern = repo_actual_kb.get("INSULIN_ON_ADMISSION_PATTERN")
+    
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "BASAL_DOSAGE", make_ts("10:00"), make_ts("10:00"), 25),  # 2h after admission
+        (1, "BASAL_ROUTE", make_ts("10:00"), make_ts("10:00"), "SubCutaneous"),
+        (1, "WEIGHT_MEASURE", make_ts("07:30"), make_ts("07:30"), 72),  # closest to pattern start (08:00)
+        (1, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_admission_event = admission_event.apply(df_admission_raw)
+    
+    # Apply BASAL_BITZUA (tuple merging)
+    df_basal_input = df_raw[df_raw["ConceptName"].isin(["BASAL_DOSAGE", "BASAL_ROUTE"])]
+    df_basal = basal_raw.apply(df_basal_input)
+    
+    df_weight = weight_raw.apply(df_raw[df_raw["ConceptName"] == "WEIGHT_MEASURE"])
+    df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
+    df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
+    
+    df_pattern_input = pd.concat([df_admission_event, df_basal, df_weight, df_diabetes_context], ignore_index=True)
+    df_out = pattern.apply(df_pattern_input)
+    
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["Value"] == "True"
+    # Time: 2h in [0h, 48h] plateau → score=1.0
+    assert row["TimeConstraintScore"] == 1.0
+    # Value: 25 units, weight=72 kg → trapez=[0, 14.4, 43.2, 72]
+    #   25 in [14.4, 43.2] plateau → score=1.0
+    assert row["ValueConstraintScore"] == 1.0
+
+
+def test_actual_pattern_insulin_on_admission_uses_default_weight(repo_actual_kb):
+    """
+    Test INSULIN_ON_ADMISSION_PATTERN without weight data (uses default=72).
+    Expected: Pattern found with value compliance using default parameter.
+    """
+    admission_raw = repo_actual_kb.get("ADMISSION")
+    admission_event = repo_actual_kb.get("ADMISSION_EVENT")
+    basal_raw = repo_actual_kb.get("BASAL_BITZUA")
+    diabetes_raw = repo_actual_kb.get("DIABETES_DIAGNOSIS")
+    diabetes_context = repo_actual_kb.get("DIABETES_DIAGNOSIS_CONTEXT")
+    pattern = repo_actual_kb.get("INSULIN_ON_ADMISSION_PATTERN")
+    
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "BASAL_DOSAGE", make_ts("10:00"), make_ts("10:00"), 25),
+        (1, "BASAL_ROUTE", make_ts("10:00"), make_ts("10:00"), "SubCutaneous"),
+        (1, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
+        # No WEIGHT_MEASURE → default=72 will be used
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_admission_event = admission_event.apply(df_admission_raw)
+    
+    df_basal_input = df_raw[df_raw["ConceptName"].isin(["BASAL_DOSAGE", "BASAL_ROUTE"])]
+    df_basal = basal_raw.apply(df_basal_input)
+    
+    df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
+    df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
+    
+    df_pattern_input = pd.concat([df_admission_event, df_basal, df_diabetes_context], ignore_index=True)
+    df_out = pattern.apply(df_pattern_input)
+    
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["Value"] == "True"
+    assert row["ValueConstraintScore"] == 1.0, "Should use default weight=72 → same result as previous test"
+
+
+def test_actual_pattern_multiple_rules_or_semantics(repo_actual_kb):
+    """
+    Test GLUCOSE_MEASURE_ON_ADMISSION_PATTERN with multiple rules (OR semantics).
+    Pattern has 2 rules: 12h window and 36h window.
+    Expected: Glucose at 20h matches second rule only.
+    """
+    admission_raw = repo_actual_kb.get("ADMISSION")
+    admission_event = repo_actual_kb.get("ADMISSION_EVENT")
+    glucose_raw = repo_actual_kb.get("GLUCOSE_MEASURE")
+    diabetes_raw = repo_actual_kb.get("DIABETES_DIAGNOSIS")
+    diabetes_context = repo_actual_kb.get("DIABETES_DIAGNOSIS_CONTEXT")
+    pattern = repo_actual_kb.get("GLUCOSE_MEASURE_ON_ADMISSION_PATTERN")
+    
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB_MEASURE", make_ts("04:00", day=1), make_ts("04:00", day=1), 180),  # 20h after admission
+        (1, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_admission_event = admission_event.apply(df_admission_raw)
+    df_glucose = glucose_raw.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB_MEASURE"])
+    df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
+    df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
+    
+    df_pattern_input = pd.concat([df_admission_event, df_glucose, df_diabetes_context], ignore_index=True)
+    df_out = pattern.apply(df_pattern_input)
+    
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["Value"] == "True", "Should match second rule (20h within 36h window)"
+    # Second rule trapez: [0h, 0h, 24h, 36h] → 20h in plateau [B, C] → score=1.0
+    assert row["TimeConstraintScore"] == 1.0
+
+
+# -----------------------------
 # Tests: Parsing & Validation
 # -----------------------------
 

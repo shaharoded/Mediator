@@ -3,10 +3,30 @@
     <categories>Events</categories>
     <description>Meal event, with context window around meal times</description>
     <derived-from>
-        <attribute name="MEAL" tak="raw-concept" idx="0"/>
+        <attribute name="MEAL" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
+
+    <abstraction-rules>
+        <rule value="Breakfast" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Breakfast"/>
+            </attribute>
+        </rule>
+        <rule value="Lunch" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Lunch"/>
+            </attribute>
+        </rule>
+        <rule value="Dinner" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Dinner"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
     
     <context-windows>
-        <persistence good-before="2h" good-after="2h"/>
+        <persistence value="Breakfast" good-before="2h" good-after="2h"/>
+        <persistence value="Lunch" good-before="2h" good-after="2h"/>
+        <persistence value="Dinner" good-before="2h" good-after="2h"/>
     </context-windows>
 </context>

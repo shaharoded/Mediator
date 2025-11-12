@@ -211,8 +211,30 @@ EVENT_MEAL_XML = """\
     <categories>Events</categories>
     <description>Meal event</description>
     <derived-from>
-        <attribute name="MEAL" tak="raw-concept" idx="0"/>
+        <attribute name="MEAL" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
+    <abstraction-rules>
+        <rule value="Breakfast" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Breakfast"/>
+            </attribute>
+        </rule>
+        <rule value="Lunch" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Lunch"/>
+            </attribute>
+        </rule>
+        <rule value="Dinner" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Dinner"/>
+            </attribute>
+        </rule>
+        <rule value="Snack" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Snack"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
 </event>
 """
 

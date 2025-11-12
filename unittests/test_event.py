@@ -107,8 +107,25 @@ EVENT_NO_RULES_XML = """\
     <categories>Events</categories>
     <description>Meal event</description>
     <derived-from>
-        <attribute name="MEAL" tak="raw-concept" idx="0"/>
+        <attribute name="MEAL" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
+    <abstraction-rules>
+        <rule value="Breakfast" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Breakfast"/>
+            </attribute>
+        </rule>
+        <rule value="Lunch" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Lunch"/>
+            </attribute>
+        </rule>
+        <rule value="Dinner" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Dinner"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
 </event>
 """
 
@@ -138,27 +155,28 @@ def test_parse_event_validates_structure(repo_with_disglycemia):
     assert len(event.abstraction_rules) == 2
 
 
-def test_event_apply_no_rules(tmp_path: Path):
-    """Event with no rules emits raw values as-is."""
+def test_event_validation_requires_rules_always(tmp_path: Path):
+    """Validation fails if abstraction-rules block is missing (now mandatory for all Events)."""
+    event_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="NO_RULES_EVENT">
+    <categories>Events</categories>
+    <description>Event without rules</description>
+    <derived-from>
+        <attribute name="MEAL" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+</event>
+"""
     meal_path = write_xml(tmp_path, "MEAL.xml", RAW_MEAL_XML)
-    event_path = write_xml(tmp_path, "MEAL_EVENT.xml", EVENT_NO_RULES_XML)
+    event_path = write_xml(tmp_path, "NO_RULES_EVENT.xml", event_xml)
     
     repo = TAKRepository()
     repo.register(RawConcept.parse(meal_path))
     set_tak_repository(repo)
-    event = Event.parse(event_path)
-    repo.register(event)
     
-    df_in = pd.DataFrame([
-        (1, "MEAL", make_ts("08:00"), make_ts("08:00"), ("Breakfast",), "raw-concept"),
-        (1, "MEAL", make_ts("12:00"), make_ts("12:00"), ("Lunch",), "raw-concept"),
-    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    
-    df_out = event.apply(df_in)
-    assert len(df_out) == 2
-    assert all(df_out["ConceptName"] == "MEAL_EVENT")
-    assert all(df_out["StartDateTime"] == df_out["EndDateTime"])  # point-in-time
-    assert list(df_out["Value"]) == ["Breakfast", "Lunch"]
+    # FIXED: XSD validation now catches this error first, so match either error message
+    with pytest.raises(ValueError, match="(missing <abstraction-rules> block|Missing child element.*abstraction-rules)"):
+        Event.parse(event_path)
 
 
 def test_event_apply_with_rules_or_operator(repo_with_disglycemia):
@@ -287,7 +305,8 @@ def test_event_validation_requires_rules_for_multiple_attributes(tmp_path: Path)
     repo.register(RawConcept.parse(glucose_path))
     repo.register(RawConcept.parse(hypo_path))
     set_tak_repository(repo)
-    with pytest.raises(ValueError, match="must define abstraction rules"):
+    # FIXED: XSD catches missing abstraction-rules first
+    with pytest.raises(ValueError, match="(must define abstraction rules|Missing child element.*abstraction-rules)"):
         Event.parse(event_path)
 
 
@@ -308,20 +327,38 @@ def test_event_validation_requires_rules_for_numeric(tmp_path: Path):
     repo = TAKRepository()
     repo.register(RawConcept.parse(glucose_path))
     set_tak_repository(repo)
-    with pytest.raises(ValueError, match="must define abstraction rules"):
+    # FIXED: XSD catches missing abstraction-rules first
+    with pytest.raises(ValueError, match="(must define abstraction rules|Missing child element.*abstraction-rules)"):
         Event.parse(event_path)
 
 
 def test_event_apply_extracts_value_by_idx(tmp_path: Path):
-    """Event with no abstraction rules emits correct value (not tuple) using idx."""
+    """Event with abstraction rules emits correct value using idx."""
     event_xml = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <event name="MEAL_EVENT">
     <categories>Events</categories>
     <description>Meal event</description>
     <derived-from>
-        <attribute name="MEAL" tak="raw-concept" idx="0"/>
+        <attribute name="MEAL" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
+    <abstraction-rules>
+        <rule value="Breakfast" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Breakfast"/>
+            </attribute>
+        </rule>
+        <rule value="Lunch" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Lunch"/>
+            </attribute>
+        </rule>
+        <rule value="Dinner" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Dinner"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
 </event>
 """
     raw_meal_xml = """\

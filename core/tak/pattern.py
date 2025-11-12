@@ -641,6 +641,19 @@ class LocalPattern(Pattern):
                             f"use only 'equal' constraints."
                         )
 
+        # Validate context blocks (only ONE attribute allowed per context block)
+        for rule in self.abstraction_rules:
+            if rule.context_spec and rule.context_spec.get("attributes"):
+                num_context_attrs = len(rule.context_spec["attributes"])
+                if num_context_attrs > 1:
+                    raise ValueError(
+                        f"{self.name}: Pattern context blocks can only reference ONE context TAK. "
+                        f"Found {num_context_attrs} context attributes in rule. "
+                        f"Reason: A single DataFrame row cannot match multiple ConceptName values simultaneously."
+                        f"You can consider a few differnt contexts (OR condition) by splitting to different rules."
+                        f"Or you can consider only the intersection of 2 or more contexts as context of it's own by defining this as a seperate <context> file."
+                    )
+
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Apply LocalPattern to find and rate pattern instances.
