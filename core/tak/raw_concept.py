@@ -215,7 +215,7 @@ class RawConcept(TAK):
                         df.drop(index=idx_drop, inplace=True)
 
             elif typ == "boolean":
-                # No validation; any present row will become (True,) later
+                # No validation; any present row will become ("True",)
                 pass
 
         if df.empty:
@@ -228,14 +228,20 @@ class RawConcept(TAK):
         if self.concept_type != "raw":
             out = df.loc[:, ["PatientId","StartDateTime","EndDateTime","ConceptName","Value"]].copy()
 
-            # boolean → set to ("True",) only for those concepts (string, not Python bool)
+            # boolean → ALWAYS stringify to "True" (never Python bool)
             if any(a["type"] == "boolean" for a in self.attributes):
                 bool_names = {a["name"] for a in self.attributes if a["type"] == "boolean"}
                 mask_bool = out["ConceptName"].isin(bool_names)
                 if mask_bool.any():
+                    # Ensure Value is ALWAYS string "True", not Python bool
+                    out.loc[mask_bool, "Value"] = out.loc[mask_bool, "Value"].apply(
+                        lambda v: "True" if str(v).lower() in ("true", "1", "yes") else str(v)
+                    )
+                    # Wrap in 1-tuple
                     out.loc[mask_bool, "Value"] = [("True",)] * int(mask_bool.sum())
 
             # wrap scalars into 1-tuples (avoid double-wrap)
+            # Ensure all non-tuple values are stringified before wrapping
             out["Value"] = out["Value"].map(lambda v: v if isinstance(v, tuple) else (v,))
 
             out["ConceptName"] = self.name
@@ -254,6 +260,15 @@ class RawConcept(TAK):
         # 3) raw → EXACT TIMESTAMP GROUPING (NO TOLERANCE)
         df = df.copy()
         df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
+        
+        # Stringify boolean attributes BEFORE grouping
+        for a in self.attributes:
+            if a["type"] == "boolean":
+                mask = (df["ConceptName"] == a["name"])
+                if mask.any():
+                    df.loc[mask, "Value"] = df.loc[mask, "Value"].apply(
+                        lambda v: "True" if str(v).lower() in ("true", "1", "yes") else str(v)
+                    )
         
         # Group by exact timestamp (rounded to nearest microsecond to handle floating-point errors)
         df["timestamp_key"] = df["StartDateTime"].dt.round("us")

@@ -214,7 +214,7 @@ This TAK knowledge base was developed for analyzing diabetes management during h
 - `raw` — Multi-attribute concepts with tuple merging (e.g., medication dosage + route)
 - `raw-numeric` — Single numeric attributes with range validation
 - `raw-nominal` — Single nominal attributes with allowed values
-- `raw-boolean` — Boolean flags (presence/absence)
+- `raw-boolean` — Boolean flags (presence only), will automatically assign str "True" as one nominal value.
 
 **Key Parameters:**
 - `concept-type` — One of: `raw`, `raw-numeric`, `raw-nominal`, `raw-boolean`
