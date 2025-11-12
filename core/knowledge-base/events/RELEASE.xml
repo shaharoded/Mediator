@@ -4,7 +4,7 @@
     <description>Release event</description>
     <derived-from>
         <!-- ref optional when no abstraction-rules -->
-        <attribute name="RELEASE" tak="raw-concept" idx="0"/>
+        <attribute name="RELEASE" tak="raw-concept" idx="0" ref='A1'/>
     </derived-from>
 
     <abstraction-rules>
