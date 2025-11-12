@@ -221,6 +221,9 @@ python -m core.mediator \
     --log-level INFO
 ```
 
+>> This implementation does not offer a run on a partial subset of TAKs from the repository, since it validates every TAK's dependencies before calculation, and all must be in cache when running the abstraction (it also assumes stored results from past runs might not be credible).
+
+>> If you wish to run on a subset of TAKs you'll need to pull the desired TAKs + all of their dependencies to a new TAK folder of the same structure, and point the Mediator's config there.
 ---
 
 ### 1.6 Run Tests

@@ -1,11 +1,10 @@
 """
 TO-DO:
- - write_output_thread function needs to split Pattern output and write properly to the 2 different tables
  - define that max-distance=0 for 'before' will also capture 'overlap', so that if context window overlaps with event, it is included. As long as anchor.StartTime < event.StartTime, we can treat "before" as inclusive of overlap.
  """
 
 from __future__ import annotations
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any, Union, Tuple
 from pathlib import Path
 import asyncio
 import json
@@ -33,8 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from backend.dataaccess import DataAccess 
 from backend.config import (
     DB_PATH,
-    INSERT_ABSTRACTED_MEASUREMENT_QUERY,
     GET_DATA_BY_PATIENT_CONCEPTS_QUERY,
+    INSERT_ABSTRACTED_MEASUREMENT_QUERY,
     INSERT_QA_SCORE_QUERY
 )
 
@@ -220,7 +219,7 @@ class Mediator:
             rows = self.da.fetch_records(query, ())
             return [int(r[0]) for r in rows]
     
-    def get_input_for_raw_concept(self, patient_id: int, raw_concept: RawConcept, da: Optional[DataAccess] = None) -> pd.DataFrame:
+    def __get_input_for_raw_concept(self, patient_id: int, raw_concept: RawConcept, da: Optional[DataAccess] = None) -> pd.DataFrame:
         """
         Query InputPatientData for a RawConcept's data by its attributes.
         Thread-safe: uses provided DataAccess instance if given, otherwise uses self.da.
@@ -279,7 +278,7 @@ class Mediator:
                 return tak_outputs[tak.name]
             
             # Not cached → query InputPatientData (caller will cache AFTER apply())
-            return self.get_input_for_raw_concept(patient_id, tak, da)
+            return self.__get_input_for_raw_concept(patient_id, tak, da)
         
         # RECURSIVE CASE: All other TAKs (cache-only lookups)
         
@@ -295,6 +294,10 @@ class Mediator:
         # CASE: Event → derived_from is list of RawConcepts
         if isinstance(tak, Event):
             dfs = [get_cached_dependency(df_spec["name"]) for df_spec in tak.derived_from]
+            # Filter out empty DataFrames before concat
+            dfs = [df for df in dfs if not df.empty]
+            if not dfs:
+                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
             return pd.concat(dfs, ignore_index=True)
         
         # CASE: State → single derived_from (RawConcept or Event)
@@ -308,119 +311,21 @@ class Mediator:
         # CASE: Context → derived_from (RawConcepts) + clippers (any TAK type)
         if isinstance(tak, Context):
             dfs = [get_cached_dependency(spec["name"]) for spec in tak.derived_from + tak.clippers]
+            dfs = [df for df in dfs if not df.empty]
+            if not dfs:
+                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
             return pd.concat(dfs, ignore_index=True)
         
         # CASE: Pattern → derived_from + parameters
         if isinstance(tak, Pattern):
             dfs = [get_cached_dependency(spec["name"]) for spec in tak.derived_from + tak.parameters]
+            dfs = [df for df in dfs if not df.empty]
+            if not dfs:
+                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
             return pd.concat(dfs, ignore_index=True)
         
         # Fallback (should never reach here)
         raise RuntimeError(f"Unknown TAK type: {tak.family}")
-
-    def _process_patient_sync(self, patient_id: int) -> Dict[str, Union[int, str]]:
-        """
-        Process a single patient through all TAKs in dependency order.
-        Returns per-TAK output row counts for stats tracking.
-        """
-        # Create new DB connection for this thread (SQLite thread safety)
-        thread_da = DataAccess(db_path=self.db_path)
-        
-        logger.info(f"[Patient {patient_id}] Processing start")
-        stats = {}
-        tak_outputs = {}  # Cache ALL TAK outputs for this patient_id
-        
-        try:
-            # Phase 0: Query global clipper times ONCE per patient
-            clipper_df = self._get_global_clipper_times(patient_id, thread_da)
-            execution_order = getattr(self.repo, 'execution_order', list(self.repo.taks.keys()))
-
-            # Process TAKs in topological order
-            for tak_name in execution_order:
-                tak = self.repo.get(tak_name)
-                try:
-                    # --- Step 1: Get input data (READ-ONLY cache access) ---
-                    df_input = self.get_input_for_tak(patient_id, tak, tak_outputs, thread_da)
-                    
-                    if df_input.empty:
-                        continue
-                    
-                    # --- Step 2: Apply TAK ---
-                    df_output = tak.apply(df_input)
-
-                    # --- Step 3: Apply global clippers ---
-                    df_output = self._apply_global_clippers(df_output, clipper_df)
-                    
-                    # --- Step 4: Cache output (UNIFIED: all TAKs cached AFTER apply()) ---
-                    tak_outputs[tak_name] = df_output
-                    
-                    # --- Step 5: Write to DB ---
-                    if isinstance(tak, Pattern):
-                        # Patterns: split into main output + QA scores
-                        df_output_main, df_output_scores = self._split_pattern_output(df_output)
-                        
-                        # Update cache with main output (for downstream patterns)
-                        tak_outputs[tak_name] = df_output_main
-                        
-                        rows_written_main = self.write_output(df_output_main, thread_da)
-                        rows_written_scores = self.write_qa_scores(df_output_scores, thread_da)
-                        
-                        stats[tak.name] = {
-                            "output_rows": rows_written_main,
-                            "qa_scores": rows_written_scores
-                        }
-                    else:
-                        # All other TAKs: write to OutputPatientData (skip RawConcepts)
-                        if not isinstance(tak, RawConcept):
-                            rows_written = self.write_output(df_output, thread_da)
-                        else:
-                            rows_written = len(df_output)
-                        
-                        stats[tak.name] = rows_written
-                    
-                except Exception as e:
-                    logger.error(f"[Patient {patient_id}][{tak_name}] Error: {e}")
-                    stats[tak_name] = {"error": str(e)}
-            
-            logger.info(f"[Patient {patient_id}] Processing complete | stats={stats}")
-            return stats
-            
-        except Exception as e:
-            logger.error(f"[Patient {patient_id}] Critical error: {e}", exc_info=True)
-            return {"error": str(e)}
-        finally:
-            # Close thread-local connection
-            thread_da.conn.close()
-
-    def _get_global_clipper_times(self, patient_id: int) -> Optional[pd.DataFrame]:
-        """
-        Query InputPatientData for global clipper events (once per patient, before TAK processing).
-        Returns DataFrame with columns: ConceptName, StartDateTime, or None if no clippers found.
-        """
-        if not self.global_clippers:
-            return None
-        
-        clipper_names = list(self.global_clippers.keys())
-        table = "InputPatientData"
-        
-        # Load query template and replace placeholders
-        with open(GET_DATA_BY_PATIENT_CONCEPTS_QUERY, 'r') as f:
-            query_template = f.read()
-        
-        query = query_template.replace("{table}", table)
-        placeholders = ','.join('?' * len(clipper_names))
-        query = query.replace("{CONCEPT_PLACEHOLDERS}", placeholders)
-        
-        params = (patient_id, *clipper_names)
-        rows = self.da.fetch_records(query, params)
-        
-        if not rows:
-            return None
-        
-        # Return DataFrame with ConceptName and StartDateTime (clippers are point events)
-        df = pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
-        return df[["ConceptName", "StartDateTime"]]
     
     def write_output(self, df: pd.DataFrame, da: Optional[DataAccess] = None) -> int:
         """
@@ -499,23 +404,7 @@ class Mediator:
         
         return db.insert_many(INSERT_QA_SCORE_QUERY, rows, batch_size=1000)
 
-    async def process_patient_async(self, patient_id: int, semaphore: asyncio.Semaphore) -> Dict[str, int]:
-        """
-        Process a single patient through the entire TAK pipeline (async).
-        
-        Args:
-            patient_id: Patient ID
-            semaphore: Asyncio semaphore for concurrency control
-        
-        Returns:
-            Dict with stats: {tak_name: rows_written}
-        """
-        async with semaphore:
-            # Run synchronous TAK processing in executor (blocking operations)
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._process_patient_sync, patient_id)
-    
-    def _get_global_clipper_times(self, patient_id: int) -> Optional[pd.DataFrame]:
+    def _get_global_clipper_times(self, patient_id: int, da: DataAccess) -> Optional[pd.DataFrame]:
         """
         Query InputPatientData for global clipper events (once per patient, before TAK processing).
         Returns DataFrame with columns: ConceptName, StartDateTime, or None if no clippers found.
@@ -535,7 +424,7 @@ class Mediator:
         query = query.replace("{CONCEPT_PLACEHOLDERS}", placeholders)
         
         params = (patient_id, *clipper_names)
-        rows = self.da.fetch_records(query, params)
+        rows = da.fetch_records(query, params)
         
         if not rows:
             return None
@@ -600,6 +489,124 @@ class Mediator:
             logger.info(f"[Global Clippers] Dropped {dropped_count} invalid intervals (StartDateTime >= EndDateTime after clipping)")
         
         return df[valid_mask]
+    
+    def _split_pattern_output(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Split Pattern output into main output (for OutputPatientData) and QA scores (for PatientQAScores).
+        
+        Main output: Rows with valid timestamps (True/Partial patterns)
+        QA scores: All rows (including False patterns with NaT timestamps)
+        
+        Args:
+            df: Pattern output with columns [PatientId, ConceptName, StartDateTime, EndDateTime, 
+                                            Value, TimeConstraintScore, ValueConstraintScore, AbstractionType]
+        
+        Returns:
+            Tuple of (main_output_df, qa_scores_df)
+        """
+        if df.empty:
+            return (
+                pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"]),
+                pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore"])
+            )
+        
+        # Main output: only rows with valid timestamps (not NaT)
+        # This filters out "False" patterns (which have NaT timestamps)
+        df_main = df[df["StartDateTime"].notna()].copy()
+        df_main = df_main[["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"]]
+        
+        # QA scores: all rows (including "False" with NaT)
+        # Extract compliance score columns
+        df_scores = df[["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore"]].copy()
+        
+        return df_main, df_scores
+
+    def _process_patient_sync(self, patient_id: int) -> Dict[str, Union[int, str]]:
+        """
+        Process a single patient through all TAKs in dependency order.
+        Returns per-TAK output row counts for stats tracking.
+        """
+        # Create new DB connection for this thread (SQLite thread safety)
+        thread_da = DataAccess(db_path=self.db_path)
+        
+        logger.info(f"[Patient {patient_id}] Processing start")
+        stats = {}
+        tak_outputs = {}  # Cache ALL TAK outputs for this patient_id {tak.name: tak.apply() df}
+        
+        try:
+            # Phase 0: Query global clipper times ONCE per patient
+            clipper_df = self._get_global_clipper_times(patient_id, thread_da)
+            execution_order = getattr(self.repo, 'execution_order', list(self.repo.taks.keys()))
+
+            # Process TAKs in topological order
+            for tak_name in execution_order:
+                tak = self.repo.get(tak_name)
+                try:
+                    # --- Step 1: Get input data (READ-ONLY cache access) ---
+                    df_input = self.get_input_for_tak(patient_id, tak, tak_outputs, thread_da)
+                    # Will not skip on empty inputs - TAK.apply() will know how to return them.
+                    
+                    # --- Step 2: Apply TAK ---
+                    df_output = tak.apply(df_input)
+
+                    # --- Step 3: Apply global clippers ---
+                    df_output = self._apply_global_clippers(df_output, clipper_df)
+                    
+                    # --- Step 4: Write to DB + cache output (UNIFIED: all TAKs cached AFTER apply()) ---
+                    if isinstance(tak, Pattern):
+                        # Patterns: split into main output + QA scores
+                        df_output_main, df_output_scores = self._split_pattern_output(df_output)
+                        
+                        # Update cache with main output (for downstream patterns)
+                        tak_outputs[tak_name] = df_output_main
+                        
+                        rows_written_main = self.write_output(df_output_main, thread_da)
+                        _ = self.write_qa_scores(df_output_scores, thread_da)
+                        
+                        # Add to stats the number of temporal rows written
+                        stats[tak.name] = rows_written_main
+
+                    else:
+                        
+                        tak_outputs[tak_name] = df_output
+                        
+                        # All other TAKs: write to OutputPatientData (skip RawConcepts)
+                        if not isinstance(tak, RawConcept):
+                            rows_written = self.write_output(df_output, thread_da)
+                        else:
+                            rows_written = len(df_output)
+                        
+                        stats[tak.name] = rows_written
+                    
+                except Exception as e:
+                    logger.error(f"[Patient {patient_id}][{tak_name}] Error: {e}")
+                    stats[tak_name] = {"error": str(e)}
+            
+            logger.info(f"[Patient {patient_id}] Processing complete | stats={stats}")
+            return stats
+            
+        except Exception as e:
+            logger.error(f"[Patient {patient_id}] Critical error: {e}", exc_info=True)
+            return {"error": str(e)}
+        finally:
+            # Close thread-local connection
+            thread_da.conn.close()
+
+    async def process_patient_async(self, patient_id: int, semaphore: asyncio.Semaphore) -> Dict[str, int]:
+        """
+        Process a single patient through the entire TAK pipeline (async).
+        
+        Args:
+            patient_id: Patient ID
+            semaphore: Asyncio semaphore for concurrency control
+        
+        Returns:
+            Dict with stats: {tak_name: rows_written}
+        """
+        async with semaphore:
+            # Run synchronous TAK processing in executor (blocking operations)
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self._process_patient_sync, patient_id)
     
     async def process_all_patients_async(
         self,
@@ -745,7 +752,7 @@ Examples:
     parser.add_argument(
         "--db",
         type=Path,
-        default=DB_PATH,
+        default=DB_PATH,numeric_level = getattr(logging, args.log_level.upper(), logging.INFO),
         help=f"Path to database file (default: {DB_PATH})"
     )
     

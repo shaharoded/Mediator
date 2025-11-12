@@ -31,9 +31,9 @@ CREATE TABLE IF NOT EXISTS PatientQAScores (
     RowId INTEGER PRIMARY KEY AUTOINCREMENT,
     PatientId INTEGER NOT NULL,
     PatternName TEXT NOT NULL,
-    StartDateTime TEXT NOT NULL,
+    StartDateTime TEXT,
     EndDateTime TEXT,
-    ComplianceType TEXT,
-    ComplianceScore REAL,
-    UNIQUE (PatientId, PatternName, StartDateTime)
+    ComplianceType TEXT NOT NULL,
+    ComplianceScore REAL NOT NULL,
+    UNIQUE (PatientId, PatternName, StartDateTime, ComplianceType)
 );
