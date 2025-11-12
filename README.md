@@ -57,7 +57,7 @@ Mediator/
 │   │   ├── state.py                        # State TAK
 │   │   ├── trend.py                        # Trend TAK
 │   │   ├── context.py                      # Context TAK
-│   │   ├── pattern.py                      # Pattern TAK - Local (DONE) and Global (TODO)
+│   │   ├── pattern.py                      # Pattern TAK - LocalPattern
 │   │   └── utils.py                        # Shared utilities
 │   ├── config.py                           # TAK paths
 │   └── mediator.py                         # Orchestration engine + CLI
@@ -238,6 +238,8 @@ python -m pytest unittests/test_event.py -v
 python -m pytest unittests/test_state.py -v
 python -m pytest unittests/test_trend.py -v
 python -m pytest unittests/test_context.py -v
+python -m pytest unittests/test_pattern.py -v
+python -m pytest unittests/test_repository.py -v
 python -m pytest unittests/test_mediator.py -v
 
 # With coverage report
