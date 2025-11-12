@@ -1066,6 +1066,8 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb, small_patient_sub
     
     # Try each patient until we find one with patterns + compliance functions
     for patient_id in small_patient_subset:
+        print(f"\n=== Trying patient {patient_id} ===")
+        
         # Run pipeline for this patient
         mediator.run(max_concurrent=1, patient_subset=[patient_id])
         
@@ -1078,7 +1080,12 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb, small_patient_sub
         """
         pattern_output = prod_db.fetch_records(output_query, (patient_id,))
         
+        print(f"   Pattern output: {len(pattern_output)} patterns")
+        for pattern_name, cnt in pattern_output:
+            print(f"      - {pattern_name}: {cnt} instances")
+        
         if not pattern_output:
+            print(f"   ⚠️  No pattern output for patient {patient_id}")
             continue  # Try next patient
         
         # Check if any pattern has compliance functions
@@ -1092,8 +1099,12 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb, small_patient_sub
                 )
                 if has_compliance:
                     has_compliance_patterns.append(pattern_name)
+                    print(f"   ✅ {pattern_name} HAS compliance functions")
+                else:
+                    print(f"   ⚠️  {pattern_name} has NO compliance functions")
         
         if not has_compliance_patterns:
+            print(f"   ⚠️  No compliance patterns for patient {patient_id}")
             continue  # Try next patient
         
         # Found patient with compliance patterns! Query QA scores
@@ -1105,8 +1116,11 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb, small_patient_sub
         """
         rows = prod_db.fetch_records(query, (patient_id,))
         
+        print(f"   QA scores: {len(rows)} rows")
+        
         if not rows:
             # Pattern exists WITH compliance functions but no QA scores → BUG!
+            print(f"\n❌ BUG: Patient {patient_id} has patterns WITH compliance functions ({has_compliance_patterns}) but NO QA scores!")
             pytest.fail(
                 f"Patient {patient_id} has patterns WITH compliance functions ({has_compliance_patterns}) "
                 f"but no QA scores. This indicates write_qa_scores() is not working correctly."
@@ -1131,6 +1145,7 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb, small_patient_sub
         return  # Test passed!
     
     # If we get here, no patient had patterns with compliance functions
+    print(f"\n⚠️  Skipping test: None of the {len(small_patient_subset)} patients have patterns WITH OUTPUT that have compliance functions")
     pytest.skip(f"None of the {len(small_patient_subset)} patients have patterns with compliance functions (no QA scores to test)")
 
 
@@ -1479,8 +1494,17 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb, small_patient_sub
     mediator = Mediator(prod_kb, prod_db)
     mediator.build_repository()
     
+    # DEBUG: Print patterns with compliance functions
+    print("\n=== Patterns in repository ===")
+    for pattern in mediator.patterns:
+        has_time = any(r.time_constraint_compliance for r in pattern.abstraction_rules)
+        has_value = any(r.value_constraint_compliance for r in pattern.abstraction_rules)
+        print(f"   {pattern.name}: time={has_time}, value={has_value}")
+    
     # Try each patient until we find one with patterns + compliance functions
     for patient_id in small_patient_subset:
+        print(f"\n=== Trying patient {patient_id} ===")
+        
         # Run pipeline for this patient
         mediator.run(max_concurrent=1, patient_subset=[patient_id])
         
@@ -1493,7 +1517,12 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb, small_patient_sub
         """
         pattern_output = prod_db.fetch_records(output_query, (patient_id,))
         
+        print(f"   Pattern output: {len(pattern_output)} patterns")
+        for pattern_name, cnt in pattern_output:
+            print(f"      - {pattern_name}: {cnt} instances")
+        
         if not pattern_output:
+            print(f"   ⚠️  No pattern output for patient {patient_id}")
             continue  # Try next patient
         
         # Check if any pattern has compliance functions
@@ -1507,8 +1536,12 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb, small_patient_sub
                 )
                 if has_compliance:
                     has_compliance_patterns.append(pattern_name)
+                    print(f"   ✅ {pattern_name} HAS compliance functions")
+                else:
+                    print(f"   ⚠️  {pattern_name} has NO compliance functions")
         
         if not has_compliance_patterns:
+            print(f"   ⚠️  No compliance patterns for patient {patient_id}")
             continue  # Try next patient
         
         # Found patient with compliance patterns! Query QA scores
@@ -1520,8 +1553,11 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb, small_patient_sub
         """
         rows = prod_db.fetch_records(query, (patient_id,))
         
+        print(f"   QA scores: {len(rows)} rows")
+        
         if not rows:
             # Pattern exists WITH compliance functions but no QA scores → BUG!
+            print(f"\n❌ BUG: Patient {patient_id} has patterns WITH compliance functions ({has_compliance_patterns}) but NO QA scores!")
             pytest.fail(
                 f"Patient {patient_id} has patterns WITH compliance functions ({has_compliance_patterns}) "
                 f"but no QA scores. This indicates write_qa_scores() is not working correctly."
@@ -1546,6 +1582,7 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb, small_patient_sub
         return  # Test passed!
     
     # If we get here, no patient had patterns with compliance functions
+    print(f"\n⚠️  Skipping test: None of the {len(small_patient_subset)} patients have patterns WITH OUTPUT that have compliance functions")
     pytest.skip(f"None of the {len(small_patient_subset)} patients have patterns with compliance functions (no QA scores to test)")
 
 

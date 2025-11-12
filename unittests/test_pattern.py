@@ -1435,6 +1435,7 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, t
     weight_tak = repo.get("WEIGHT_MEASURE")
     
     df_raw = pd.DataFrame([
+       
         (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
         (1, "BASAL_DOSAGE", make_ts("10:00"), make_ts("10:00"), 10),  # 2h gap, 10 units
         (1, "BASAL_ROUTE", make_ts("10:00"), make_ts("10:00"), "SubCutaneous"),
@@ -1443,7 +1444,6 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, t
     
     df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
     
-   
     # Apply BASAL_BITZUA (tuple merging)
     df_basal_input = df_raw[df_raw["ConceptName"].isin(["BASAL_DOSAGE", "BASAL_ROUTE"])]
     df_basal = basal_tak.apply(df_basal_input)
@@ -1451,7 +1451,22 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, t
     df_weight = weight_tak.apply(df_raw[df_raw["ConceptName"] == "WEIGHT"])
     
     df_input = pd.concat([df_admission, df_basal, df_weight], ignore_index=True)
+    
+    # DEBUG: Print input
+    print("\n=== Pattern input ===")
+    print(df_input)
+    
     df_out = pattern_tak.apply(df_input)
+    
+    # DEBUG: Print output with scores
+    print("\n=== Pattern output ===")
+    print(df_out)
+    print(f"\nPattern found: {len(df_out)} rows")
+    if len(df_out) > 0:
+        row = df_out.iloc[0]
+        print(f"Value: {row['Value']}")
+        print(f"TimeConstraintScore: {row['TimeConstraintScore']}")
+        print(f"ValueConstraintScore: {row['ValueConstraintScore']}")
     
     assert len(df_out) == 1
     row = df_out.iloc[0]
@@ -1466,3 +1481,8 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, t
     
     # Combined: (1.0 + 0.694) / 2 = 0.847 → Partial
     assert row["Value"] == "Partial"
+    
+    print("\n✅ Combined compliance test PASSED")
+    print(f"   Time score: {row['TimeConstraintScore']:.3f}")
+    print(f"   Value score: {row['ValueConstraintScore']:.3f}")
+    print(f"   Combined value: {row['Value']}")

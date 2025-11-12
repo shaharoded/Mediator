@@ -161,7 +161,7 @@ python -m backend.dataaccess --create_db
 cp /path/to/your/input_data.csv backend/data/
 
 # Load into database
-python -m backend.dataaccess --load_csv backend/data/input_data.csv --yes
+
 ```
 
 **Load CSV (Option B: Pass absolute path):**
