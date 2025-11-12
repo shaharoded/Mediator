@@ -4,6 +4,82 @@ from typing import Union
 from .external_functions import REPO
 
 
+@dataclass(frozen=True)
+class TrapezNode:
+    """Immutable trapezoid node for compliance scoring.
+    
+    Supports both:
+    - Time-based: timedelta values (A, B, C, D all as timedelta)
+    - Value-based: float values (A, B, C, D all as float)
+    
+    Order: A <= B <= C <= D (validated at parse time).
+    """
+    A: Union[float, timedelta]
+    B: Union[float, timedelta]
+    C: Union[float, timedelta]
+    D: Union[float, timedelta]
+    
+    def validate(self) -> None:
+        """Ensure trapez is well-formed: A <= B <= C <= D."""
+        if not (self.A <= self.B <= self.C <= self.D):
+            raise ValueError(
+                f"Invalid trapez order: A={self.A}, B={self.B}, C={self.C}, D={self.D}. "
+                f"Must satisfy A <= B <= C <= D."
+            )
+    
+    def compliance_score(self, value: Union[float, timedelta]) -> float:
+        """
+        Compute compliance score for a given value using piecewise-linear interpolation.
+        
+        Score is 1.0 (100%) between B and C.
+        Score is 0.0 (0%) outside [A, D].
+        Score linearly interpolates:
+          - [A, B]: 0 → 1
+          - [B, C]: 1 (constant)
+          - [C, D]: 1 → 0
+        
+        Args:
+            value: The actual measured value (timedelta for time-constraint, float for value-constraint)
+        
+        Returns:
+            float: Compliance score in [0, 1]
+        """
+        # Convert timedeltas to seconds for uniform comparison
+        if isinstance(value, timedelta):
+            val = value.total_seconds()
+        else:
+            val = float(value)
+        
+        if isinstance(self.A, timedelta):
+            a = self.A.total_seconds()
+            b = self.B.total_seconds()
+            c = self.C.total_seconds()
+            d = self.D.total_seconds()
+        else:
+            a = float(self.A)
+            b = float(self.B)
+            c = float(self.C)
+            d = float(self.D)
+        
+        if val < a or val > d:
+            return 0.0
+        
+        if b <= val <= c:
+            return 1.0
+        
+        if a <= val < b:
+            if b == a:
+                return 0.0
+            return (val - a) / (b - a)
+        
+        if c < val <= d:
+            if d == c:
+                return 0.0
+            return (d - val) / (d - c)
+        
+        return 0.0
+
+        
 def parse_duration(duration_str):
     """
     Convert a compact duration string (e.g. '72h', '2d', '15m') into a timedelta object.
@@ -126,79 +202,3 @@ def apply_external_function(func_name: str, trapez: tuple, constraint_type: str,
         
         # Return TrapezNode with float values
         return TrapezNode(A=results[0], B=results[1], C=results[2], D=results[3])
-    
-
-@dataclass(frozen=True)
-class TrapezNode:
-    """Immutable trapezoid node for compliance scoring.
-    
-    Supports both:
-    - Time-based: timedelta values (A, B, C, D all as timedelta)
-    - Value-based: float values (A, B, C, D all as float)
-    
-    Order: A <= B <= C <= D (validated at parse time).
-    """
-    A: Union[float, timedelta]
-    B: Union[float, timedelta]
-    C: Union[float, timedelta]
-    D: Union[float, timedelta]
-    
-    def validate(self) -> None:
-        """Ensure trapez is well-formed: A <= B <= C <= D."""
-        if not (self.A <= self.B <= self.C <= self.D):
-            raise ValueError(
-                f"Invalid trapez order: A={self.A}, B={self.B}, C={self.C}, D={self.D}. "
-                f"Must satisfy A <= B <= C <= D."
-            )
-    
-    def compliance_score(self, value: Union[float, timedelta]) -> float:
-        """
-        Compute compliance score for a given value using piecewise-linear interpolation.
-        
-        Score is 1.0 (100%) between B and C.
-        Score is 0.0 (0%) outside [A, D].
-        Score linearly interpolates:
-          - [A, B]: 0 → 1
-          - [B, C]: 1 (constant)
-          - [C, D]: 1 → 0
-        
-        Args:
-            value: The actual measured value (timedelta for time-constraint, float for value-constraint)
-        
-        Returns:
-            float: Compliance score in [0, 1]
-        """
-        # Convert timedeltas to seconds for uniform comparison
-        if isinstance(value, timedelta):
-            val = value.total_seconds()
-        else:
-            val = float(value)
-        
-        if isinstance(self.A, timedelta):
-            a = self.A.total_seconds()
-            b = self.B.total_seconds()
-            c = self.C.total_seconds()
-            d = self.D.total_seconds()
-        else:
-            a = float(self.A)
-            b = float(self.B)
-            c = float(self.C)
-            d = float(self.D)
-        
-        if val < a or val > d:
-            return 0.0
-        
-        if b <= val <= c:
-            return 1.0
-        
-        if a <= val < b:
-            if b == a:
-                return 0.0
-            return (val - a) / (b - a)
-        
-        if c < val <= d:
-            if d == c:
-                return 0.0
-            return (d - val) / (d - c)
-        
-        return 0.0

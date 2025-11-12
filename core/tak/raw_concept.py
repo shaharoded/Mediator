@@ -320,4 +320,8 @@ class RawConcept(TAK):
         
         logger.info("[%s][RAW] emitted_tuples=%d | input_rows=%d", self.name, len(out), total_in)
         
+        # FINAL STEP: Sort by StartDateTime for downstream TAKs
+        out = out.sort_values("StartDateTime").reset_index(drop=True)
+
+        logger.info("[%s] apply() end | output_rows=%d", self.name, len(out))
         return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
