@@ -872,7 +872,7 @@ class LocalPattern(Pattern):
         
         # Extract temporal relation spec
         how = rule.relation_spec.get("how")
-        max_delta = rule.max_delta
+        max_delta = rule.max_delta # str representation or None
         
         # Vectorized temporal check (before="event.start must be after anchor.end")
         if how == "before":

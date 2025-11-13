@@ -5,7 +5,7 @@ from .external_functions import REPO
 
 
 @dataclass(frozen=True)
-class TrapezNode:
+class FuzzyLogicTrapez:
     """Immutable trapezoid node for compliance scoring.
     
     Supports both:
@@ -130,7 +130,7 @@ def parse_duration(duration_str):
         raise ValueError(f"Unsupported duration unit: '{unit}'. Use s, m, h, d, w, M, or y.")
     
 
-def apply_external_function(func_name: str, trapez: tuple, constraint_type: str, *args) -> TrapezNode:
+def apply_external_function(func_name: str, trapez: tuple, constraint_type: str, *args) -> FuzzyLogicTrapez:
     """
     Apply an external function by name to each value in the trapez tuple, passing any additional *args.
     For time-constraint, values are parsed as durations, converted to seconds, passed to function,
@@ -143,7 +143,7 @@ def apply_external_function(func_name: str, trapez: tuple, constraint_type: str,
         *args: Additional arguments to pass to the function.
 
     Returns:
-        TrapezNode: Finalized trapezoid node (A, B, C, D values as timedelta or float)
+        FuzzyLogicTrapez: Finalized trapezoid node (A, B, C, D values as timedelta or float)
 
     Raises:
         ValueError: If the function name is not recognized or wrong number of parameters.
@@ -173,8 +173,8 @@ def apply_external_function(func_name: str, trapez: tuple, constraint_type: str,
                 f"Results: {results}"
             )
         
-        # Convert back to timedeltas and return TrapezNode
-        return TrapezNode(
+        # Convert back to timedeltas and return FuzzyLogicTrapez
+        return FuzzyLogicTrapez(
             A=timedelta(seconds=results[0]),
             B=timedelta(seconds=results[1]),
             C=timedelta(seconds=results[2]),
@@ -200,5 +200,5 @@ def apply_external_function(func_name: str, trapez: tuple, constraint_type: str,
                 f"Results: {results}"
             )
         
-        # Return TrapezNode with float values
-        return TrapezNode(A=results[0], B=results[1], C=results[2], D=results[3])
+        # Return FuzzyLogicTrapez with float values
+        return FuzzyLogicTrapez(A=results[0], B=results[1], C=results[2], D=results[3])

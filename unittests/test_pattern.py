@@ -1486,3 +1486,689 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, t
     print(f"   Time score: {row['TimeConstraintScore']:.3f}")
     print(f"   Value score: {row['ValueConstraintScore']:.3f}")
     print(f"   Combined value: {row['Value']}")
+
+
+# -----------------------------
+# Tests: Actual KB Patterns (Self-Contained Debug Tests)
+# -----------------------------
+
+def test_debug_insulin_on_admission_basic(tmp_path: Path):
+    """
+    Debug test for INSULIN_ON_ADMISSION_PATTERN with minimal data.
+    Tests the exact XML structure from actual KB.
+    """
+    # Copy actual KB XMLs (self-contained)
+    raw_admission_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ADMISSION" concept-type="raw-boolean">
+  <categories>Admin</categories>
+  <description>Admission raw</description>
+  <attributes>
+    <attribute name="ADMISSION" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+    
+    event_admission_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="ADMISSION_EVENT">
+    <categories>Admin</categories>
+    <description>Admission event</description>
+    <derived-from>
+        <attribute name="ADMISSION" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</event>
+"""
+    
+    raw_basal_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="BASAL_BITZUA" concept-type="raw">
+  <categories>Medications</categories>
+  <description>Basal insulin</description>
+  <attributes>
+    <attribute name="BASAL_DOSAGE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="100"/>
+      </numeric-allowed-values>
+    </attribute>
+    <attribute name="BASAL_ROUTE" type="nominal">
+      <nominal-allowed-values>
+        <allowed-value value="SubCutaneous"/>
+        <allowed-value value="IntraVenous"/>
+      </nominal-allowed-values>
+    </attribute>
+  </attributes>
+  <tuple-order>
+    <attribute name="BASAL_DOSAGE"/>
+    <attribute name="BASAL_ROUTE"/>
+  </tuple-order>
+  <merge require-all="false"/>
+</raw-concept>
+"""
+    
+    raw_bolus_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="BOLUS_BITZUA" concept-type="raw">
+  <categories>Medications</categories>
+  <description>Bolus insulin</description>
+  <attributes>
+    <attribute name="BOLUS_DOSAGE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="100"/>
+      </numeric-allowed-values>
+    </attribute>
+    <attribute name="BOLUS_ROUTE" type="nominal">
+      <nominal-allowed-values>
+        <allowed-value value="SubCutaneous"/>
+        <allowed-value value="IntraVenous"/>
+      </nominal-allowed-values>
+    </attribute>
+  </attributes>
+  <tuple-order>
+    <attribute name="BOLUS_DOSAGE"/>
+    <attribute name="BOLUS_ROUTE"/>
+  </tuple-order>
+  <merge require-all="false"/>
+</raw-concept>
+"""
+    
+    raw_diabetes_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="DIABETES_DIAGNOSIS" concept-type="raw-boolean">
+  <categories>Diagnoses</categories>
+  <description>Diabetes diagnosis</description>
+  <attributes>
+    <attribute name="DIABETES_DIAGNOSIS" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+    
+    context_diabetes_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="DIABETES_DIAGNOSIS_CONTEXT">
+    <categories>Diagnoses</categories>
+    <description>Diabetes diagnosis context</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+    <context-windows>
+        <persistence good-before="0h" good-after="720h"/>
+    </context-windows>
+</context>
+"""
+    
+    raw_weight_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="WEIGHT_MEASURE" concept-type="raw-numeric">
+  <categories>Measurements</categories>
+  <description>Weight measure</description>
+  <attributes>
+    <attribute name="WEIGHT_MEASURE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="300"/>
+      </numeric-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+    
+    pattern_insulin_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="INSULIN_ON_ADMISSION_PATTERN" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Captures if INSULIN (BASAL/BOLUS) was performed within reasonable time of admission</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
+        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
+        <attribute name="BASAL_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="E2"/>
+    </derived-from>
+    <parameters>
+        <parameter name="WEIGHT_MEASURE" tak="raw-concept" idx="0" ref="P1" default="72"/>
+    </parameters>
+    <abstraction-rules>
+        <rule>
+            <context>
+                <attribute ref="C1">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
+            <temporal-relation how='before' max-distance='72h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                    <attribute ref="E2">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                    </function>
+                </time-constraint-compliance>
+                <value-constraint-compliance>
+                    <target>
+                        <attribute ref="E1"/>
+                        <attribute ref="E2"/>
+                    </target>
+                    <function name="mul">
+                        <parameter ref="P1"/>
+                        <trapeze trapezeA="0" trapezeB="0.2" trapezeC="0.6" trapezeD="1"/>
+                    </function>
+                </value-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+    
+    # Write XMLs
+    write_xml(tmp_path, "ADMISSION_RAW.xml", raw_admission_xml)
+    write_xml(tmp_path, "ADMISSION_EVENT.xml", event_admission_xml)
+    write_xml(tmp_path, "BASAL_BITZUA.xml", raw_basal_xml)
+    write_xml(tmp_path, "BOLUS_BITZUA.xml", raw_bolus_xml)
+    write_xml(tmp_path, "DIABETES_DIAGNOSIS.xml", raw_diabetes_xml)
+    write_xml(tmp_path, "DIABETES_CONTEXT.xml", context_diabetes_xml)
+    write_xml(tmp_path, "WEIGHT_MEASURE.xml", raw_weight_xml)
+    write_xml(tmp_path, "PATTERN_INSULIN.xml", pattern_insulin_xml)
+    
+    # Build repository
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(tmp_path / "ADMISSION_RAW.xml"))
+    repo.register(RawConcept.parse(tmp_path / "BASAL_BITZUA.xml"))
+    repo.register(RawConcept.parse(tmp_path / "BOLUS_BITZUA.xml"))
+    repo.register(RawConcept.parse(tmp_path / "DIABETES_DIAGNOSIS.xml"))
+    repo.register(RawConcept.parse(tmp_path / "WEIGHT_MEASURE.xml"))
+    
+    set_tak_repository(repo)
+    
+    from core.tak.event import Event
+    repo.register(Event.parse(tmp_path / "ADMISSION_EVENT.xml"))
+    repo.register(Context.parse(tmp_path / "DIABETES_CONTEXT.xml"))
+    repo.register(LocalPattern.parse(tmp_path / "PATTERN_INSULIN.xml"))
+    
+    # Get TAKs
+    admission_raw = repo.get("ADMISSION")
+    admission_event = repo.get("ADMISSION_EVENT")
+    basal_raw = repo.get("BASAL_BITZUA")
+    weight_raw = repo.get("WEIGHT_MEASURE")
+    diabetes_raw = repo.get("DIABETES_DIAGNOSIS")
+    diabetes_context = repo.get("DIABETES_DIAGNOSIS_CONTEXT")
+    pattern = repo.get("INSULIN_ON_ADMISSION_PATTERN")
+    
+    # Synthetic input data
+    df_raw = pd.DataFrame([
+        (1000, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1000, "BASAL_DOSAGE", make_ts("10:00"), make_ts("10:00"), 25),
+        (1000, "BASAL_ROUTE", make_ts("10:00"), make_ts("10:00"), "SubCutaneous"),
+        (1000, "WEIGHT_MEASURE", make_ts("07:30"), make_ts("07:30"), 72),
+        (1000, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    # Apply TAK pipeline
+    df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_admission_event = admission_event.apply(df_admission_raw)
+    
+    df_basal_input = df_raw[df_raw["ConceptName"].isin(["BASAL_DOSAGE", "BASAL_ROUTE"])]
+    df_basal = basal_raw.apply(df_basal_input)
+    
+    df_weight = weight_raw.apply(df_raw[df_raw["ConceptName"] == "WEIGHT_MEASURE"])
+    df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
+    df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
+    
+    df_pattern_input = pd.concat([df_admission_event, df_basal, df_weight, df_diabetes_context], ignore_index=True)
+    
+    print("\n=== DEBUG: Pattern input ===")
+    print(df_pattern_input)
+    print(f"\nInput dtypes:")
+    print(df_pattern_input.dtypes)
+    
+    # Apply pattern (THIS IS WHERE ERROR OCCURS)
+    df_out = pattern.apply(df_pattern_input)
+    
+    print("\n=== DEBUG: Pattern output ===")
+    print(df_out)
+    
+    # Assertions
+    assert len(df_out) == 1
+    assert df_out.iloc[0]["Value"] == "True"
+
+
+def test_debug_glucose_on_admission_multi_rule(tmp_path: Path):
+    """
+    Debug test for GLUCOSE_MEASURE_ON_ADMISSION_PATTERN with 2 rules.
+    Tests multiple rule evaluation with time-constraint compliance.
+    """
+    raw_admission_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ADMISSION" concept-type="raw-boolean">
+  <categories>Admin</categories>
+  <description>Admission raw</description>
+  <attributes>
+    <attribute name="ADMISSION" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+    
+    event_admission_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="ADMISSION_EVENT">
+    <categories>Admin</categories>
+    <description>Admission event</description>
+    <derived-from>
+        <attribute name="ADMISSION" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</event>
+"""
+    
+    raw_glucose_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="GLUCOSE_MEASURE" concept-type="raw-numeric">
+  <categories>Measurements</categories>
+  <description>Glucose measure</description>
+  <attributes>
+    <attribute name="GLUCOSE_MEASURE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="600"/>
+      </numeric-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+    
+    raw_diabetes_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="DIABETES_DIAGNOSIS" concept-type="raw-boolean">
+  <categories>Diagnoses</categories>
+  <description>Diabetes diagnosis</description>
+  <attributes>
+    <attribute name="DIABETES_DIAGNOSIS" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+    
+    context_diabetes_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="DIABETES_DIAGNOSIS_CONTEXT">
+    <categories>Diagnoses</categories>
+    <description>Diabetes diagnosis context</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+    <context-windows>
+        <persistence good-before="0h" good-after="720h"/>
+    </context-windows>
+</context>
+"""
+    
+    pattern_glucose_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="GLUCOSE_MEASURE_ON_ADMISSION_PATTERN" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Captures if DEX was preformed within resonable time of admission</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <context>
+                <attribute ref="C1">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
+            <temporal-relation how='before' max-distance='12h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="8h" trapezeD="12h"/>
+                    </function>
+                </time-constraint-compliance>
+            </compliance-function>
+        </rule>
+        <rule>
+            <temporal-relation how='before' max-distance='36h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="24h" trapezeD="36h"/>
+                    </function>
+                </time-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+    
+    # Write XMLs
+    write_xml(tmp_path, "ADMISSION_RAW.xml", raw_admission_xml)
+    write_xml(tmp_path, "ADMISSION_EVENT.xml", event_admission_xml)
+    write_xml(tmp_path, "GLUCOSE_MEASURE.xml", raw_glucose_xml)
+    write_xml(tmp_path, "DIABETES_DIAGNOSIS.xml", raw_diabetes_xml)
+    write_xml(tmp_path, "DIABETES_CONTEXT.xml", context_diabetes_xml)
+    write_xml(tmp_path, "PATTERN_GLUCOSE.xml", pattern_glucose_xml)
+    
+    # Build repository
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(tmp_path / "ADMISSION_RAW.xml"))
+    repo.register(RawConcept.parse(tmp_path / "GLUCOSE_MEASURE.xml"))
+    repo.register(RawConcept.parse(tmp_path / "DIABETES_DIAGNOSIS.xml"))
+    
+    set_tak_repository(repo)
+    
+    from core.tak.event import Event
+    repo.register(Event.parse(tmp_path / "ADMISSION_EVENT.xml"))
+    repo.register(Context.parse(tmp_path / "DIABETES_CONTEXT.xml"))
+    repo.register(LocalPattern.parse(tmp_path / "PATTERN_GLUCOSE.xml"))
+    
+    # Get TAKs
+    admission_raw = repo.get("ADMISSION")
+    admission_event = repo.get("ADMISSION_EVENT")
+    glucose_raw = repo.get("GLUCOSE_MEASURE")
+    diabetes_raw = repo.get("DIABETES_DIAGNOSIS")
+    diabetes_context = repo.get("DIABETES_DIAGNOSIS_CONTEXT")
+    pattern = repo.get("GLUCOSE_MEASURE_ON_ADMISSION_PATTERN")
+    
+    # Test case: glucose at 10h (should match first rule with partial compliance)
+    df_raw = pd.DataFrame([
+        (1000, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1000, "GLUCOSE_MEASURE", make_ts("18:00"), make_ts("18:00"), 150),
+        (1000, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_admission_event = admission_event.apply(df_admission_raw)
+    df_glucose = glucose_raw.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_MEASURE"])
+    df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
+    df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
+    
+    df_pattern_input = pd.concat([df_admission_event, df_glucose, df_diabetes_context], ignore_index=True)
+    
+    print("\n=== DEBUG: Pattern input ===")
+    print(df_pattern_input)
+    
+    df_out = pattern.apply(df_pattern_input)
+    
+    print("\n=== DEBUG: Pattern output ===")
+    print(df_out)
+    
+    assert len(df_out) == 1
+    assert df_out.iloc[0]["Value"] == "Partial"
+    assert df_out.iloc[0]["TimeConstraintScore"] == pytest.approx(0.5)
+
+
+def test_debug_insulin_on_high_glucose_context_clipping(tmp_path: Path):
+    """
+    Debug test for INSULIN_ON_HIGH_GLUCOSE_PATTERN with context clipping.
+    Tests context TAK used as anchor (HIGH_GLUCOSE_CONTEXT).
+    """
+    raw_glucose_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="GLUCOSE_MEASURE" concept-type="raw-numeric">
+  <categories>Measurements</categories>
+  <description>Glucose measure</description>
+  <attributes>
+    <attribute name="GLUCOSE_MEASURE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="600"/>
+      </numeric-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+    
+    context_high_glucose_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="HIGH_GLUCOSE_CONTEXT">
+    <categories>Measurements</categories>
+    <description>High glucose context</description>
+    <derived-from>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value min="200"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+    <context-windows>
+        <persistence good-before="0h" good-after="0h"/>  <!-- ✅ Changed from 6h to 0h -->
+    </context-windows>
+</context>
+"""
+    
+    context_meal_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="MEAL_CONTEXT">
+    <categories>Meals</categories>
+    <description>Meal context (Breakfast/Lunch/Dinner)</description>
+    <derived-from>
+        <attribute name="MEAL_TIMING" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="Breakfast" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Breakfast"/>
+            </attribute>
+        </rule>
+        <rule value="Lunch" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Lunch"/>
+            </attribute>
+        </rule>
+        <rule value="Dinner" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="Dinner"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+    <context-windows>
+        <persistence good-before="1h" good-after="3h"/>
+    </context-windows>
+</context>
+"""
+    
+    raw_meal_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="MEAL_TIMING" concept-type="raw-nominal">
+  <categories>Meals</categories>
+  <description>Meal timing</description>
+  <attributes>
+    <attribute name="MEAL_TIMING" type="nominal">
+      <nominal-allowed-values>
+        <allowed-value value="Breakfast"/>
+        <allowed-value value="Lunch"/>
+        <allowed-value value="Dinner"/>
+      </nominal-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+    
+    raw_bolus_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="BOLUS_BITZUA" concept-type="raw">
+  <categories>Medications</categories>
+  <description>Bolus insulin</description>
+  <attributes>
+    <attribute name="BOLUS_DOSAGE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="100"/>
+      </numeric-allowed-values>
+    </attribute>
+    <attribute name="BOLUS_ROUTE" type="nominal">
+      <nominal-allowed-values>
+        <allowed-value value="SubCutaneous"/>
+        <allowed-value value="IntraVenous"/>
+      </nominal-allowed-values>
+    </attribute>
+  </attributes>
+  <tuple-order>
+    <attribute name="BOLUS_DOSAGE"/>
+    <attribute name="BOLUS_ROUTE"/>
+  </tuple-order>
+  <merge require-all="false"/>
+</raw-concept>
+"""
+    
+    pattern_insulin_high_glucose_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="INSULIN_ON_HIGH_GLUCOSE_PATTERN" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Captures if INSULIN (BASAL/BOLUS) was performed within reasonable time after high glucose measured</description>
+    <derived-from>
+        <attribute name="MEAL_CONTEXT" tak="context" ref="C1"/>
+        <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="A1"/>
+        <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <context>
+                <attribute ref="C1">
+                    <allowed-value equal="Breakfast"/>
+                    <allowed-value equal="Lunch"/>
+                    <allowed-value equal="Dinner"/>
+                </attribute>
+            </context>
+            <temporal-relation how='before' max-distance='2h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="1h" trapezeD="2h"/>
+                    </function>
+                </time-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+    
+    # Write XMLs
+    write_xml(tmp_path, "GLUCOSE_MEASURE.xml", raw_glucose_xml)
+    write_xml(tmp_path, "HIGH_GLUCOSE_CONTEXT.xml", context_high_glucose_xml)
+    write_xml(tmp_path, "MEAL_TIMING.xml", raw_meal_xml)
+    write_xml(tmp_path, "MEAL_CONTEXT.xml", context_meal_xml)
+    write_xml(tmp_path, "BOLUS_BITZUA.xml", raw_bolus_xml)
+    write_xml(tmp_path, "PATTERN_INSULIN_HIGH_GLUCOSE.xml", pattern_insulin_high_glucose_xml)
+    
+    # Build repository
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(tmp_path / "GLUCOSE_MEASURE.xml"))
+    repo.register(RawConcept.parse(tmp_path / "MEAL_TIMING.xml"))
+    repo.register(RawConcept.parse(tmp_path / "BOLUS_BITZUA.xml"))
+    
+    set_tak_repository(repo)
+    
+    repo.register(Context.parse(tmp_path / "HIGH_GLUCOSE_CONTEXT.xml"))
+    repo.register(Context.parse(tmp_path / "MEAL_CONTEXT.xml"))
+    repo.register(LocalPattern.parse(tmp_path / "PATTERN_INSULIN_HIGH_GLUCOSE.xml"))
+    
+    # Get TAKs
+    glucose_raw = repo.get("GLUCOSE_MEASURE")
+    high_glucose_context = repo.get("HIGH_GLUCOSE_CONTEXT")
+    meal_raw = repo.get("MEAL_TIMING")
+    meal_context = repo.get("MEAL_CONTEXT")
+    bolus_raw = repo.get("BOLUS_BITZUA")
+    pattern = repo.get("INSULIN_ON_HIGH_GLUCOSE_PATTERN")
+    
+    # Test case: high glucose at lunch, bolus 30min later
+    df_raw = pd.DataFrame([
+        (1000, "GLUCOSE_MEASURE", make_ts("12:00"), make_ts("12:00"), 250),
+        (1000, "MEAL_TIMING", make_ts("12:00"), make_ts("12:00"), "Lunch"),
+        (1000, "BOLUS_DOSAGE", make_ts("12:05"), make_ts("12:05"), 10),
+        (1000, "BOLUS_ROUTE", make_ts("12:30"), make_ts("12:30"), "SubCutaneous"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_glucose = glucose_raw.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_MEASURE"])
+    df_high_glucose = high_glucose_context.apply(df_glucose)
+    
+    df_meal = meal_raw.apply(df_raw[df_raw["ConceptName"] == "MEAL_TIMING"])
+    df_meal_context = meal_context.apply(df_meal)
+    
+    df_bolus_input = df_raw[df_raw["ConceptName"].isin(["BOLUS_DOSAGE", "BOLUS_ROUTE"])]
+    df_bolus = bolus_raw.apply(df_bolus_input)
+    
+    df_pattern_input = pd.concat([df_high_glucose, df_meal_context, df_bolus], ignore_index=True)
+    
+    print("\n=== DEBUG: Pattern input ===")
+    print(df_pattern_input)
+    
+    df_out = pattern.apply(df_pattern_input)
+    
+    print("\n=== DEBUG: Pattern output ===")
+    print(df_out)
+    
+    assert len(df_out) == 1
+    assert df_out.iloc[0]["Value"] == "True"
+    assert df_out.iloc[0]["TimeConstraintScore"] == 1.0

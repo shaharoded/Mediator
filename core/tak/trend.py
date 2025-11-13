@@ -172,7 +172,6 @@ class Trend(TAK):
             return df
 
         # OPTIMIZATION 1: Pre-convert to numpy arrays (avoid repeated pandas overhead)
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
         times_ns = df["StartDateTime"].to_numpy(dtype="datetime64[ns]")  # nanosecond timestamps
         values = df["numeric_value"].to_numpy(dtype=float)
         

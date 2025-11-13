@@ -255,7 +255,6 @@ class RawConcept(TAK):
 
         # 3) concept_type == "raw": merge tuples
         df = df.copy()
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
         
         # Stringify boolean attributes BEFORE grouping
         for a in self.attributes:

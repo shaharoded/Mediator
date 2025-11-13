@@ -512,7 +512,6 @@ class State(TAK):
 
         # Sort by StartDateTime and prepare for vectorized operations
         df = df.sort_values("StartDateTime").reset_index(drop=True)
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
         
         merged: List[dict] = []
         n = len(df)

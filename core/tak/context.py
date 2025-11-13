@@ -372,10 +372,6 @@ class Context(TAK):
         if df.empty:
             return df
         
-        # Convert timestamps once (avoid repeated conversions)
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
-        df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
-        
         # For each unique value, apply its window
         for value in df["Value"].unique():
             # Look up window for this value (value-specific first, then default)
@@ -417,10 +413,6 @@ class Context(TAK):
         # Sort by StartDateTime (MUST be sorted for clipping logic)
         df = df.sort_values("StartDateTime").reset_index(drop=True)
         
-        # Convert timestamps once (ensure datetime64[ns])
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
-        df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
-        
         # VECTORIZED: Get next row's StartDateTime (shift up by 1)
         df["_next_start"] = df["StartDateTime"].shift(-1)
         
@@ -452,12 +444,6 @@ class Context(TAK):
         """
         if df.empty or clipper_df.empty:
             return df
-
-        # Convert timestamps once
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
-        df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
-        clipper_df["StartDateTime"] = pd.to_datetime(clipper_df["StartDateTime"])
-        clipper_df["EndDateTime"] = pd.to_datetime(clipper_df["EndDateTime"])
 
         # Track indices to drop
         indices_to_drop = set()

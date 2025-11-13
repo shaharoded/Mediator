@@ -11,6 +11,7 @@ from pathlib import Path
 import asyncio
 import json
 import logging
+import traceback
 import sys
 import argparse
 
@@ -249,6 +250,8 @@ class Mediator:
             return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
         
         df = pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
+        df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
         df["AbstractionType"] = "raw-concept"
         return df
     
@@ -291,7 +294,7 @@ class Mediator:
                     f"TAK '{tak.name}' dependency '{dep_name}' not in cache for patient {patient_id}. "
                     f"This indicates incorrect execution order."
                 )
-            return tak_outputs[dep_name]
+            return tak_outputs[dep_name].copy()
         
         # CASE: Event → derived_from is list of RawConcepts
         if isinstance(tak, Event):
@@ -475,8 +478,6 @@ class Mediator:
         
         # Only clip non-clipper, non-raw-concept TAKs
         df = df_clippable.copy()
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
-        df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
         
         # OPTIMIZATION 2: Extract clipper times as numpy arrays (vectorized comparisons)
         start_clippers = clipper_df[clipper_df["ConceptName"].isin(
@@ -553,10 +554,20 @@ class Mediator:
         
         return df_main, df_scores
 
-    def _process_patient_sync(self, patient_id: int) -> Dict[str, Union[int, str]]:
+    def _process_patient_sync(self, 
+                              patient_id: int,
+                              return_cache: bool = False
+                              ) -> Union[Dict[str, Union[int, str]], Tuple[Dict[str, Union[int, str]], Dict[str, pd.DataFrame]]]:
         """
-        Process a single patient through all TAKs in dependency order.
-        Returns per-TAK output row counts for stats tracking.
+        Process single patient synchronously with full TAK dependency chain.
+        
+        Args:
+            patient_id: Patient ID to process
+            return_cache: If True, return (stats, tak_outputs_cache) for debugging
+        
+        Returns:
+            If return_cache=False: Dict of TAK name -> output row count
+            If return_cache=True: Tuple of (stats, tak_outputs_cache)
         """
         # Create new DB connection for this thread (SQLite thread safety)
         thread_da = DataAccess(db_path=self.db_path)
@@ -614,14 +625,14 @@ class Mediator:
                     
                 except Exception as e:
                     logger.error(f"[Patient {patient_id}][{tak_name}] Error: {e}")
-                    stats[tak_name] = {"error": str(e)}
+                    stats[tak_name] = {"error": str(e), "traceback": traceback.format_exc()}
             
             logger.info(f"[Patient {patient_id}] Processing complete | stats={stats}")
-            return stats
+            return stats, tak_outputs if return_cache else stats
             
         except Exception as e:
             logger.error(f"[Patient {patient_id}] Critical error: {e}", exc_info=True)
-            return {"error": str(e)}
+            return {"error": str(e)}, tak_outputs if return_cache else {"error": str(e)}
         finally:
             # Close thread-local connection
             thread_da.conn.close()
