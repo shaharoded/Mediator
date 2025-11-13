@@ -545,12 +545,12 @@ class Mediator:
         
         # Main output: only rows with valid timestamps (not NaT)
         # This filters out "False" patterns (which have NaT timestamps)
-        df_main = df[df["StartDateTime"].notna()].copy()
+        df_main = df[df["StartDateTime"].notna()]
         df_main = df_main[["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"]]
         
         # QA scores: all rows (including "False" with NaT)
         # Extract compliance score columns
-        df_scores = df[["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore"]].copy()
+        df_scores = df[["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore"]]
         
         return df_main, df_scores
 

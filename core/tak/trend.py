@@ -134,14 +134,14 @@ class Trend(TAK):
             # Multi-patient: process separately and concatenate
             results = []
             for pid in patients:
-                patient_df = df[df["PatientId"] == pid].copy()
+                patient_df = df[df["PatientId"] == pid]
                 patient_trends = self._compute_trends(patient_df)
                 patient_intervals = self._build_intervals(patient_trends)
                 results.append(patient_intervals)
             df_out = pd.concat(results, ignore_index=True)
         else:
             # Single patient: process directly
-            df = self._compute_trends(df.copy())
+            df = self._compute_trends(df)
             df_out = self._build_intervals(df)
 
         df_out["ConceptName"] = self.name
