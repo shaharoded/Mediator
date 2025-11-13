@@ -442,6 +442,8 @@ class Mediator:
         - END clippers: if row.EndDateTime >= clipper_time, set EndDateTime = clipper_time - 1s
         - Drop rows where StartDateTime >= EndDateTime after clipping (invalid intervals)
         
+        EXCEPTION: Do not clip TAKs listed in global_clippers.json (prevents self-clipping)
+        
         Uses vectorized operations for efficient processing.
         
         Args:
@@ -454,8 +456,16 @@ class Mediator:
         if df.empty or clipper_df is None or clipper_df.empty:
             return df
         
-        # OPTIMIZATION 1: Convert timestamps ONCE (avoid repeated conversions)
-        df = df.copy()
+        # Exclude clipper TAKs from being clipped (prevents ADMISSION/ADMISSION_EVENT from being clipped)
+        clipper_names = set(self.global_clippers.keys())
+        df_non_clippers = df[~df["ConceptName"].isin(clipper_names)]
+        
+        # If all rows are clippers, return as-is (no clipping needed)
+        if df_non_clippers.empty:
+            return df
+        
+        # Only clip non-clipper TAKs
+        df = df_non_clippers.copy()
         df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
         df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
         
@@ -487,7 +497,14 @@ class Mediator:
         valid_mask = df["StartDateTime"] < df["EndDateTime"]
         dropped_count = (~valid_mask).sum()
         if dropped_count > 0:
-            logger.info(f"[Global Clippers] Dropped {dropped_count} invalid intervals (StartDateTime >= EndDateTime after clipping)")
+            # Log which concepts were affected
+            invalid_rows = df[~valid_mask]
+            affected_concepts = invalid_rows["ConceptName"].value_counts().to_dict()
+            concepts_str = ", ".join(f"{concept}: {count}" for concept, count in affected_concepts.items())
+            logger.info(
+                f"[Global Clippers] Dropped {dropped_count} invalid intervals "
+                f"(StartDateTime >= EndDateTime after clipping) | Affected concepts: {concepts_str}"
+            )
         
         return df[valid_mask]
     
