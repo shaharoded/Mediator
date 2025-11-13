@@ -1,6 +1,6 @@
 """
 TO-DO:
- - Patterns are being matched even without an event occurring? We see them clipped.
+ - Patterns are not all calculated, might have some exception there.
  - define that max-distance=0 for 'before' will also capture 'overlap', so that if context window overlaps with event, it is included. As long as anchor.StartTime < event.StartTime, we can treat "before" as inclusive of overlap.
  - re-define operator="and" for Contexts (not for events). Should check if 2+ contexts overlap and if so will return their overlap window +- good before/after. This 
  """
@@ -581,13 +581,13 @@ class Mediator:
                     # --- Step 2: Apply TAK ---
                     df_output = tak.apply(df_input)
 
-                    # --- Step 3: Apply global clippers ---
-                    df_output = self._apply_global_clippers(df_output, clipper_df)
-                    
-                    # --- Step 4: Write to DB + cache output (UNIFIED: all TAKs cached AFTER apply()) ---
+                    # --- Step 3: Write to DB + cache output ---
                     if isinstance(tak, Pattern):
                         # Patterns: split into main output + QA scores
                         df_output_main, df_output_scores = self._split_pattern_output(df_output)
+                        
+                        # Apply global clippers (only to main output, not QA scores with NaT)
+                        df_output_main = self._apply_global_clippers(df_output_main, clipper_df)
                         
                         # Update cache with main output (for downstream patterns)
                         tak_outputs[tak_name] = df_output_main
@@ -599,6 +599,8 @@ class Mediator:
                         stats[tak.name] = rows_written_main
 
                     else:
+                        # All other TAKs: apply global clippers before caching/writing
+                        df_output = self._apply_global_clippers(df_output, clipper_df)
                         
                         tak_outputs[tak_name] = df_output
                         
