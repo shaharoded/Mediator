@@ -628,11 +628,11 @@ class Mediator:
                     stats[tak_name] = {"error": str(e), "traceback": traceback.format_exc()}
             
             logger.info(f"[Patient {patient_id}] Processing complete | stats={stats}")
-            return stats, tak_outputs if return_cache else stats
+            return (stats, tak_outputs) if return_cache else stats
             
         except Exception as e:
             logger.error(f"[Patient {patient_id}] Critical error: {e}", exc_info=True)
-            return {"error": str(e)}, tak_outputs if return_cache else {"error": str(e)}
+            return ({"error": str(e)}, tak_outputs) if return_cache else {"error": str(e)}
         finally:
             # Close thread-local connection
             thread_da.conn.close()
