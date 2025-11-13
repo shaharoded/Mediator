@@ -377,29 +377,79 @@ class State(TAK):
                             f"has values not covered by abstraction rules: {uncovered}. "
                             f"Rows with these values will be filtered out."
                         )
-                
-                # For numeric attributes: warn about unbounded ranges
+
+                # For numeric attributes: validate against parent RawConcept bounds
                 elif parent_attr["type"] == "numeric":
                     ranges = numeric_ranges_per_attr.get(idx, [])
                     if ranges:
-                        # Check if lower bound is covered
-                        has_lower_bound = any(min_val == -float('inf') for min_val, _ in ranges)
-                        # Check if upper bound is covered
-                        has_upper_bound = any(max_val == float('inf') for _, max_val in ranges)
+                        # Get parent's numeric bounds
+                        parent_min = parent_attr.get("min")
+                        parent_max = parent_attr.get("max")
                         
-                        if not has_lower_bound:
+                        # If parent has no bounds, skip validation (shouldn't happen per RawConcept validation)
+                        if parent_min is None and parent_max is None:
                             logger.warning(
                                 f"{self.name}: attribute idx={idx} ('{attr_name}', numeric) "
-                                f"has no range covering -infinity. Very low values will be filtered out."
+                                f"parent '{self.derived_from}' has no min/max bounds defined"
+                            )
+                            continue
+                        
+                        # Determine parent's effective range
+                        effective_parent_min = parent_min if parent_min is not None else -float('inf')
+                        effective_parent_max = parent_max if parent_max is not None else float('inf')
+                        
+                        # Find collective bounds of all State ranges
+                        state_min_bound = min(min_val for min_val, _ in ranges)
+                        state_max_bound = max(max_val for _, max_val in ranges)
+                        
+                        # Check if State ranges EXPLICITLY exceed parent bounds
+                        # (ignore open ranges that implicitly inherit parent bounds)
+                        if state_min_bound < effective_parent_min and state_min_bound != -float('inf'):
+                            logger.warning(
+                                f"{self.name}: attribute idx={idx} ('{attr_name}', numeric) "
+                                f"has explicit range starting at {state_min_bound}, but parent '{self.derived_from}' "
+                                f"min is {parent_min}. Values below {parent_min} will never occur."
                             )
                         
-                        if not has_upper_bound:
+                        if state_max_bound > effective_parent_max and state_max_bound != float('inf'):
                             logger.warning(
                                 f"{self.name}: attribute idx={idx} ('{attr_name}', numeric) "
-                                f"has no range covering +infinity. Very high values will be filtered out."
+                                f"has explicit range extending to {state_max_bound}, but parent '{self.derived_from}' "
+                                f"max is {parent_max}. Values above {parent_max} will never occur."
+                            )
+                        
+                        # Check if State ranges don't cover parent's full range
+                        # (warn about gaps at the boundaries)
+                        if parent_min is not None and state_min_bound > parent_min:
+                            logger.warning(
+                                f"{self.name}: attribute idx={idx} ('{attr_name}', numeric) "
+                                f"ranges start at {state_min_bound}, but parent '{self.derived_from}' "
+                                f"allows values from {parent_min}. Values in [{parent_min}, {state_min_bound}) "
+                                f"will be filtered out."
+                            )
+                        
+                        if parent_max is not None and state_max_bound < parent_max:
+                            logger.warning(
+                                f"{self.name}: attribute idx={idx} ('{attr_name}', numeric) "
+                                f"ranges end at {state_max_bound}, but parent '{self.derived_from}' "
+                                f"allows values up to {parent_max}. Values in [{state_max_bound}, {parent_max}] "
+                                f"will be filtered out."
+                            )
+                        
+                        # Info: log if open ranges are being implicitly bounded by parent
+                        if state_min_bound == -float('inf') and parent_min is not None:
+                            logger.info(
+                                f"{self.name}: attribute idx={idx} ('{attr_name}', numeric) "
+                                f"has open lower bound, effectively bounded by parent min={parent_min}"
+                            )
+                        
+                        if state_max_bound == float('inf') and parent_max is not None:
+                            logger.info(
+                                f"{self.name}: attribute idx={idx} ('{attr_name}', numeric) "
+                                f"has open upper bound, effectively bounded by parent max={parent_max}"
                             )
 
-        return None
+                return None
 
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """

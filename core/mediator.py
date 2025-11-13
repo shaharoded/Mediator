@@ -1,6 +1,5 @@
 """
 TO-DO:
- - Looks like a few real life TAKs are not calculated. Look into that with run_mediator.ipynb
  - define that max-distance=0 for 'before' will also capture 'overlap', so that if context window overlaps with event, it is included. As long as anchor.StartTime < event.StartTime, we can treat "before" as inclusive of overlap.
  - re-define operator="and" for Contexts (not for events). Should check if 2+ contexts overlap and if so will return their overlap window +- good before/after. This 
  """

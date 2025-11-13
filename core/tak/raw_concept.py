@@ -247,17 +247,13 @@ class RawConcept(TAK):
             out["ConceptName"] = self.name
             out["AbstractionType"] = self.family
 
-            # Log I/O sizes (non-raw)
-            out_rows = len(out)
-            if out_rows != len(df):
-                logger.warning("[%s][NON-RAW] output_rows != input_rows | in=%d out=%d",
-                            self.name, len(df), out_rows)
-            else:
-                logger.info("[%s][NON-RAW] emitted rows: %d", self.name, out_rows)
-
+            # SORT OUTPUT BY TIMESTAMP (critical for downstream TAKs)
+            out = out.sort_values("StartDateTime").reset_index(drop=True)
+            
+            logger.info("[%s] apply() end | output_rows=%d", self.name, len(out))
             return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
 
-        # 3) raw → EXACT TIMESTAMP GROUPING (NO TOLERANCE)
+        # 3) concept_type == "raw": merge tuples
         df = df.copy()
         df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
         
@@ -320,8 +316,11 @@ class RawConcept(TAK):
         
         logger.info("[%s][RAW] emitted_tuples=%d | input_rows=%d", self.name, len(out), total_in)
         
-        # FINAL STEP: Sort by StartDateTime for downstream TAKs
+        out["ConceptName"] = self.name
+        out["AbstractionType"] = self.family
+        
+        # SORT OUTPUT BY TIMESTAMP
         out = out.sort_values("StartDateTime").reset_index(drop=True)
-
+        
         logger.info("[%s] apply() end | output_rows=%d", self.name, len(out))
         return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]

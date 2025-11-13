@@ -570,10 +570,25 @@ class LocalPattern(Pattern):
                     rule_min = attr_spec.get("min")
                     rule_max = attr_spec.get("max")
                     
+                    # Only warn if pattern EXPLICITLY sets bounds that exceed parent bounds
+                    # (None means open range, which implicitly inherits parent bounds)
                     if rule_min is not None and tak_max is not None and rule_min > tak_max:
                         raise ValueError(f"{self.name}: anchor attribute '{attr_name}' (ref='{ref}') min={rule_min} exceeds TAK max={tak_max}")
                     if rule_max is not None and tak_min is not None and rule_max < tak_min:
                         raise ValueError(f"{self.name}: anchor attribute '{attr_name}' (ref='{ref}') max={rule_max} below TAK min={tak_min}")
+                    
+                    # Info: warn if pattern constraints are tighter than necessary (outside TAK's range)
+                    # This catches cases like: TAK has [0, 100], pattern says min=110 (nonsensical)
+                    if rule_min is not None and tak_min is not None and rule_min < tak_min:
+                        logger.info(
+                            f"{self.name}: anchor attribute '{attr_name}' (ref='{ref}') has min={rule_min}, "
+                            f"but parent TAK min={tak_min}. Effective range will be [{tak_min}, ...)"
+                        )
+                    if rule_max is not None and tak_max is not None and rule_max > tak_max:
+                        logger.info(
+                            f"{self.name}: anchor attribute '{attr_name}' (ref='{ref}') has max={rule_max}, "
+                            f"but parent TAK max={tak_max}. Effective range will be [..., {tak_max}]"
+                        )
             
             # Validate event attributes (same logic)
             for attr_name, attr_spec in tr.get("event", {}).get("attributes", {}).items():
@@ -614,7 +629,18 @@ class LocalPattern(Pattern):
                         raise ValueError(f"{self.name}: event attribute '{attr_name}' (ref='{ref}') min={rule_min} exceeds TAK max={tak_max}")
                     if rule_max is not None and tak_min is not None and rule_max < tak_min:
                         raise ValueError(f"{self.name}: event attribute '{attr_name}' (ref='{ref}') max={rule_max} below TAK min={tak_min}")
-
+                    
+                    if rule_min is not None and tak_min is not None and rule_min < tak_min:
+                        logger.info(
+                            f"{self.name}: event attribute '{attr_name}' (ref='{ref}') has min={rule_min}, "
+                            f"but parent TAK min={tak_min}. Effective range will be [{tak_min}, ...)"
+                        )
+                    if rule_max is not None and tak_max is not None and rule_max > tak_max:
+                        logger.info(
+                            f"{self.name}: event attribute '{attr_name}' (ref='{ref}') has max={rule_max}, "
+                            f"but parent TAK max={tak_max}. Effective range will be [..., {tak_max}]"
+                        )
+            
             # Validate context attributes (nominal only, so reject min/max)
             if rule.context_spec:
                 for attr_name, attr_spec in rule.context_spec.get("attributes", {}).items():
