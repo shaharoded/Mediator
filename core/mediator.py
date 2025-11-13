@@ -1,5 +1,6 @@
 """
 TO-DO:
+ - Patterns are being matched even without an event occurring? We see them clipped.
  - define that max-distance=0 for 'before' will also capture 'overlap', so that if context window overlaps with event, it is included. As long as anchor.StartTime < event.StartTime, we can treat "before" as inclusive of overlap.
  - re-define operator="and" for Contexts (not for events). Should check if 2+ contexts overlap and if so will return their overlap window +- good before/after. This 
  """
@@ -442,7 +443,9 @@ class Mediator:
         - END clippers: if row.EndDateTime >= clipper_time, set EndDateTime = clipper_time - 1s
         - Drop rows where StartDateTime >= EndDateTime after clipping (invalid intervals)
         
-        EXCEPTION: Do not clip TAKs listed in global_clippers.json (prevents self-clipping)
+        EXCEPTION: Do not clip:
+          1. TAKs listed in global_clippers.json (prevents self-clipping)
+          2. Raw concepts (foundational data should not be clipped)
         
         Uses vectorized operations for efficient processing.
         
@@ -456,16 +459,22 @@ class Mediator:
         if df.empty or clipper_df is None or clipper_df.empty:
             return df
         
-        # Exclude clipper TAKs from being clipped (prevents ADMISSION/ADMISSION_EVENT from being clipped)
+        # Exclude clipper TAKs AND raw concepts from being clipped
         clipper_names = set(self.global_clippers.keys())
-        df_non_clippers = df[~df["ConceptName"].isin(clipper_names)]
         
-        # If all rows are clippers, return as-is (no clipping needed)
-        if df_non_clippers.empty:
+        # Split into clippable vs non-clippable
+        # Non-clippable: clippers + all raw concepts
+        is_raw_concept = df["AbstractionType"] == "raw-concept"
+        is_clipper = df["ConceptName"].isin(clipper_names)
+        df_non_clippable = df[is_raw_concept | is_clipper]
+        df_clippable = df[~(is_raw_concept | is_clipper)]
+        
+        # If nothing to clip, return as-is
+        if df_clippable.empty:
             return df
         
-        # Only clip non-clipper TAKs
-        df = df_non_clippers.copy()
+        # Only clip non-clipper, non-raw-concept TAKs
+        df = df_clippable.copy()
         df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
         df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
         
@@ -505,6 +514,11 @@ class Mediator:
                 f"[Global Clippers] Dropped {dropped_count} invalid intervals "
                 f"(StartDateTime >= EndDateTime after clipping) | Affected concepts: {concepts_str}"
             )
+        
+        # Concatenate non-clippable rows back
+        if not df_non_clippable.empty:
+            df_clipped = df[valid_mask]
+            return pd.concat([df_non_clippable, df_clipped], ignore_index=True).sort_values("StartDateTime").reset_index(drop=True)
         
         return df[valid_mask]
     
@@ -669,9 +683,13 @@ class Mediator:
         # Map results back to patient IDs
         patient_stats = dict(zip(patient_ids, results))
         
-        # Summary
-        total_rows = sum(sum(stats.values()) for stats in results if "error" not in stats)
-        errors = sum(1 for stats in results if "error" in stats)
+        # Summary (filter out error values properly)
+        total_rows = sum(
+            sum(v for v in stats.values() if isinstance(v, int))
+            for stats in results 
+            if isinstance(stats, dict) and "error" not in stats
+        )
+        errors = sum(1 for stats in results if isinstance(stats, dict) and "error" in stats)
         
         print("\n" + "="*80)
         print("✅ Patient Processing Complete")
