@@ -64,6 +64,7 @@ Mediator/
 ├── run_mediator.ipynb                      # Example flow for deployment option 2
 ├── images/                                 # Documentation assets
 ├── unittests/                              # Comprehensive test suite
+├── logs/                                   # Here you'll find post-run log file.
 ├── setup.py                                # Package definition (for pip install -e)
 ├── Dockerfile                              # Docker image definition
 ├── docker-compose.yml                      # Docker Compose configuration

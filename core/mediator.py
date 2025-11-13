@@ -40,8 +40,41 @@ from backend.config import (
     INSERT_QA_SCORE_QUERY
 )
 
-
 logger = logging.getLogger(__name__)
+
+def setup_logging(log_file: Optional[Path] = None, console_level: int = logging.WARNING):
+    """
+    Configure logging with separate console and file handlers.
+    
+    Args:
+        log_file: Path to log file (if None, only console logging)
+        console_level: Minimum level for console output (default: WARNING)
+    """
+    # Root logger configuration
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # Capture all levels
+    
+    # Clear existing handlers
+    root_logger.handlers.clear()
+    
+    # Console handler (WARNING and above by default)
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setLevel(console_level)
+    console_formatter = logging.Formatter('%(levelname)s - %(message)s')
+    console_handler.setFormatter(console_formatter)
+    root_logger.addHandler(console_handler)
+    
+    # File handler (INFO and above)
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file, mode='a')
+        file_handler.setLevel(logging.INFO)
+        file_formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        file_handler.setFormatter(file_formatter)
+        root_logger.addHandler(file_handler)
 
 
 class Mediator:
@@ -82,6 +115,8 @@ class Mediator:
         
         # Load global clippers (START/END events that clip all abstractions)
         self.global_clippers = self._load_global_clippers()
+        
+        logger.info(f"Mediator initialized with KB path: {knowledge_base_path}")
     
     def _load_global_clippers(self) -> Dict[str, str]:
         """

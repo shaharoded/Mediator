@@ -456,7 +456,7 @@ class Context(TAK):
             # Filter to this specific clipper
             clipper_df = clipper_df[clipper_df["ConceptName"] == clipper_name]
             if clipper_df.empty:
-                logger.warning("[%s] Clipper '%s' not found in input (skipping)", self.name, clipper_name)
+                logger.info("[%s] Clipper '%s' not found in input (skipping)", self.name, clipper_name)
                 continue
 
             # For each context row, find ALL overlapping clippers

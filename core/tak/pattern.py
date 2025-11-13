@@ -1089,7 +1089,7 @@ class LocalPattern(Pattern):
                 try:
                     target_values.append(float(val))
                 except (ValueError, TypeError):
-                    logger.warning(f"[{self.name}] Cannot convert target value to float: {val}")
+                    logger.error(f"[{self.name}] Cannot convert target value to float: {val}")
         
         if not target_values:
             return 0.0
