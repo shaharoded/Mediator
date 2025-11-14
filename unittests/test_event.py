@@ -1,32 +1,14 @@
 """
 Comprehensive unit tests for Event TAK.
-
-Tests cover:
-1. Parsing & validation (XML structure, multi-source, operator checks)
-2. Abstraction (or/and logic, constraint matching)
-3. Edge cases (no rules, single source, State as derived-from)
 """
-
 import pandas as pd
 import pytest
-from datetime import datetime, timedelta
 from pathlib import Path
 
 from core.tak.event import Event
 from core.tak.raw_concept import RawConcept
 from core.tak.repository import set_tak_repository, TAKRepository
-
-
-def write_xml(tmp_path: Path, name: str, xml: str) -> Path:
-    p = tmp_path / name
-    p.write_text(xml.strip(), encoding="utf-8")
-    return p
-
-
-def make_ts(hhmm: str, day: int = 0) -> datetime:
-    base = datetime(2024, 1, 1) + timedelta(days=day)
-    hh, mm = map(int, hhmm.split(":"))
-    return base.replace(hour=hh, minute=mm, second=0, microsecond=0)
+from unittests.test_utils import write_xml, make_ts  # FIXED: correct import path
 
 
 # XML Fixtures

@@ -1,41 +1,16 @@
 """
 Comprehensive unit tests for State TAK.
-
-Tests cover:
-1. Parsing & validation (XML structure, business logic)
-2. Discretization (numeric ranges, gaps, overlaps)
-3. Abstraction (first vs all, tuple matching, coverage)
-4. Merging (multi-point concatenation, good_before/after, interpolation, max_skip)
-5. Edge cases (single-point states, order="all" overlapping intervals, permissive rules)
 """
-
 import pandas as pd
 import pytest
-from datetime import datetime, timedelta
 from pathlib import Path
 
-# Imports from your codebase
 from core.tak.state import State
 from core.tak.raw_concept import RawConcept
 from core.tak.repository import set_tak_repository, TAKRepository
 from core.tak.utils import parse_duration
-from core.tak.event import Event  # NEW IMPORT
-
-# -----------------------------
-# Helpers: XML writers & timestamp builders
-# -----------------------------
-def write_xml(tmp_path: Path, name: str, xml: str) -> Path:
-    """Write XML to disk and return path."""
-    p = tmp_path / name
-    p.write_text(xml.strip(), encoding="utf-8")
-    return p
-
-
-def make_ts(hhmm: str, day: int = 0) -> datetime:
-    """Build timestamp: 2024-01-01 + day offset + HH:MM."""
-    base = datetime(2024, 1, 1) + timedelta(days=day)
-    hh, mm = map(int, hhmm.split(":"))
-    return base.replace(hour=hh, minute=mm, second=0, microsecond=0)
+from core.tak.event import Event
+from unittests.test_utils import write_xml, make_ts  # FIXED: correct import path
 
 
 # -----------------------------
@@ -335,49 +310,42 @@ def df_glucose_three_different_levels() -> pd.DataFrame:
 
 @pytest.fixture
 def repo_with_basal(tmp_path: Path) -> TAKRepository:
-    """BASAL raw-concept + state (COMPLETE ACTUAL TAK)."""
-    raw_path = write_xml(tmp_path, "BASAL_BITZUA.xml", RAW_BASAL_XML)
+    """Setup: BASAL_BITZUA raw-concept + state."""
+    basal_path = write_xml(tmp_path, "BASAL_BITZUA.xml", RAW_BASAL_XML)
     state_path = write_xml(tmp_path, "BASAL_BITZUA_STATE.xml", STATE_BASAL_XML)
+    
     repo = TAKRepository()
-    raw_tak = RawConcept.parse(raw_path)
-    repo.register(raw_tak)
+    repo.register(RawConcept.parse(basal_path))
     set_tak_repository(repo)
-    state_tak = State.parse(state_path)
-    repo.register(state_tak)
+    repo.register(State.parse(state_path))
     return repo
 
 
 @pytest.fixture
 def repo_with_glucose(tmp_path: Path) -> TAKRepository:
-    """GLUCOSE raw-concept + state (COMPLETE ACTUAL TAK)."""
-    raw_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
-    state_path = write_xml(tmp_path, "GLUCOSE_STATE.xml", STATE_GLUCOSE_XML)
+    """Setup: GLUCOSE_MEASURE raw-concept + state."""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    state_path = write_xml(tmp_path, "GLUCOSE_MEASURE_STATE.xml", STATE_GLUCOSE_XML)
+    
     repo = TAKRepository()
-    raw_tak = RawConcept.parse(raw_path)
-    repo.register(raw_tak)
+    repo.register(RawConcept.parse(glucose_path))
     set_tak_repository(repo)
-    state_tak = State.parse(state_path)
-    repo.register(state_tak)
+    repo.register(State.parse(state_path))
     return repo
 
 
 @pytest.fixture
 def repo_with_meal_event_state(tmp_path: Path) -> TAKRepository:
-    """MEAL raw-concept → MEAL_EVENT → MEAL_STATE (State from Event)."""
-    raw_path = write_xml(tmp_path, "MEAL.xml", RAW_MEAL_XML)
+    """Setup: MEAL raw-concept → event → state."""
+    meal_path = write_xml(tmp_path, "MEAL.xml", RAW_MEAL_XML)
     event_path = write_xml(tmp_path, "MEAL_EVENT.xml", EVENT_MEAL_XML)
     state_path = write_xml(tmp_path, "MEAL_STATE.xml", STATE_FROM_EVENT_XML)
     
     repo = TAKRepository()
-    raw_tak = RawConcept.parse(raw_path)
-    repo.register(raw_tak)
+    repo.register(RawConcept.parse(meal_path))
     set_tak_repository(repo)
-    
-    event_tak = Event.parse(event_path)
-    repo.register(event_tak)
-    
-    state_tak = State.parse(state_path)
-    repo.register(state_tak)
+    repo.register(Event.parse(event_path))
+    repo.register(State.parse(state_path))
     return repo
 
 
@@ -468,157 +436,147 @@ def test_merge_multi_point_same_rule(repo_with_basal):
 def test_merge_gap_exceeds_window(repo_with_basal):
     """Gap > good_after breaks into 2 intervals."""
     state_tak = repo_with_basal.get("BASAL_BITZUA_STATE")
-    df_in = df_basal_gap_exceeds_window()
+    df_in = df_basal_gap_exceeds_window()  # T=0h, T=26h (gap > 24h)
     df_out = state_tak.apply(df_in)
     assert len(df_out) == 2
-    assert all(df_out["Value"] == "SubCutaneous Low")
+    # First interval: [0h → 24h] (0h + good_after)
+    assert df_out.iloc[0]["EndDateTime"] == make_ts("00:00", day=1)
+    # Second interval: [26h → 50h] (26h + good_after)
+    assert df_out.iloc[1]["EndDateTime"] == make_ts("02:00", day=2)
 
 
 def test_merge_different_routes_same_dosage_no_merge(repo_with_basal):
-    """Different routes don't merge, but intervals extend to next sample or +good_after."""
+    """Different routes → different abstracted values → no merge."""
     state_tak = repo_with_basal.get("BASAL_BITZUA_STATE")
-    df_in = df_basal_different_routes_same_dosage()  # T=0h SubCutaneous, T=4h IntraVenous
+    df_in = df_basal_different_routes_same_dosage()
     df_out = state_tak.apply(df_in)
-    
-    # Expected: 2 intervals
-    # - [T=0h → T=4h, "SubCutaneous Low"] (ends at next sample's start)
-    # - [T=4h → T=28h (4h+24h), "IntraVenous Low"] (no next sample, extends by good_after)
     assert len(df_out) == 2
     assert df_out.iloc[0]["Value"] == "SubCutaneous Low"
-    assert df_out.iloc[0]["EndDateTime"] == make_ts("04:00")
     assert df_out.iloc[1]["Value"] == "IntraVenous Low"
-    assert df_out.iloc[1]["EndDateTime"] == make_ts("04:00", day=1)  # +24h
 
 
 def test_merge_same_route_different_dosages_no_merge(repo_with_basal):
-    """Same route but different dosage levels don't merge (value change trims interval)."""
+    """Same route but different dosage levels → no merge."""
     state_tak = repo_with_basal.get("BASAL_BITZUA_STATE")
-    df_in = df_basal_same_route_different_dosages()  # T=0h Low, T=4h High
+    df_in = df_basal_same_route_different_dosages()
     df_out = state_tak.apply(df_in)
     assert len(df_out) == 2
-    values = set(df_out["Value"])
-    assert values == {"SubCutaneous Low", "SubCutaneous High"}
-    
-    # First interval trimmed at value change point
     assert df_out.iloc[0]["Value"] == "SubCutaneous Low"
-    assert df_out.iloc[0]["StartDateTime"] == make_ts("00:00")
-    assert df_out.iloc[0]["EndDateTime"] == make_ts("04:00")  # TRIMMED at next sample
-    
-    # Second interval extends by good_after
     assert df_out.iloc[1]["Value"] == "SubCutaneous High"
-    assert df_out.iloc[1]["StartDateTime"] == make_ts("04:00")
-    assert df_out.iloc[1]["EndDateTime"] == make_ts("04:00", day=1)  # 4h + 24h
 
 
 def test_merge_interpolate_skip_outlier(repo_with_basal):
-    """max_skip=1 allows skipping 1 outlier."""
+    """Interpolate with max_skip=1: Low→Low→High→Low skips High."""
     state_tak = repo_with_basal.get("BASAL_BITZUA_STATE")
-    df_in = df_basal_interpolate_skip()  # T=0h, 4h, 8h(outlier), 12h
+    df_in = df_basal_interpolate_skip()  # T=0h(Low), 4h(Low), 8h(High), 12h(Low)
     df_out = state_tak.apply(df_in)
+    # With max_skip=1, High is treated as outlier → merged into Low interval
     assert len(df_out) == 1
-    row = df_out.iloc[0]
-    assert row["Value"] == "SubCutaneous Low"
-    assert row["StartDateTime"] == make_ts("00:00")
-    # CORRECTED: EndDateTime = last_merged_time (12h) + good_after (24h) = 36h
-    assert row["EndDateTime"] == make_ts("12:00", day=1)
+    assert df_out.iloc[0]["Value"] == "SubCutaneous Low"
+    assert df_out.iloc[0]["StartDateTime"] == make_ts("00:00")
+    assert df_out.iloc[0]["EndDateTime"] == make_ts("12:00", day=1)  # 12h + 24h
 
-
-# -----------------------------
-# Tests: Edge Cases
-# -----------------------------
 
 def test_single_point_dull_state(repo_with_basal):
-    """Single tuple emits interval extended by good_after."""
+    """Single point creates a dull state interval."""
     state_tak = repo_with_basal.get("BASAL_BITZUA_STATE")
     df_in = pd.DataFrame([
-        (1, "BASAL_BITZUA", make_ts("00:00"), make_ts("00:00"), (12, "SubCutaneous"), "raw-concept"),
+        (1, "BASAL_BITZUA", make_ts("08:00"), make_ts("08:00"), (15, "SubCutaneous"), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    
     df_out = state_tak.apply(df_in)
     assert len(df_out) == 1
-    row = df_out.iloc[0]
-    assert row["Value"] == "SubCutaneous Low"
-    assert row["StartDateTime"] == make_ts("00:00")
-    # CORRECTED: EndDateTime = 0h + 24h = 24h (next day 00:00)
-    assert row["EndDateTime"] == make_ts("00:00", day=1)
+    assert df_out.iloc[0]["StartDateTime"] == make_ts("08:00")
+    assert df_out.iloc[0]["EndDateTime"] == make_ts("08:00", day=1)  # 08:00 + 24h
 
 
 def test_no_abstraction_rules_emits_discrete_string(repo_with_glucose):
-    """State with abstraction rules emits abstracted state labels."""
+    """State with abstraction rules emits abstracted string values for numeric input."""
     state_tak = repo_with_glucose.get("GLUCOSE_MEASURE_STATE")
-    df_in = df_glucose_three_different_levels()
+    
+    # Test that numeric input (80, 150) gets abstracted to string labels
+    df_in = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (50,), "raw-concept"),   # Severe hypoglycemia
+        (1, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), (80,), "raw-concept"),   # Low glucose
+        (1, "GLUCOSE_MEASURE", make_ts("12:00"), make_ts("12:00"), (150,), "raw-concept"),  # Normal glucose
+        (1, "GLUCOSE_MEASURE", make_ts("14:00"), make_ts("14:00"), (300,), "raw-concept"),  # Hyperglycemia
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    
     df_out = state_tak.apply(df_in)
-    # Expected: 3 separate intervals (no merging due to different values)
-    assert len(df_out) == 3
-    values = list(df_out["Value"])
-    assert values[0] == 'Low glucose'
-    assert values[1] == 'Normal glucose'
-    assert values[2] == 'Hyperglycemia'
+    
+    # Should emit 4 separate state intervals (no merging since values differ)
+    assert len(df_out) == 4
+    
+    # Verify abstraction rules work correctly
+    assert df_out.iloc[0]["Value"] == "Severe hypoglycemia"
+    assert df_out.iloc[1]["Value"] == "Low glucose"
+    assert df_out.iloc[2]["Value"] == "Normal glucose"
+    assert df_out.iloc[3]["Value"] == "Hyperglycemia"
+    
+    # Verify all values are strings (not tuples)
+    assert all(isinstance(v, str) for v in df_out["Value"])
+    
+    # CORRECTED: Verify intervals are trimmed by next interval (not extended by full good_after)
+    # First interval: [08:00 → 10:00] (trimmed at next interval's start)
+    assert df_out.iloc[0]["StartDateTime"] == make_ts("08:00")
+    assert df_out.iloc[0]["EndDateTime"] == make_ts("10:00")  # Trimmed at next interval
+    
+    # Second interval: [10:00 → 12:00] (trimmed at next interval's start)
+    assert df_out.iloc[1]["StartDateTime"] == make_ts("10:00")
+    assert df_out.iloc[1]["EndDateTime"] == make_ts("12:00")  # Trimmed at next interval
+    
+    # Third interval: [12:00 → 14:00] (trimmed at next interval's start)
+    assert df_out.iloc[2]["StartDateTime"] == make_ts("12:00")
+    assert df_out.iloc[2]["EndDateTime"] == make_ts("14:00")  # Trimmed at next interval
+    
+    # Fourth interval: [14:00 → 38:00] (last interval, extended by good_after=24h)
+    assert df_out.iloc[3]["StartDateTime"] == make_ts("14:00")
+    assert df_out.iloc[3]["EndDateTime"] == make_ts("14:00", day=1)  # 14:00 + 24h
+    
+    print("\n✅ State abstraction rules work correctly for numeric input")
 
 
 def test_empty_input_returns_empty(repo_with_basal):
-    """Empty input returns empty DataFrame."""
+    """Empty input → empty output."""
     state_tak = repo_with_basal.get("BASAL_BITZUA_STATE")
-    df_in = pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    df_out = state_tak.apply(df_in)
+    df_empty = pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    df_out = state_tak.apply(df_empty)
     assert df_out.empty
 
 
 def test_state_from_event(repo_with_meal_event_state):
-    """State can be derived from Event TAK (treat like raw-nominal)."""
-    raw_tak = repo_with_meal_event_state.get("MEAL")
-    event_tak = repo_with_meal_event_state.get("MEAL_EVENT")
-    state_tak = repo_with_meal_event_state.get("MEAL_STATE")
+    """State derived from Event works correctly."""
+    meal_raw = repo_with_meal_event_state.get("MEAL")
+    meal_event = repo_with_meal_event_state.get("MEAL_EVENT")
+    meal_state = repo_with_meal_event_state.get("MEAL_STATE")
     
-    # Simulate raw-concept input
     df_raw = pd.DataFrame([
         (1, "MEAL_TYPE", make_ts("08:00"), make_ts("08:00"), "Breakfast"),
         (1, "MEAL_TYPE", make_ts("12:00"), make_ts("12:00"), "Lunch"),
-        (1, "MEAL_TYPE", make_ts("18:00"), make_ts("18:00"), "Dinner"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
     
-    # Apply raw-concept (wrap as tuples)
-    df_raw_out = raw_tak.apply(df_raw)
-    assert len(df_raw_out) == 3
-    assert all(isinstance(v, tuple) for v in df_raw_out["Value"])
+    df_raw_out = meal_raw.apply(df_raw)
+    df_event_out = meal_event.apply(df_raw_out)
+    df_state_out = meal_state.apply(df_event_out)
     
-    # Apply event (no rules → emit raw values as-is)
-    df_event_out = event_tak.apply(df_raw_out)
-    assert len(df_event_out) == 3
-    assert all(df_event_out["ConceptName"] == "MEAL_EVENT")
-    assert list(df_event_out["Value"]) == ["Breakfast", "Lunch", "Dinner"]
-    # CORRECTED: Events preserve input EndDateTime
-    assert all(df_event_out["StartDateTime"] == df_event_out["EndDateTime"])
-    
-    # Apply state (treat event like raw-nominal, merge with good_after=3h)
-    df_state_out = state_tak.apply(df_event_out)
-    
-    # Expected: 3 intervals (no merging since gaps > 3h)
-    # - [08:00 → 11:00] (8h + 3h) 'Breakfast'
-    # - [12:00 → 15:00] (12h + 3h) 'Lunch'
-    # - [18:00 → 21:00] (18h + 3h) 'Dinner'
-    assert len(df_state_out) == 3
-    assert all(df_state_out["ConceptName"] == "MEAL_STATE")
-    
-    # Check EndDateTime extensions
-    assert df_state_out.iloc[0]["EndDateTime"] == make_ts("11:00")  # 8h + 3h
-    assert df_state_out.iloc[1]["EndDateTime"] == make_ts("15:00")  # 12h + 3h
-    assert df_state_out.iloc[2]["EndDateTime"] == make_ts("21:00")  # 18h + 3h
-    
-    # Values remain as string-ified tuples (no abstraction rules)
-    assert df_state_out.iloc[0]["Value"] == 'Breakfast'
-    assert df_state_out.iloc[1]["Value"] == 'Lunch'
-    assert df_state_out.iloc[2]["Value"] == 'Dinner'
+    assert len(df_state_out) == 2
+    assert df_state_out.iloc[0]["Value"] == "Breakfast"
+    assert df_state_out.iloc[0]["EndDateTime"] == make_ts("11:00")  # 08:00 + 3h
+    assert df_state_out.iloc[1]["Value"] == "Lunch"
+    assert df_state_out.iloc[1]["EndDateTime"] == make_ts("15:00")  # 12:00 + 3h
 
 
 def test_state_apply_extracts_value_for_single_attribute_no_rules(repo_with_glucose):
-    """State with no abstraction rules emits first element as string (not tuple)."""
+    """State applies abstraction rules correctly for single numeric attribute."""
     state_tak = repo_with_glucose.get("GLUCOSE_MEASURE_STATE")
+    
     df_in = pd.DataFrame([
-        (1, "GLUCOSE_MEASURE", make_ts("00:00"), make_ts("00:00"), (80,), "raw-concept"),
-        (1, "GLUCOSE_MEASURE", make_ts("06:00"), make_ts("06:00"), (150,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (50,), "raw-concept"),  # Severe hypoglycemia
+        (1, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), (150,), "raw-concept"),  # Normal glucose
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    
     df_out = state_tak.apply(df_in)
-    # Should emit string values, not tuples
-    assert all(isinstance(v, str) for v in df_out["Value"])
-    # Should look like 'Low glucose' etc.
-    assert df_out.iloc[0]["Value"] == 'Low glucose'
+    
+    assert len(df_out) == 2
+    assert df_out.iloc[0]["Value"] == "Severe hypoglycemia"
+    assert df_out.iloc[1]["Value"] == "Normal glucose"

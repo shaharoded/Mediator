@@ -1,36 +1,21 @@
 """
 Comprehensive unit tests for Trend TAK.
-
-Tests cover:
-1. Parsing & validation (XML structure, numeric attribute requirement)
-2. Slope calculation (increasing, decreasing, steady)
-3. Anchor-based interval building (no holes except when anchor too far)
-4. Edge cases (single point, trailing isolated points)
 """
 
 import pandas as pd
 import pytest
-from datetime import datetime, timedelta
 from pathlib import Path
+from datetime import timedelta
 
 from core.tak.trend import Trend
 from core.tak.raw_concept import RawConcept
 from core.tak.repository import set_tak_repository, TAKRepository
+from unittests.test_utils import write_xml, make_ts
 
+# -----------------------------
+# XML Fixtures (SELF-CONTAINED)
+# -----------------------------
 
-def write_xml(tmp_path: Path, name: str, xml: str) -> Path:
-    p = tmp_path / name
-    p.write_text(xml.strip(), encoding="utf-8")
-    return p
-
-
-def make_ts(hhmm: str, day: int = 0) -> datetime:
-    base = datetime(2024, 1, 1) + timedelta(days=day)
-    hh, mm = map(int, hhmm.split(":"))
-    return base.replace(hour=hh, minute=mm, second=0, microsecond=0)
-
-
-# XML Fixtures
 RAW_GLUCOSE_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="GLUCOSE_MEASURE" concept-type="raw-numeric">
@@ -46,17 +31,17 @@ RAW_GLUCOSE_XML = """\
 </raw-concept>
 """
 
+# FIXED: significant-variation is an ATTRIBUTE on <derived-from>, not a separate element
 TREND_GLUCOSE_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <trend name="GLUCOSE_MEASURE_TREND">
     <categories>Measurements</categories>
-    <description>Trend for the measurements of GLUCOSE (Lab / Capillary)</description>
+    <description>Glucose trend detection</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" significant-variation="40"/>
     <time-steady value="12h"/>
     <persistence good-after="24h"/>
 </trend>
 """
-
 
 @pytest.fixture
 def repo_with_glucose_trend(tmp_path: Path) -> TAKRepository:

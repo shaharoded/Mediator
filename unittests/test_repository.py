@@ -9,7 +9,6 @@ Tests cover:
 5. Family-based priority ordering (raw-concepts before events before states, etc.)
 6. Pattern dependencies (including Pattern-from-Pattern)
 """
-
 import pytest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -20,6 +19,7 @@ from core.tak.event import Event
 from core.tak.state import State
 from core.tak.context import Context
 from core.tak.pattern import LocalPattern
+from unittests.test_utils import write_xml  # FIXED: correct import path (no make_ts needed)
 
 
 # ============================

@@ -1,24 +1,17 @@
 """
 Comprehensive unit tests for LocalPattern TAK.
-
-Tests cover:
-1. Parsing & validation (XML structure, ref mechanism, compliance functions)
-2. Pattern discovery (before/overlap, one-to-one pairing, context filtering)
-3. Compliance scoring (time-constraint, value-constraint, combined)
-4. Dynamic parameters (closest resolution, defaults)
-5. Multiple rules (OR semantics, independent matching)
-6. Edge cases (no pattern found, partial compliance, flipped intervals)
 """
 
 import pandas as pd
 import pytest
-from datetime import datetime, timedelta
 from pathlib import Path
+from datetime import datetime, timedelta
 
 from core.tak.pattern import LocalPattern
 from core.tak.raw_concept import RawConcept
 from core.tak.context import Context
 from core.tak.repository import set_tak_repository, TAKRepository
+from unittests.test_utils import write_xml, make_ts
 
 
 # -----------------------------
@@ -552,7 +545,7 @@ def test_actual_pattern_glucose_on_admission_found(repo_actual_kb):
     # Use GLUCOSE_MEASURE (attribute name from actual XML)
     df_raw = pd.DataFrame([
         (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
-        (1, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), 120),  # FIXED: GLUCOSE_MEASURE (not GLUCOSE_LAB_MEASURE)
+        (1, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), 120),  
         (1, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
     
@@ -560,7 +553,7 @@ def test_actual_pattern_glucose_on_admission_found(repo_actual_kb):
     df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
     df_admission_event = admission_event.apply(df_admission_raw)
     
-    df_glucose = glucose_raw.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_MEASURE"])  # FIXED
+    df_glucose = glucose_raw.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_MEASURE"])
     
     df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
     df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
@@ -610,13 +603,13 @@ def test_actual_pattern_glucose_on_admission_partial_compliance(repo_actual_kb):
     
     df_raw = pd.DataFrame([
         (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
-        (1, "GLUCOSE_MEASURE", make_ts("18:00"), make_ts("18:00"), 150),  # FIXED: GLUCOSE_MEASURE
+        (1, "GLUCOSE_MEASURE", make_ts("18:00"), make_ts("18:00"), 150),
         (1, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
     
     df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
     df_admission_event = admission_event.apply(df_admission_raw)
-    df_glucose = glucose_raw.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_MEASURE"])  # FIXED
+    df_glucose = glucose_raw.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_MEASURE"])
     df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
     df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
     
@@ -1305,7 +1298,7 @@ def test_pattern_empty_input_returns_false(repo_simple_pattern):
 
     df_out = pattern_tak.apply(df_empty)
 
-    # FIXED: Empty input returns empty DataFrame (no PatientId for False row)
+    # Empty input returns empty DataFrame (no PatientId for False row)
     assert len(df_out) == 0
     assert df_out.empty
 
@@ -1345,7 +1338,7 @@ def test_pattern_select_last_prefers_latest_event(repo_simple_pattern, tmp_path)
 
 def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, tmp_path):
     """Combined score: average of time (1.0) + value (0.694) = 0.847 → Partial."""
-    # FIXED: Add missing <derived-from>, <parameters>, and proper <abstraction-rules> wrapper
+    # Add missing <derived-from>, <parameters>, and proper <abstraction-rules> wrapper
     pattern_xml_combined = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <pattern name="COMBINED_COMPLIANCE" concept-type="local-pattern">
@@ -1394,7 +1387,7 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, t
 """
     pattern_path = write_xml(tmp_path, "PATTERN_COMBINED.xml", pattern_xml_combined)
     
-    # FIXED: Register BASAL_BITZUA in repo (missing from repo_value_compliance fixture)
+    # Register BASAL_BITZUA in repo (missing from repo_value_compliance fixture)
     basal_raw_xml = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="BASAL_BITZUA" concept-type="raw">
@@ -1430,18 +1423,20 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, t
     pattern_tak = LocalPattern.parse(pattern_path)
     repo.register(pattern_tak)
     
+    # Get TAKs (only once!)
     admission_tak = repo.get("ADMISSION_EVENT")
     basal_tak = repo.get("BASAL_BITZUA")
     weight_tak = repo.get("WEIGHT_MEASURE")
     
+    # Create test data (only once!)
     df_raw = pd.DataFrame([
-       
         (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
         (1, "BASAL_DOSAGE", make_ts("10:00"), make_ts("10:00"), 10),  # 2h gap, 10 units
         (1, "BASAL_ROUTE", make_ts("10:00"), make_ts("10:00"), "SubCutaneous"),
         (1, "WEIGHT", make_ts("07:00"), make_ts("07:00"), 72),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
     
+    # Apply TAKs
     df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
     
     # Apply BASAL_BITZUA (tuple merging)
