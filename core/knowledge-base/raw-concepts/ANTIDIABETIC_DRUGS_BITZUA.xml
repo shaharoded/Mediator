@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ANTIDIABETIC_DRUGS_BITZUA" concept-type="raw">
+    <categories>DrugAdministration</categories>
+    <description>Raw concept to manage the administration of antidiabetic medications IV/PO (already discretized)</description>
+    <attributes>
+        <attribute name="ANTIDIABETIC_DRUGS_DOSAGE" type="nominal">
+            <nominal-allowed-values>
+                <allowed-value value="Low"/>
+                <allowed-value value="Medium"/>
+                <allowed-value value="High"/>
+            </nominal-allowed-values>
+        </attribute>
+        <attribute name="ANTIDIABETIC_DRUGS_ROUTE" type="nominal">
+            <nominal-allowed-values>
+                <allowed-value value="IV"/>
+                <allowed-value value="PO"/>
+            </nominal-allowed-values>
+        </attribute>
+    </attributes>
+    
+    <!-- Tuple-order BEFORE merge -->
+    <tuple-order>
+        <attribute name="ANTIDIABETIC_DRUGS_DOSAGE"/>
+        <attribute name="ANTIDIABETIC_DRUGS_ROUTE"/>
+    </tuple-order>
+
+    <!-- Merge dosage+route if observed together; each is optional -->
+    <merge require-all="false"/>
+</raw-concept>

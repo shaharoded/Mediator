@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="BASAL_BITZUA" concept-type="raw">
-    <categories>Medications</categories>
+    <categories>DrugAdministration</categories>
     <description>Raw concept to manage the administration of BASAL (long term) insulin</description>
     <attributes>
         <attribute name="BASAL_DOSAGE" type="numeric">

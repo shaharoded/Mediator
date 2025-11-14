@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ANTIBIOTIC_DRUGS_BITZUA" concept-type="raw-boolean">
+    <categories>DrugAdministration</categories>
+    <description>Raw concept to mark antibiotic drugs administration event</description>
+    <attributes>
+        <attribute name="ANTIBIOTIC_DRUGS_BITZUA" type="boolean"/>
+    </attributes>
+</raw-concept>

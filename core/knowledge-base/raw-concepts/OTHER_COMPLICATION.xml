@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="OTHER_COMPLICATION" concept-type="raw-boolean">
+    <categories>Complications</categories>
+    <description>Raw concept to mark an unidentified diabetic complication event, inputed from 'Observation'</description>
+    <attributes>
+        <attribute name="OTHER_COMPLICATION" type="boolean"/>
+    </attributes>
+</raw-concept>

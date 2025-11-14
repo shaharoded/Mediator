@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="NORMAL_GLUCOSE_IND" concept-type="raw-numeric">
-    <categories>Measurements</categories>
+    <categories>Context</categories>
     <description>Raw concept to indicate the transition to normal glucose range</description>
     <attributes>
         <attribute name="GLUCOSE_MEASURE" type="numeric">

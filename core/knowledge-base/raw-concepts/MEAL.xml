@@ -8,7 +8,7 @@
                 <allowed-value value="Breakfast"/>
                 <allowed-value value="Lunch"/>
                 <allowed-value value="Dinner"/>
-                <allowed-value value="Night"/>
+                <allowed-value value="Night-Snack"/>
             </nominal-allowed-values>
         </attribute>
     </attributes>

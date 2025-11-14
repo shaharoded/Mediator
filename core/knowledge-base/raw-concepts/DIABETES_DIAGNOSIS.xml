@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="DIABETES_DIAGNOSIS" concept-type="raw-boolean">
-    <categories>Events</categories>
+    <categories>Context</categories>
     <description>Raw concept to mark the diabetes diagnosis event</description>
     <attributes>
         <attribute name="DIABETES_DIAGNOSIS" type="boolean"/>

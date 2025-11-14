@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="RETINOPATHY" concept-type="raw-boolean">
+    <categories>Complications</categories>
+    <description>Raw concept to mark the retinopathy event, inputed from 'Observation'</description>
+    <attributes>
+        <attribute name="RETINOPATHY" type="boolean"/>
+    </attributes>
+</raw-concept>

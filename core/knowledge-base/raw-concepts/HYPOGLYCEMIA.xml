@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="HYPOGLYCEMIA" concept-type="raw-boolean">
-    <categories>Events</categories>
+    <categories>Complications</categories>
     <description>Raw concept to mark the hypoglycemia event, inputed as 'Observation'</description>
     <attributes>
         <attribute name="HYPOGLYCEMIA" type="boolean"/>

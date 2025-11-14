@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="K-BINDER_BITZUA" concept-type="raw-boolean">
+    <categories>DrugAdministration</categories>
+    <description>Raw concept to mark potassium binder administration event</description>
+    <attributes>
+        <attribute name="K-BINDER_BITZUA" type="boolean"/>
+    </attributes>
+</raw-concept>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="NERVOUS_SYSTEM_DISORDER" concept-type="raw-boolean">
+    <categories>Complications</categories>
+    <description>Raw concept to mark the nervous system disorder event, inputed as 'Observation'</description>
+    <attributes>
+        <attribute name="NERVOUS_SYSTEM_DISORDER" type="boolean"/>
+    </attributes>
+</raw-concept>

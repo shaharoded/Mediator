@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="CARDIO-VASCULAR_DISORDER" concept-type="raw-boolean">
+    <categories>Complications</categories>
+    <description>Raw concept to mark a cardio-vascular disorder event, inputed from 'Observation'</description>
+    <attributes>
+        <attribute name="CARDIO-VASCULAR_DISORDER" type="boolean"/>
+    </attributes>
+</raw-concept>
