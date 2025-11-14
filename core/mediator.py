@@ -208,15 +208,23 @@ class Mediator:
             raise RuntimeError(f"TAK repository finalization failed: {e}") from e
         
         # Summary
+        # Count unique TAKs from repository (avopids dupolicates on re-run)
+        raw_concepts_count = sum(1 for t in repo.taks.values() if isinstance(t, RawConcept))
+        events_count = sum(1 for t in repo.taks.values() if isinstance(t, Event))
+        states_count = sum(1 for t in repo.taks.values() if isinstance(t, State))
+        trends_count = sum(1 for t in repo.taks.values() if isinstance(t, Trend))
+        contexts_count = sum(1 for t in repo.taks.values() if isinstance(t, Context))
+        patterns_count = sum(1 for t in repo.taks.values() if isinstance(t, Pattern))
+        
         print("\n" + "="*80)
         print("✅ TAK Repository Built Successfully")
         print("="*80)
-        print(f"  Raw Concepts: {len(self.raw_concepts)}")
-        print(f"  Events:       {len(self.events)}")
-        print(f"  States:       {len(self.states)}")
-        print(f"  Trends:       {len(self.trends)}")
-        print(f"  Contexts:     {len(self.contexts)}")
-        print(f"  Patterns:     {len(self.patterns)}")
+        print(f"  Raw Concepts: {raw_concepts_count}")
+        print(f"  Events:       {events_count}")
+        print(f"  States:       {states_count}")
+        print(f"  Trends:       {trends_count}")
+        print(f"  Contexts:     {contexts_count}")
+        print(f"  Patterns:     {patterns_count}")
         print(f"  TOTAL TAKs:   {len(repo.taks)}")
         print("="*80 + "\n")
         
@@ -580,12 +588,17 @@ class Mediator:
         
         # Main output: only rows with valid timestamps (not NaT)
         # This filters out "False" patterns (which have NaT timestamps)
-        df_main = df[df["StartDateTime"].notna()]
-        df_main = df_main[["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"]]
+        df_main = df[df["StartDateTime"].notna()][["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"]].copy()
         
         # QA scores: all rows (including "False" with NaT)
         # Extract compliance score columns
-        df_scores = df[["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore"]]
+        df_scores = df[["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore"]].copy()
+        
+        # Fill NaT with sentinel date for DB insertion
+        sentinel_date = pd.Timestamp('9999-12-31 23:59:59')
+    
+        df_scores.loc[:, 'StartDateTime'] = df_scores['StartDateTime'].fillna(sentinel_date)
+        df_scores.loc[:, 'EndDateTime'] = df_scores['EndDateTime'].fillna(sentinel_date)
         
         return df_main, df_scores
 
