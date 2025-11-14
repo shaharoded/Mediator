@@ -34,7 +34,7 @@ Mediator/
 │   ├── data/
 │   │   ├── generate_synthetic_data.ipynb   # Synthetic data generator
 │   │   ├── mediator.db                     # SQLite database (auto-created)
-│   │   └── synthetic_input_data.csv        # Example input CSV
+│   │   └── input_data.csv                  # Sample input CSV (auto-created by .ipynb)
 │   ├── queries/                            # SQL templates
 │   ├── config.py                           # Database paths
 │   └── dataaccess.py                       # Database access + CLI
@@ -110,7 +110,7 @@ cd Mediator
 
 # Create virtual environment
 python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+.venv\Scripts\activate  # Windows
 
 # Install dependencies
 pip install --upgrade pip
@@ -119,37 +119,9 @@ pip install -r requirements.txt
 # Install as editable package (enables imports from anywhere)
 pip install -e .
 ```
-
 ---
 
-### 1.2 Load in Target Machine
-
-**If deploying to a different machine:**
-
-```bash
-# Option A: Git clone (recommended)
-git clone https://github.com/YOUR_USERNAME/Mediator.git
-cd Mediator
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt && pip install -e .
-
-# Option B: Transfer ZIP archive
-# LOCAL:
-zip -r mediator-src.zip . -x "*.pyc" "__pycache__/*" ".venv/*" ".git/*" "*.db" "*.log"
-scp mediator-src.zip user@remote-server:/home/user/
-
-# REMOTE:
-ssh user@remote-server
-cd /home/user/
-unzip mediator-src.zip
-cd Mediator/
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt && pip install -e .
-```
-
----
-
-### 1.3 Initialize Database & Load CSV
+### 1.2 Initialize Database & Load CSV
 
 **Create database tables:**
 ```bash
@@ -178,7 +150,7 @@ python -m backend.dataaccess --load_csv /absolute/path/to/input_data.csv --yes
 
 ---
 
-### 1.4 Upload New TAKs
+### 1.3 Upload New TAKs
 
 **Extract TAK ZIP to knowledge-base folder:**
 ```bash
@@ -196,7 +168,7 @@ find core/knowledge-base -name "*.xml" -exec \
 
 ---
 
-### 1.5 Run Mediator (CLI)
+### 1.4 Run Mediator (CLI)
 
 **Process all patients:**
 ```bash
@@ -227,7 +199,7 @@ python -m core.mediator \
 >> If you wish to run on a subset of TAKs you'll need to pull the desired TAKs + all of their dependencies to a new TAK folder of the same structure, and point the Mediator's config there.
 ---
 
-### 1.6 Run Tests
+### 1.5 Run Tests
 
 ```bash
 # Run all tests (53 tests)
@@ -254,7 +226,7 @@ python -m pytest unittests/ --cov=core --cov=backend --cov-report=html
 **Best for:** Research workflows, interactive analysis, visualization, Python API usage.
 This method is designed to be deployed on an older version of python as found in my remote computer research env. The idea is to use this as a code repository with a main.ipynb file that can import and use the pythonic functions offered here.
 
-**Note:** Python 3.7 support uses older dependency versions (pandas 1.3.5, numpy 1.21.6) which are no longer maintained. For production use, Python 3.9+ is strongly recommended.
+**Note:** Python 3.7 support uses older dependency versions (pandas 1.3.5, numpy 1.21.6) which are no longer maintained. If available, Python 3.9+ is strongly recommended, and will compile with this package as well.
 
 ### Requirements
 - Python 3.7+ (requirements are adapted to older version for my research env)
@@ -302,7 +274,7 @@ cp /path/to/input_data.csv backend/data/
 
 ```bash
 # Activate virtual environment
-source .venv/bin/activate
+.venv\Scripts\activate  # Windows
 
 # Start Jupyter server
 jupyter notebook
