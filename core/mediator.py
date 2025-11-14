@@ -1,6 +1,6 @@
 """
 TO-DO:
- - Patterns are not all calculated, might have some exception there.
+ - Fix stats for tak execusion + try to solve skipped test in test_mediator.py
  - define that max-distance=0 for 'before' will also capture 'overlap', so that if context window overlaps with event, it is included. As long as anchor.StartTime < event.StartTime, we can treat "before" as inclusive of overlap.
  - re-define operator="and" for Contexts (not for events). Should check if 2+ contexts overlap and if so will return their overlap window +- good before/after. This 
  """
@@ -638,29 +638,34 @@ class Mediator:
                         # Update cache with main output (for downstream patterns)
                         tak_outputs[tak_name] = df_output_main
                         
-                        rows_written_main = self.write_output(df_output_main, thread_da)
-                        _ = self.write_qa_scores(df_output_scores, thread_da)
+                        rows_written = len(df_output_main)
+                        self.write_output(df_output_main, thread_da)
+                        self.write_qa_scores(df_output_scores, thread_da)
                         
                         # Add to stats the number of temporal rows written
-                        stats[tak.name] = rows_written_main
+                        stats[tak_name] = rows_written
 
                     else:
                         # All other TAKs: apply global clippers before caching/writing
                         df_output = self._apply_global_clippers(df_output, clipper_df)
                         
                         tak_outputs[tak_name] = df_output
+                        rows_written = len(df_output)
                         
                         # All other TAKs: write to OutputPatientData (skip RawConcepts)
                         if not isinstance(tak, RawConcept):
-                            rows_written = self.write_output(df_output, thread_da)
-                        else:
-                            rows_written = len(df_output)
+                            self.write_output(df_output, thread_da)
                         
-                        stats[tak.name] = rows_written
+                        stats[tak_name] = rows_written
                     
                 except Exception as e:
-                    logger.error(f"[Patient {patient_id}][{tak_name}] Error: {e}")
-                    stats[tak_name] = {"error": str(e), "traceback": traceback.format_exc()}
+                    error_msg = f"ERROR: {str(e)}"
+                    logger.error(f"[Patient {patient_id}][{tak_name}] {error_msg}")
+                    logger.debug(f"Traceback:\n{traceback.format_exc()}")
+                    stats[tak_name] = error_msg
+                    
+                    # Store empty DataFrame in cache on error
+                    tak_outputs[tak_name] = pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
             
             logger.info(f"[Patient {patient_id}] Processing complete | stats={stats}")
             return (stats, tak_outputs) if return_cache else stats
