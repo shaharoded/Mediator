@@ -1,5 +1,6 @@
 """
 TO-DO:
+ - Update KB - Finished raw concepts, need to finish contexts, events, states, trends
  - What happens on local pattern if I define something like glucose every 12 hours? Will the anchor catch the closest option? What will happen if I define a context to it as well? Might "skip" smaller pattern-intervals just because the larger one also fits, which might distory the QA.
  - We have empty QA row when no pattern is found, but what about when we only find patterns some of the days? How to say "there should have been an instance here"? Maybe global pattern?
  - define that max-distance=0 for 'before' will also capture 'overlap', so that if context window overlaps with event, it is included. As long as anchor.StartTime < event.StartTime, we can treat "before" as inclusive of overlap.
