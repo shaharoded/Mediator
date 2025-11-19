@@ -7,3 +7,5 @@ backend/data/*.log
 logs/*.log
 *.egg-info/
 mediator-deploy.zip
+.vscode/
+.pytest_cache/

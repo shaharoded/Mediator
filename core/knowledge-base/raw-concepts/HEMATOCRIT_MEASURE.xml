@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="HEMATOCRIT_MEASURE" concept-type="raw-numeric">
+    <categories>Measurements</categories>
+    <description>Raw concept to manage the measurement of HEMATOCRIT</description>
+    <attributes>
+        <attribute name="HEMATOCRIT_MEASURE" type="numeric">
+            <numeric-allowed-values>
+                <allowed-value min="0" max="80"/>
+            </numeric-allowed-values>
+        </attribute>
+    </attributes>
+</raw-concept>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="BLOOD_CULTURE" concept-type="raw-nominal">
+    <categories>Measurements</categories>
+    <description>Raw concept to state a BLOOD CULTURE was performed, and it's result</description>
+    <attributes>
+        <attribute name="BLOOD_CULTURE" type="nominal">
+            <nominal-allowed-values>
+                <allowed-value value="Positive"/>
+                <allowed-value value="Negative"/>
+            </nominal-allowed-values>
+        </attribute>
+    </attributes>
+</raw-concept>

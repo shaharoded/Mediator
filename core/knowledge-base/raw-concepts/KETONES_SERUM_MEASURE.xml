@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="KETONES_SERUM_MEASURE" concept-type="raw-numeric">
+    <categories>Measurements</categories>
+    <description>Raw concept to manage the measurement of KETONES by SERUM</description>
+    <attributes>
+        <attribute name="KETONES_SERUM_MEASURE" type="numeric">
+            <numeric-allowed-values>
+                <allowed-value min="0" max="150"/>
+            </numeric-allowed-values>
+        </attribute>
+    </attributes>
+</raw-concept>

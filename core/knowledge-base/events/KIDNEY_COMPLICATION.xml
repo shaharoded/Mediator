@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="KIDNEY_COMPLICATION_EVENT">
+    <categories>Events</categories>
+    <description>Dysglycemia event</description>
+    <derived-from>
+        <attribute name="KIDNEY_COMPLICATION" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="CREATININE_MEASURE" tak="raw-concept" idx="0" ref="A2"/>
+        <attribute name="E-GFR_MEASURE" tak="raw-concept" idx="0" ref="A3"/>
+    </derived-from>
+    
+    <!-- 
+    Abstraction rules: constraint types allowed in <allowed-value>:
+    - equal="value"               → exact match
+    - min="value"                 → >= value
+    - max="value"                 → <= value
+    - min="val1" max="val2"       → range [val1, val2]
+    -->
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>  <!-- exact match -->
+            </attribute>
+            <attribute ref="A2">
+                <allowed-value min="4"/> <!-- >= 4 -->
+            </attribute>
+            <attribute ref="A3">
+                <allowed-value max="30"/>  <!-- <= 30 -->
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</event>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="NEUROVASCULAR_COMPLICATION" concept-type="raw-boolean">
+    <categories>Complications</categories>
+    <description>Raw concept to mark the neurovascular complication event, inputed as 'Observation'</description>
+    <attributes>
+        <attribute name="NEUROVASCULAR_COMPLICATION" type="boolean"/>
+    </attributes>
+</raw-concept>

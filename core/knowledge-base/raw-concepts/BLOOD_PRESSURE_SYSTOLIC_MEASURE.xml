@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="BLOOD_PRESSURE_SYSTOLIC_MEASURE" concept-type="raw-numeric">
+    <categories>Measurements</categories>
+    <description>Raw concept to manage the measurement of BLOOD_PRESSURE in SYSTOLIC measure</description>
+    <attributes>
+        <attribute name="BLOOD_PRESSURE_SYSTOLIC_MEASURE" type="numeric">
+            <numeric-allowed-values>
+                <allowed-value min="0" max="250"/>
+            </numeric-allowed-values>
+        </attribute>
+    </attributes>
+</raw-concept>
