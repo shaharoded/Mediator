@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<trend name="CREATININE_SERUM_MEASURE_TREND">
+<trend name="E-GFR_MEASURE_TREND">
     <categories>Measurements</categories>
-    <description>Trend for the measurements of CREATININE (Serum)</description>
-    <derived-from name="CREATININE_SERUM_MEASURE" tak="raw-concept" idx="0" significant-variation="0.5"/>
+    <description>Trend for the measurements of E-GFR</description>
+    <derived-from name="E-GFR_MEASURE" tak="raw-concept" idx="0" significant-variation="10"/>
 
     <!-- Each point will be classified as either "steady" or "changing" based on this window -->
     <time-steady value="12h"/>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="PH_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of PH</description>
+    <derived-from name="PH_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="6h" interpolate="true" max-skip="1"/>
+
+    <!-- Discretize and abstract -->
+    <abstraction-rules>
+        <rule value="Acidosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="7.2"/>
+            </attribute>
+        </rule>
+        <rule value="Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="7.2" max="7.45"/>
+            </attribute>
+        </rule>
+        <rule value="Alkalosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="7.45"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>

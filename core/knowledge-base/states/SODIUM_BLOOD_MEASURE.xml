@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="SODIUM_BLOOD_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of SODIUM (by Blood)</description>
+    <derived-from name="SODIUM_BLOOD_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="18h" interpolate="true" max-skip="1"/>
+
+    <!-- Discretize and abstract -->
+    <abstraction-rules>
+        <rule value="Severe Hyponatremia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="130"/>
+            </attribute>
+        </rule>
+        <rule value="Mild Hyponatremia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="130" max="135"/>
+            </attribute>
+        </rule>
+        <rule value="Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="135" max="145"/>
+            </attribute>
+        </rule>
+        <rule value="Mild Hypernatremia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="145" max="150"/>
+            </attribute>
+        </rule>
+        <rule value="Severe Hypernatremia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="150"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="E-GFR_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of E-GFR</description>
+    <derived-from name="E-GFR_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="48h" interpolate="true" max-skip="1"/>
+
+    <!-- Discretize and abstract -->
+    <abstraction-rules>
+        <rule value="Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="90"/>
+            </attribute>
+        </rule>
+        <rule value="Mild" operator="and">
+            <attribute idx="0">
+                <allowed-value min="60" max="90"/>
+            </attribute>
+        </rule>
+        <rule value="Moderate" operator="and">
+            <attribute idx="0">
+                <allowed-value min="30" max="60"/>
+            </attribute>
+        </rule>
+        <rule value="Severe" operator="and">
+            <attribute idx="0">
+                <allowed-value min="15" max="30"/>
+            </attribute>
+        </rule>
+        <rule value="Failure" operator="and">
+            <attribute idx="0">
+                <allowed-value max="15"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>

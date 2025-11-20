@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="KETONES_SERUM_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of KETONES (by Serum)</description>
+    <derived-from name="KETONES_SERUM_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="12h" interpolate="true" max-skip="1"/>
+
+    <!-- Discretize and abstract -->
+    <abstraction-rules>
+        <rule value="Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="10"/>
+            </attribute>
+        </rule>
+        <rule value="Mild Ketosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="10" max="30"/>
+            </attribute>
+        </rule>
+        <rule value="Ketosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="30" max="80"/>
+            </attribute>
+        </rule>
+        <rule value="Severe Ketosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="80"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>

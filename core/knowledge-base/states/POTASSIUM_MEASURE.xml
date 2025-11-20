@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="POTASSIUM_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of POTASSIUM</description>
+    <derived-from name="POTASSIUM_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="8h" interpolate="true" max-skip="1"/>
+
+    <!-- Discretize and abstract -->
+    <abstraction-rules>
+        <rule value="Severe Hypokalemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="3.0"/>
+            </attribute>
+        </rule>
+        <rule value="Mild Hypokalemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="3.0" max="3.5"/>
+            </attribute>
+        </rule>
+        <rule value="Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="3.5" max="5.0"/>
+            </attribute>
+        </rule>
+        <rule value="Hyperkalemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="5.0"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>

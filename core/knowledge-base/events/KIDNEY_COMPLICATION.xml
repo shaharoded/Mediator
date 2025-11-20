@@ -21,10 +21,10 @@
                 <allowed-value equal="True"/>  <!-- exact match -->
             </attribute>
             <attribute ref="A2">
-                <allowed-value min="4"/> <!-- >= 4 -->
+                <allowed-value min="20"/> <!-- >= 20, probable AKI -->
             </attribute>
             <attribute ref="A3">
-                <allowed-value max="30"/>  <!-- <= 30 -->
+                <allowed-value max="29"/>  <!-- <= 29 CKD Stage 4 -->
             </attribute>
         </rule>
     </abstraction-rules>

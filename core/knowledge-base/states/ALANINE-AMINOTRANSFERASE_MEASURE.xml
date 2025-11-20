@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="ALANINE-AMINOTRANSFERASE_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of ALANINE-AMINOTRANSFERASE</description>
+    <derived-from name="ALANINE-AMINOTRANSFERASE_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="36h" interpolate="true" max-skip="1"/>
+
+    <!-- Discretize and abstract -->
+    <abstraction-rules>
+        <rule value="Low" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="10"/>
+            </attribute>
+        </rule>
+        <rule value="Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="10" max="45"/>
+            </attribute>
+        </rule>
+        <rule value="Elevated" operator="and">
+            <attribute idx="0">
+                <allowed-value min="45" max="100"/>
+            </attribute>
+        </rule>
+        <rule value="High" operator="and">
+            <attribute idx="0">
+                <allowed-value min="100"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>

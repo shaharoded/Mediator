@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="HEART_RATE_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of HEART RATE</description>
+    <derived-from name="HEART_RATE_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="4h" interpolate="true" max-skip="1"/>
+
+    <!-- Discretize and abstract -->
+    <abstraction-rules>
+        <rule value="Bradycardia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="50"/>
+            </attribute>
+        </rule>
+        <rule value="Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="50" max="100"/>
+            </attribute>
+        </rule>
+        <rule value="Tachycardia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="100"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>

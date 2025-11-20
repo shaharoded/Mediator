@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<raw-concept name="STEROIDS_DOSAGE" concept-type="raw">
+<raw-concept name="STEROIDS_BITZUA" concept-type="raw">
     <categories>DrugAdministration</categories>
     <description>Raw concept to manage the administration dosage of steroids (already discretized)</description>
     <attributes>

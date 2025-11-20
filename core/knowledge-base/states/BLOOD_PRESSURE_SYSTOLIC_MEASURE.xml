@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="BLOOD_PRESSURE_SYSTOLIC_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of Systolic BLOOD PRESSURE</description>
+    <derived-from name="BLOOD_PRESSURE_SYSTOLIC_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="4h" interpolate="true" max-skip="1"/>
+
+    <!-- Discretize and abstract -->
+    <abstraction-rules>
+        <rule value="Low" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="90"/>
+            </attribute>
+        </rule>
+        <rule value="Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="90" max="120"/>
+            </attribute>
+        </rule>
+        <rule value="Elevated" operator="and">
+            <attribute idx="0">
+                <allowed-value min="120" max="180"/>
+            </attribute>
+        </rule>
+        <rule value="Severe HTN" operator="and">
+            <attribute idx="0">
+                <allowed-value min="180"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>

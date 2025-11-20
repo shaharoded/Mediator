@@ -57,20 +57,5 @@
                 <allowed-value equal="IntraVenous"/>
             </attribute>
         </rule>
-        <rule value="Low" operator="and">
-            <attribute idx="0">
-                <allowed-value min="0" max="10"/>
-            </attribute>
-        </rule>
-        <rule value="Medium" operator="and">
-            <attribute idx="0">
-                <allowed-value min="10" max="20"/>
-            </attribute>
-        </rule>
-        <rule value="High" operator="and">
-            <attribute idx="0">
-                <allowed-value min="20"/>
-            </attribute>
-        </rule>
     </abstraction-rules>
 </state>

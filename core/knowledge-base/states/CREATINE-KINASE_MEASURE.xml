@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="CREATINE-KINASE_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of CREATINE-KINASE</description>
+    <derived-from name="CREATINE-KINASE_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="18h" interpolate="true" max-skip="1"/>
+
+    <!-- Discretize and abstract -->
+    <abstraction-rules>
+        <rule value="Low" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="40"/>
+            </attribute>
+        </rule>
+        <rule value="Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="40" max="200"/>
+            </attribute>
+        </rule>
+        <rule value="Moderate" operator="and">
+            <attribute idx="0">
+                <allowed-value min="200" max="1000"/>
+            </attribute>
+        </rule>
+        <rule value="High" operator="and">
+            <attribute idx="0">
+                <allowed-value min="1000" max="5000"/>
+            </attribute>
+        </rule>
+        <rule value="Extreme" operator="and">
+            <attribute idx="0">
+                <allowed-value min="5000"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>
