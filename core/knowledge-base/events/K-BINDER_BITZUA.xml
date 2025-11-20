@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<event name="CARDIOVASCULAR_DISORDER_EVENT">
-    <categories>Complications</categories>
-    <description>Marks Cardiovascular Disorder (in admission complication) event</description>
+<event name="K-BINDER_BITZUA_EVENT">
+    <categories>DrugAdministration</categories>
+    <description>Marks K Binder administration event</description>
     <derived-from>
         <!-- ref optional when no abstraction-rules -->
-        <attribute name="CARDIOVASCULAR_DISORDER" tak="raw-concept" idx="0" ref='A1'/>
+        <attribute name="K-BINDER_BITZUA" tak="raw-concept" idx="0" ref='A1'/>
     </derived-from>
 
     <abstraction-rules>

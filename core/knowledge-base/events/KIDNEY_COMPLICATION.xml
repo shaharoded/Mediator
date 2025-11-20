@@ -4,7 +4,7 @@
     <description>Dysglycemia event</description>
     <derived-from>
         <attribute name="KIDNEY_COMPLICATION" tak="raw-concept" idx="0" ref="A1"/>
-        <attribute name="CREATININE_MEASURE" tak="raw-concept" idx="0" ref="A2"/>
+        <attribute name="CREATININE_SERUM_MEASURE" tak="raw-concept" idx="0" ref="A2"/>
         <attribute name="E-GFR_MEASURE" tak="raw-concept" idx="0" ref="A3"/>
     </derived-from>
     

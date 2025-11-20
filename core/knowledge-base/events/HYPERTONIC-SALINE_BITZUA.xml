@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<event name="K_BINDER_BITZUA_EVENT">
+<event name="HYPERTONIC-SALINE_BITZUA_EVENT">
     <categories>DrugAdministration</categories>
-    <description>Marks K Binder administration event</description>
+    <description>Marks Hypertonic Saline administration event</description>
     <derived-from>
         <!-- ref optional when no abstraction-rules -->
-        <attribute name="K_BINDER_BITZUA" tak="raw-concept" idx="0" ref='A1'/>
+        <attribute name="HYPERTONIC-SALINE_BITZUA" tak="raw-concept" idx="0" ref='A1'/>
     </derived-from>
 
     <abstraction-rules>

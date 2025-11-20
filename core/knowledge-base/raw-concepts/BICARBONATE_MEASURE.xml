@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<raw-concept name="PH_MEASURE" concept-type="raw-numeric">
+<raw-concept name="BICARBONATE_MEASURE" concept-type="raw-numeric">
     <categories>Measurements</categories>
     <description>Raw concept to manage the measurement of BICARBONATE</description>
     <attributes>
