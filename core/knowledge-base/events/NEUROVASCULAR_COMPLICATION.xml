@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<event name="DEATH_EVENT">
+<event name="NEUROVASCULAR_COMPLICATION_EVENT">
     <categories>Complications</categories>
-    <description>Death event</description>
+    <description>Marks Neurovascular Complication (in admission complication) event</description>
     <derived-from>
-        <attribute name="DEATH" tak="raw-concept" idx="0" ref="A1"/>
+        <!-- ref optional when no abstraction-rules -->
+        <attribute name="NEUROVASCULAR_COMPLICATION" tak="raw-concept" idx="0" ref='A1'/>
     </derived-from>
 
     <abstraction-rules>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <event name="KIDNEY_COMPLICATION_EVENT">
-    <categories>Events</categories>
+    <categories>Complications</categories>
     <description>Dysglycemia event</description>
     <derived-from>
         <attribute name="KIDNEY_COMPLICATION" tak="raw-concept" idx="0" ref="A1"/>

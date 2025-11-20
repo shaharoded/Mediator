@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="HYPERTONIC_SALINE_BITZUA_EVENT">
+    <categories>DrugAdministration</categories>
+    <description>Marks Hypertonic Saline administration event</description>
+    <derived-from>
+        <!-- ref optional when no abstraction-rules -->
+        <attribute name="HYPERTONIC_SALINE_BITZUA" tak="raw-concept" idx="0" ref='A1'/>
+    </derived-from>
+
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</event>
