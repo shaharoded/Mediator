@@ -130,7 +130,34 @@ def parse_duration(duration_str):
         raise ValueError(f"Unsupported duration unit: '{unit}'. Use s, m, h, d, w, M, or y.")
     
 
-def apply_external_function(func_name: str, trapez: tuple, constraint_type: str, *args) -> FuzzyLogicTrapez:
+def apply_external_function(func_name: str, value: Union[float, str], *args) -> Union[float, str]:
+    """
+    Apply an external function by name to a single value, passing any additional *args.
+
+    Args:
+        func_name (str): The name of the external function to apply.
+        value (Union[float, str]): The value to apply the function to.
+        *args: Additional arguments to pass to the function.
+
+    Returns:
+        Union[float, str]: The result of applying the external function.
+
+    Raises:
+        ValueError: If the function name is not recognized or wrong number of parameters.
+    """
+    func = REPO.get(func_name)
+    if func is None:
+        raise ValueError(f"External function '{func_name}' not found in repository.")
+    
+    try:
+        return func(value, *args)
+    except TypeError as e:
+        raise ValueError(f"Function '{func_name}' called with wrong number of parameters: {e}")
+    except Exception as e:
+        raise ValueError(f"Error applying function '{func_name}' to value '{value}': {e}")
+
+
+def apply_external_function_on_trapez(func_name: str, trapez: tuple, constraint_type: str, *args) -> FuzzyLogicTrapez:
     """
     Apply an external function by name to each value in the trapez tuple, passing any additional *args.
     For time-constraint, values are parsed as durations, converted to seconds, passed to function,
@@ -148,23 +175,14 @@ def apply_external_function(func_name: str, trapez: tuple, constraint_type: str,
     Raises:
         ValueError: If the function name is not recognized or wrong number of parameters.
     """
-    func = REPO.get(func_name)
-    if func is None:
-        raise ValueError(f"External function '{func_name}' not found in repository.")
-
     # Preprocess all values based on type
     if constraint_type == "time-constraint":
         # Parse all as durations and convert to seconds
         seconds = [parse_duration(val).total_seconds() for val in trapez]
         results = []
         for sec in seconds:
-            try:
-                res = func(sec, *args)
-                results.append(res)
-            except TypeError as e:
-                raise ValueError(f"Function '{func_name}' called with wrong number of parameters: {e}")
-            except Exception as e:
-                raise ValueError(f"Error applying function '{func_name}' to value '{sec}': {e}")
+            res = apply_external_function(func_name, sec, *args)
+            results.append(res)
         
         # Validate ordering
         if not (results[0] <= results[1] <= results[2] <= results[3]):
@@ -185,13 +203,8 @@ def apply_external_function(func_name: str, trapez: tuple, constraint_type: str,
         processed = list(trapez)
         results = []
         for val in processed:
-            try:
-                res = func(val, *args)
-                results.append(res)
-            except TypeError as e:
-                raise ValueError(f"Function '{func_name}' called with wrong number of parameters: {e}")
-            except Exception as e:
-                raise ValueError(f"Error applying function '{func_name}' to value '{val}': {e}")
+            res = apply_external_function(func_name, val, *args)
+            results.append(res)
         
         # Validate ordering
         if not (results[0] <= results[1] <= results[2] <= results[3]):

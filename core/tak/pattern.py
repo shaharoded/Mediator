@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .tak import TAK, validate_xml_against_schema, TemporalRelationRule
-from .utils import apply_external_function, parse_duration
+from .utils import apply_external_function_on_trapez, parse_duration
 from .repository import get_tak_repository
 from .raw_concept import RawConcept
 from .external_functions import REPO
@@ -1031,7 +1031,7 @@ class LocalPattern(Pattern):
         param_vals = [parameter_values[ref] for ref in tcc_spec["parameters"]]
         
         try:
-            trapez_node = apply_external_function(
+            trapez_node = apply_external_function_on_trapez(
                 tcc_spec["func_name"],  # positional
                 tcc_spec["trapez"],     # positional
                 "time-constraint",      # positional
@@ -1098,7 +1098,7 @@ class LocalPattern(Pattern):
         param_vals = [parameter_values[ref] for ref in vcc_spec["parameters"]]
         
         try:
-            trapez_node = apply_external_function(
+            trapez_node = apply_external_function_on_trapez(
                 vcc_spec["func_name"],  # positional
                 vcc_spec["trapez"],     # positional
                 "value-constraint",     # positional

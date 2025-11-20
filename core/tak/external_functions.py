@@ -49,6 +49,28 @@ def multiply(x, *args):
     return result
 
 
+@register("div")
+def divide(x, *args):
+    """
+    Divide trapez value by all parameters.
+    
+    Args:
+        x: Base trapez value
+        *args: Parameters to divide by
+    
+    Returns:
+        Result of dividing x by all parameters
+    
+    Example:
+        div(10, 2) → 5
+        div(43.2, 72, 1.2) → 0.5
+    """
+    result = x
+    for arg in args:
+        result /= arg
+    return result
+
+
 @register("add")
 def add(x, *args):
     """
