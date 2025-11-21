@@ -1,6 +1,5 @@
 """
 TO-DO:
- - Define parameters for raw-concepts as inputs that can modify the raw concept value, use to define mSHR.
  - What happens on local pattern if I define something like glucose every 12 hours? Will the anchor catch the closest option? What will happen if I define a context to it as well? Might "skip" smaller pattern-intervals just because the larger one also fits, which might distory the QA.
  - We have empty QA row when no pattern is found, but what about when we only find patterns some of the days? How to say "there should have been an instance here"? Maybe global pattern?
  - define that max-distance=0 for 'before' will also capture 'overlap', so that if context window overlaps with event, it is included. As long as anchor.StartTime < event.StartTime, we can treat "before" as inclusive of overlap.
@@ -345,7 +344,8 @@ class Mediator:
         
         # CASE: ParameterizedRawConcept → derived_from + parameters
         if isinstance(tak, ParameterizedRawConcept):
-            dfs = [get_cached_dependency(spec["name"]) for spec in tak.derived_from + tak.parameters]
+            dfs = [get_cached_dependency(tak.derived_from)] +\
+                  [get_cached_dependency(spec["name"]) for spec in tak.parameters]
             dfs = [df for df in dfs if not df.empty]
             if not dfs:
                 return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
@@ -606,8 +606,8 @@ class Mediator:
         # Extract compliance score columns
         df_scores = df[["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore"]].copy()
         
-        # Fill NaT with sentinel date for DB insertion
-        sentinel_date = pd.Timestamp('9999-12-31 23:59:59')
+        # Fill NaT with sentinel date for DB insertion (approx. 2262-04-11 23:47:16)
+        sentinel_date = pd.Timestamp.max
     
         df_scores.loc[:, 'StartDateTime'] = df_scores['StartDateTime'].fillna(sentinel_date)
         df_scores.loc[:, 'EndDateTime'] = df_scores['EndDateTime'].fillna(sentinel_date)

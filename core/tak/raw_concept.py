@@ -339,7 +339,7 @@ class ParameterizedRawConcept(RawConcept):
         name: str,
         categories: Tuple[str, ...],
         description: str,
-        parent_name: str,
+        derived_from: str,
         parent_idx_map: List[int],
         parameters: List[Dict[str, Any]],
         functions: List[Dict[str, Any]],
@@ -359,7 +359,7 @@ class ParameterizedRawConcept(RawConcept):
             tuple_order=tuple_order,
             merge_require_all=merge_require_all
         )
-        self.parent_name = parent_name
+        self.derived_from = derived_from
         self.parent_idx_map = parent_idx_map
         self.parameters = parameters
         self.functions = functions
@@ -438,7 +438,7 @@ class ParameterizedRawConcept(RawConcept):
             name=name,
             categories=cats,
             description=desc,
-            parent_name=parent_name,
+            derived_from=parent_name,
             parent_idx_map=parent_idx_map,
             parameters=parameters,
             functions=functions,
@@ -460,9 +460,9 @@ class ParameterizedRawConcept(RawConcept):
         - Parameter idx is optional, default is required
         """
         repo = get_tak_repository()
-        parent = repo.get(self.parent_name)
+        parent = repo.get(self.derived_from)
         if not isinstance(parent, RawConcept):
-            raise ValueError(f"{self.name}: parent '{self.parent_name}' is not a RawConcept")
+            raise ValueError(f"{self.name}: parent '{self.derived_from}' is not a RawConcept")
 
         # Use parent.attributes for tuple length (works for all raw concept types)
         parent_tuple_len = len(parent.attributes)
@@ -525,7 +525,7 @@ class ParameterizedRawConcept(RawConcept):
         Uses apply_external_function and resolves parameters per row (closest in time).
         """
         repo = get_tak_repository()
-        parent = repo.get(self.parent_name)
+        parent = repo.get(self.derived_from)
         parent_rows = df[df["ConceptName"] == parent.name]
         if parent_rows.empty:
             return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
