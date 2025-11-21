@@ -7,6 +7,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .tak import TAK, validate_xml_against_schema
+from .utils import apply_external_function
+from .external_functions import REPO
+from .repository import get_tak_repository
 
 
 class RawConcept(TAK):
@@ -322,4 +325,232 @@ class RawConcept(TAK):
         out = out.sort_values("StartDateTime").reset_index(drop=True)
         
         logger.info("[%s] apply() end | output_rows=%d", self.name, len(out))
+        return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]
+
+
+class ParameterizedRawConcept(RawConcept):
+    """
+    ParameterizedRawConcept: Like RawConcept, but applies a chain of external functions
+    to the parent raw-concept's tuple, possibly using parameters.
+    Used to create dynamic calculated raw concepts based on existing ones.
+    """
+    def __init__(
+        self,
+        name: str,
+        categories: Tuple[str, ...],
+        description: str,
+        parent_name: str,
+        parent_idx_map: List[int],
+        parameters: List[Dict[str, Any]],
+        functions: List[Dict[str, Any]],
+        
+        # The following are inherited from parent after parsing:
+        concept_type: str,
+        attributes: List[Dict[str, Any]],
+        tuple_order: Tuple[str, ...],
+        merge_require_all: bool,
+    ):
+        super().__init__(
+            name=name,
+            categories=categories,
+            description=description,
+            concept_type=concept_type,
+            attributes=attributes,
+            tuple_order=tuple_order,
+            merge_require_all=merge_require_all
+        )
+        self.parent_name = parent_name
+        self.parent_idx_map = parent_idx_map
+        self.parameters = parameters
+        self.functions = functions
+
+    @classmethod
+    def parse(cls, xml_path: Union[str, Path]) -> "ParameterizedRawConcept":
+        xml_path = Path(xml_path)
+        validate_xml_against_schema(xml_path)
+        root = ET.parse(xml_path).getroot()
+        if root.tag != "parameterized-raw-concept":
+            raise ValueError(f"{xml_path} is not a parameterized-raw-concept file")
+
+        name = root.attrib["name"]
+        cats = tuple(s.strip() for s in (root.findtext("categories") or "").split(",") if s.strip())
+        desc = root.findtext("description") or ""
+
+        # Parse derived-from (must be single raw-concept)
+        df_el = root.find("derived-from")
+        if df_el is None or "name" not in df_el.attrib or "tak" not in df_el.attrib:
+            raise ValueError(f"{name}: <derived-from> must have name and tak")
+        parent_name = df_el.attrib["name"]
+        if df_el.attrib["tak"] != "raw-concept":
+            raise ValueError(f"{name}: <derived-from> must point to a raw-concept")
+        parent_idx_map = []
+        if "idx" in df_el.attrib:
+            parent_idx_map = [int(df_el.attrib["idx"])]
+        else:
+            parent_idx_map = None  # Will resolve after parent is loaded
+
+        # Parse parameters (optional, idx optional, default required)
+        parameters = []
+        params_el = root.find("parameters")
+        if params_el is not None:
+            for param_el in params_el.findall("parameter"):
+                param = {
+                    "name": param_el.attrib["name"],
+                    "tak": param_el.attrib["tak"],
+                    "idx": int(param_el.attrib["idx"]) if "idx" in param_el.attrib else 0,
+                    "ref": param_el.attrib["ref"],
+                    "default": param_el.attrib.get("default")
+                }
+                parameters.append(param)
+
+        # Parse functions (must exist, at least one, and value idx is required)
+        functions_el = root.find("functions")
+        if functions_el is None:
+            raise ValueError(f"{name}: <functions> block is required")
+        functions = []
+        for func_el in functions_el.findall("function"):
+            value_el = func_el.find("value")
+            if value_el is None or "idx" not in value_el.attrib:
+                raise ValueError(f"{name}: each <function> must have a <value idx='...'> child")
+            func = {
+                "name": func_el.attrib["name"],
+                "value_idx": int(value_el.attrib["idx"]),
+                "param_refs": [p.attrib["ref"] for p in func_el.findall("parameter")]
+            }
+            functions.append(func)
+        if not functions:
+            raise ValueError(f"{name}: must define at least one <function>")
+
+        # Parent attributes/tuple_order/etc. are inherited after repo is loaded
+        repo = get_tak_repository()
+        parent = repo.get(parent_name)
+        if not isinstance(parent, RawConcept):
+            raise ValueError(f"{name}: parent '{parent_name}' is not a RawConcept")
+        if parent_idx_map is None:
+            parent_idx_map = list(range(len(parent.tuple_order)))
+        # Inherit all structure from parent
+        concept_type = parent.concept_type
+        attributes = parent.attributes
+        tuple_order = parent.tuple_order
+        merge_require_all = parent.merge_require_all
+
+        obj = cls(
+            name=name,
+            categories=cats,
+            description=desc,
+            parent_name=parent_name,
+            parent_idx_map=parent_idx_map,
+            parameters=parameters,
+            functions=functions,
+            concept_type=concept_type,
+            attributes=attributes,
+            tuple_order=tuple_order,
+            merge_require_all=merge_require_all
+        )
+        obj.validate()
+        return obj
+
+    def validate(self) -> None:
+        """
+        Validate that:
+        - Parent exists and is a RawConcept
+        - For each parameter: TAK exists in repo OR default is provided
+        - All function names exist in REPO
+        - All function value_idx are valid for parent tuple
+        - Parameter idx is optional, default is required
+        """
+        repo = get_tak_repository()
+        parent = repo.get(self.parent_name)
+        if not isinstance(parent, RawConcept):
+            raise ValueError(f"{self.name}: parent '{self.parent_name}' is not a RawConcept")
+
+        # Use parent.attributes for tuple length (works for all raw concept types)
+        parent_tuple_len = len(parent.attributes)
+
+        for param in self.parameters:
+            tak = repo.get(param["name"])
+            if tak is None and param.get("default") is None:
+                raise ValueError(
+                    f"{self.name}: parameter TAK '{param['name']}' not found in TAK repository and no default provided"
+                )
+            if "idx" not in param:
+                param["idx"] = 0
+            if param.get("default") is None:
+                raise ValueError(
+                    f"{self.name}: parameter '{param['name']}' must have a default value (required if TAK is missing or no row is found)"
+                )
+
+        for func in self.functions:
+            func_name = func["name"]
+            value_idx = func["value_idx"]
+            if func_name not in REPO:
+                raise ValueError(f"{self.name}: function '{func_name}' not found in external functions")
+            if not (0 <= value_idx < parent_tuple_len):
+                raise ValueError(f"{self.name}: function '{func_name}' value_idx={value_idx} out of bounds for parent tuple size {parent_tuple_len}")
+
+    def _resolve_parameters_for_row(self, row, df):
+        """
+        For a given row, resolve parameter values by finding the closest-in-time parameter row,
+        or using default if not found. idx is optional (default 0). Default is always required.
+        """
+        resolved = {}
+        if not self.parameters:
+            return resolved
+        row_time = row["StartDateTime"]
+        for param in self.parameters:
+            param_rows = df[df["ConceptName"] == param["name"]].copy()
+            idx = param.get("idx", 0)
+            if not param_rows.empty:
+                # Find closest in time
+                param_rows["TimeDist"] = (param_rows["StartDateTime"] - row_time).abs()
+                closest_idx = param_rows["TimeDist"].idxmin()
+                val = param_rows.loc[closest_idx, "Value"]
+                if isinstance(val, tuple):
+                    val = val[idx]
+                resolved[param["ref"]] = val
+            else:
+                # Try to parse default as float if possible
+                default_val = param.get("default")
+                try:
+                    default_val = float(default_val)
+                except (TypeError, ValueError):
+                    pass
+                resolved[param["ref"]] = default_val
+        return resolved
+
+    def apply(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Apply: expects input df to contain all parent raw-concept output rows (with tuple Value)
+        and all parameter rows (if any). Applies function chain in-place on the tuple at the referenced idx.
+        Uses apply_external_function and resolves parameters per row (closest in time).
+        """
+        repo = get_tak_repository()
+        parent = repo.get(self.parent_name)
+        parent_rows = df[df["ConceptName"] == parent.name]
+        if parent_rows.empty:
+            return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+
+        out_rows = []
+        for _, row in parent_rows.iterrows():
+            tuple_val = list(row["Value"])  # mutable copy
+            param_values = self._resolve_parameters_for_row(row, df)
+            for func in self.functions:
+                func_name = func["name"]
+                value_idx = func["value_idx"]
+                param_refs = func["param_refs"]
+                args = [tuple_val[value_idx]]
+                for ref in param_refs:
+                    args.append(param_values.get(ref))
+                # Use apply_external_function instead of REPO directly
+                result = apply_external_function(func_name, *args)
+                tuple_val[value_idx] = result  # in-place update
+            out_rows.append({
+                "PatientId": row["PatientId"],
+                "ConceptName": self.name,
+                "StartDateTime": row["StartDateTime"],
+                "EndDateTime": row["EndDateTime"],
+                "Value": tuple(tuple_val),
+                "AbstractionType": self.family
+            })
+        out = pd.DataFrame(out_rows)
         return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]

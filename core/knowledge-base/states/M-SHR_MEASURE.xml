@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="M-SHR_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the M-SHR ratio measurements</description>
+    <derived-from name="M-SHR_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="24h" interpolate="true" max-skip="1"/>
+
+    <abstraction-rules>
+        <rule value="Very Low" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="0.6"/>
+            </attribute>
+        </rule>
+        <rule value="Very Low" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0.6" max="0.85"/>
+            </attribute>
+        </rule>
+        <rule value="Stable" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0.85" max="1.15"/>
+            </attribute>
+        </rule>
+        <rule value="High" operator="and">
+            <attribute idx="0">
+                <allowed-value min="1.15" max="1.4"/>
+            </attribute>
+        </rule>
+        <rule value="Very High" operator="and">
+            <attribute idx="0">
+                <allowed-value min="1.4"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>

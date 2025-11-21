@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 from .tak.tak import TAK
 from .tak.repository import TAKRepository, set_tak_repository
-from .tak.raw_concept import RawConcept
+from .tak.raw_concept import RawConcept, ParameterizedRawConcept
 from .tak.event import Event
 from .tak.state import State
 from .tak.trend import Trend
@@ -168,13 +168,15 @@ class Mediator:
         set_tak_repository(repo)
         
         # Load TAKs in dependency order with progress tracking
+        # Must ensure dependencies are loaded before dependents, so order is important
         phases = [
             ("Raw Concepts", self.kb_path / "raw-concepts", RawConcept, self.raw_concepts),
+            ("Parameterized Raw Concepts", self.kb_path / "parameterized-raw-concepts", ParameterizedRawConcept, self.raw_concepts),
             ("Events", self.kb_path / "events", Event, self.events),
             ("States", self.kb_path / "states", State, self.states),
             ("Trends", self.kb_path / "trends", Trend, self.trends),
             ("Contexts", self.kb_path / "contexts", Context, self.contexts),
-            ("Patterns", self.kb_path / "patterns", LocalPattern, self.patterns)  # CHANGED: Pattern → LocalPattern
+            ("Patterns", self.kb_path / "patterns", LocalPattern, self.patterns)
         ]
         
         total_files = sum(len(list(path.glob("*.xml"))) for _, path, _, _ in phases if path.exists())
@@ -322,7 +324,7 @@ class Mediator:
             DataFrame ready for tak.apply()
         """
         # BASE CASE: RawConcept
-        if isinstance(tak, RawConcept):
+        if isinstance(tak, RawConcept) and not isinstance(tak, ParameterizedRawConcept):
             # Check cache (if TAK was already applied)
             if tak.name in tak_outputs:
                 return tak_outputs[tak.name]
@@ -340,6 +342,14 @@ class Mediator:
                     f"This indicates incorrect execution order."
                 )
             return tak_outputs[dep_name].copy()
+        
+        # CASE: ParameterizedRawConcept → derived_from + parameters
+        if isinstance(tak, ParameterizedRawConcept):
+            dfs = [get_cached_dependency(spec["name"]) for spec in tak.derived_from + tak.parameters]
+            dfs = [df for df in dfs if not df.empty]
+            if not dfs:
+                return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
+            return pd.concat(dfs, ignore_index=True)
         
         # CASE: Event → derived_from is list of RawConcepts
         if isinstance(tak, Event):

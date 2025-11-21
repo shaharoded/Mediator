@@ -5,7 +5,8 @@ import pandas as pd
 import pytest
 from pathlib import Path
 
-from core.tak.raw_concept import RawConcept
+from core.tak.raw_concept import RawConcept, ParameterizedRawConcept
+from core.tak.repository import set_tak_repository, TAKRepository
 from unittests.test_utils import write_xml, make_ts  # FIXED: correct import path
 
 
@@ -79,6 +80,43 @@ RAW_BOOLEAN_XML = """\
   <attributes>
     <attribute name="ADMISSION" type="boolean"/>
   </attributes>
+</raw-concept>
+"""
+
+PARAM_RAW_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="M-SHR_MEASURE">
+    <categories>Measurements</categories>
+    <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    <parameters>
+        <parameter name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="P1" default="120"/>
+    </parameters>
+    <functions>
+        <function name="div">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+        </function>
+    </functions>
+</parameterized-raw-concept>
+"""
+
+RAW_GLUCOSE_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="GLUCOSE_MEASURE" concept-type="raw-numeric">
+  <categories>Measurements</categories>
+  <description>Glucose numeric measure</description>
+  <attributes>
+    <attribute name="GLUCOSE_LAB_MEASURE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="600"/>
+      </numeric-allowed-values>
+    </attribute>
+  </attributes>
+  <tuple-order>
+    <attribute name="GLUCOSE_LAB_MEASURE"/>
+  </tuple-order>
+  <merge require-all="false"/>
 </raw-concept>
 """
 
@@ -219,3 +257,140 @@ def test_apply_raw_merge_same_timestamp(tmp_path: Path):
     assert out.iloc[1]["StartDateTime"] == make_ts("09:00")
     
     print("\n✅ Exact-timestamp merge works correctly")
+
+
+def test_parse_parameterized_raw_concept(tmp_path: Path):
+    """Test parsing of parameterized-raw-concept XML."""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", PARAM_RAW_XML)
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+    assert tak.name == "M-SHR_MEASURE"
+    assert tak.parent_name == "GLUCOSE_MEASURE"
+    assert len(tak.parameters) == 1
+    assert len(tak.functions) == 1
+
+
+def test_apply_parameterized_raw_concept(tmp_path: Path):
+    """Test apply logic for parameterized-raw-concept."""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", PARAM_RAW_XML)
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+    # Simulate input: two glucose measurements, one as parameter
+    df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
+        (1, "FIRST_GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    out = tak.apply(df)
+    assert len(out) == 1
+    # Should compute 100 / 50 = 2.0
+    assert out.iloc[0]["Value"][0] == 2.0
+    assert out.iloc[0]["ConceptName"] == "M-SHR_MEASURE"
+
+
+def test_apply_parameterized_raw_concept_with_default_param(tmp_path: Path):
+    """Test apply logic for parameterized-raw-concept with missing param (uses default)."""
+    # Ensure the parameter has a default value in the XML
+    param_raw_xml_default = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="M-SHR_MEASURE">
+    <categories>Measurements</categories>
+    <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    <parameters>
+        <parameter name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="P1" default="25"/>
+    </parameters>
+    <functions>
+        <function name="div">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+        </function>
+    </functions>
+</parameterized-raw-concept>
+"""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml_default)
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+    # Simulate input: only main value, no param row
+    df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    out = tak.apply(df)
+    assert len(out) == 1
+    # Should compute 100 / 25 = 4.0
+    assert out.iloc[0]["Value"][0] == 4.0
+    assert out.iloc[0]["ConceptName"] == "M-SHR_MEASURE"
+
+
+def test_apply_parameterized_raw_concept_with_param_row(tmp_path: Path):
+    """Test apply logic for parameterized-raw-concept with param row present (should use row, not default)."""
+    param_raw_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="M-SHR_MEASURE">
+    <categories>Measurements</categories>
+    <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    <parameters>
+        <parameter name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="P1" default="25"/>
+    </parameters>
+    <functions>
+        <function name="div">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+        </function>
+    </functions>
+</parameterized-raw-concept>
+"""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml)
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+    # Simulate input: main value and param row (param row should be used, not default)
+    df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
+        (1, "FIRST_GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    out = tak.apply(df)
+    assert len(out) == 1
+    # Should compute 100 / 50 = 2.0 (uses param row, not default)
+    assert out.iloc[0]["Value"][0] == 2.0
+    assert out.iloc[0]["ConceptName"] == "M-SHR_MEASURE"
+
+
+def test_parameterized_raw_concept_output_shape(tmp_path: Path):
+    """Test that ParameterizedRawConcept output shape matches parent raw concept output (excluding parameter rows)."""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", PARAM_RAW_XML)
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    parent = RawConcept.parse(glucose_path)
+    repo.register(parent)
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+    # Use scalar for parent input, tuple for parameterized
+    parent_input = pd.DataFrame([
+        (1, "GLUCOSE_LAB_MEASURE", make_ts("08:00"), make_ts("08:00"), 100),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    parent_out = parent.apply(parent_input).reset_index(drop=True)
+    df_in = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
+        (1, "FIRST_GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    tak_out = tak.apply(df_in).reset_index(drop=True)
+    assert tak_out.shape[0] == parent_out.shape[0]
+    for col in ["PatientId", "StartDateTime", "EndDateTime"]:
+        assert all(parent_out[col].values == tak_out[col].values)

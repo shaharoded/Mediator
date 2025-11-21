@@ -10,7 +10,7 @@ from core.tak.raw_concept import RawConcept
 from core.tak.repository import set_tak_repository, TAKRepository
 from core.tak.utils import parse_duration
 from core.tak.event import Event
-from unittests.test_utils import write_xml, make_ts  # FIXED: correct import path
+from unittests.test_utils import write_xml, make_ts
 
 
 # -----------------------------
@@ -580,3 +580,109 @@ def test_state_apply_extracts_value_for_single_attribute_no_rules(repo_with_gluc
     assert len(df_out) == 2
     assert df_out.iloc[0]["Value"] == "Severe hypoglycemia"
     assert df_out.iloc[1]["Value"] == "Normal glucose"
+
+
+def test_state_from_parameterized_raw_concept(tmp_path: Path):
+    """Test State derived from a ParameterizedRawConcept (e.g., M-SHR_MEASURE_STATE)."""
+    # Parameterized raw concept XML (as in your previous tests)
+    param_raw_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="M-SHR_MEASURE">
+    <categories>Measurements</categories>
+    <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    <parameters>
+        <parameter name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="P1" default="120"/>
+    </parameters>
+    <functions>
+        <function name="div">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+        </function>
+    </functions>
+</parameterized-raw-concept>
+"""
+    # State XML for M-SHR_MEASURE_STATE (as in your KB)
+    state_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="M-SHR_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the M-SHR ratio measurements</description>
+    <derived-from name="M-SHR_MEASURE" tak="raw-concept"/>
+    <persistence good-after="24h" interpolate="true" max-skip="1"/>
+    <abstraction-rules>
+        <rule value="Very Low" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="0.6"/>
+            </attribute>
+        </rule>
+        <rule value="Very Low" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0.6" max="0.85"/>
+            </attribute>
+        </rule>
+        <rule value="Stable" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0.85" max="1.15"/>
+            </attribute>
+        </rule>
+        <rule value="High" operator="and">
+            <attribute idx="0">
+                <allowed-value min="1.15" max="1.4"/>
+            </attribute>
+        </rule>
+        <rule value="Very High" operator="and">
+            <attribute idx="0">
+                <allowed-value min="1.4"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>
+"""
+    # Raw concept for glucose (parent of parameterized)
+    raw_glucose_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="GLUCOSE_MEASURE" concept-type="raw-numeric">
+  <categories>Measurements</categories>
+  <description>Glucose numeric measure</description>
+  <attributes>
+    <attribute name="GLUCOSE_LAB_MEASURE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="600"/>
+      </numeric-allowed-values>
+    </attribute>
+  </attributes>
+  <tuple-order>
+    <attribute name="GLUCOSE_LAB_MEASURE"/>
+  </tuple-order>
+  <merge require-all="false"/>
+</raw-concept>
+"""
+    # Write XMLs
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", raw_glucose_xml)
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml)
+    state_path = write_xml(tmp_path, "M-SHR_MEASURE_STATE.xml", state_xml)
+    # Build repo
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    from core.tak.raw_concept import ParameterizedRawConcept
+    repo.register(ParameterizedRawConcept.parse(param_path))
+    from core.tak.state import State
+    state_tak = State.parse(state_path)
+    repo.register(state_tak)
+    # Simulate input: glucose and param (first glucose measure)
+    df_in = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
+        (1, "FIRST_GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    # Apply parameterized raw concept
+    param_tak = repo.get("M-SHR_MEASURE")
+    df_param = param_tak.apply(df_in)
+    # Apply state
+    df_state = state_tak.apply(df_param)
+    assert len(df_state) == 1
+    # 100/50 = 2.0 → "Very High"
+    assert df_state.iloc[0]["Value"] == "Very High"
+    assert df_state.iloc[0]["StartDateTime"] == make_ts("08:00")
+    assert df_state.iloc[0]["EndDateTime"] == make_ts("08:00", day=1)  # 24h window

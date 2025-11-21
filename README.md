@@ -52,7 +52,7 @@ Mediator/
 │   ├── tak/                                # TAK implementation
 │   │   ├── tak.py                          # Base classes + tak rules
 │   │   ├── repository.py                   # TAK repository object + functions
-│   │   ├── raw_concept.py                  # RawConcept TAK
+│   │   ├── raw_concept.py                  # RawConcept + ParameterizedRawConcept TAK
 │   │   ├── event.py                        # Event TAK
 │   │   ├── state.py                        # State TAK
 │   │   ├── trend.py                        # Trend TAK

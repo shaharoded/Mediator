@@ -5,11 +5,12 @@
 2. [Data Assumptions & Process](#data-assumptions--process)
 3. [TAK Families](#tak-families)
    - [Raw Concepts](#1-raw-concepts)
-   - [Events](#2-events)
-   - [States](#3-states)
-   - [Trends](#4-trends)
-   - [Contexts](#5-contexts)
-   - [Patterns (Local)](#6-patterns-local)
+   - [Parameterized Raw Concepts](#2-parameterized-raw-concepts)
+   - [Events](#3-events)
+   - [States](#4-states)
+   - [Trends](#5-trends)
+   - [Contexts](#6-contexts)
+   - [Patterns (Local)](#7-patterns-local)
 4. [XML Schema Reference](#xml-schema-reference)
 5. [Algorithms & Implementation](#algorithms--implementation)
 6. [Validation Rules](#validation-rules)
@@ -233,7 +234,39 @@ This TAK knowledge base was developed for analyzing diabetes management during h
 
 ---
 
-### 2. Events
+### 2. Parameterized Raw Concepts
+
+**Purpose:**  
+Parameterized Raw Concepts allow you to define a new raw concept as a function of an existing raw concept and one or more parameters (such as the first value of another measurement, or a patient-specific attribute). This enables dynamic calculation of derived values at the raw abstraction level, before higher-level abstractions like events, states, or patterns.
+
+**Key Features:**
+- **Derived-from:** References a parent raw concept (e.g., GLUCOSE_MEASURE).
+- **Parameters:** References additional raw concepts or constants, resolved per patient and per row (e.g., FIRST_GLUCOSE_MEASURE, WEIGHT_MEASURE).
+- **Functions:** Specifies how to combine the parent value and parameters using a named function (e.g., division, multiplication).
+- **Default values:** Each parameter must have a default value, used if no matching row is found for the patient.
+
+**Algorithm:**
+1. For each row of the parent raw concept, resolve parameter values:
+    - If a matching parameter row exists (by name and closest in time), use its value.
+    - Otherwise, use the parameter's default value.
+2. Apply the specified function (e.g., `div`) to the parent value and parameter(s).
+3. Emit a new row with the result as the value, and the same temporal columns as the parent.
+
+**Output:**  
+A DataFrame with the same shape and columns as the parent raw concept, but with the modified value in-place.
+
+**Use Cases:**
+- Calculating ratios (e.g., glucose divided by first glucose measurement)
+- Normalizing measurements by patient-specific attributes (e.g., dosage per kg)
+- Any derived raw value that can be expressed as a function of other raw values and parameters
+
+**Notes:**
+- Parameterized raw concepts are resolved and emitted before events, states, trends, contexts, and patterns.
+- All parameters must have a default value to ensure robust calculation.
+- Functions are extensible and can be registered in the external functions module.
+---
+
+### 3. Events
 
 **Purpose:** Point-in-time occurrences derived from one or more raw-concepts.
 
@@ -262,7 +295,7 @@ This TAK knowledge base was developed for analyzing diabetes management during h
 
 ---
 
-### 3. States
+### 4. States
 
 **Purpose:** Symbolic intervals derived from numeric/nominal concepts via discretization.
 
@@ -290,7 +323,7 @@ This TAK knowledge base was developed for analyzing diabetes management during h
 
 ---
 
-### 4. Trends
+### 5. Trends
 
 **Purpose:** Compute local slopes (Increasing/Decreasing/Steady) over time windows.
 
@@ -329,7 +362,7 @@ This TAK knowledge base was developed for analyzing diabetes management during h
 
 ---
 
-### 5. Contexts
+### 6. Contexts
 
 **Purpose:** Background facts with interval windowing and clipping (similar to Events with temporal extension).
 
@@ -360,7 +393,7 @@ NOTE: If 2 contexts's windows overlap, the later one automatically clips the ear
 
 ---
 
-### 6. Patterns (Local)
+### 7. Patterns (Local)
 
 **Purpose:** Detect complex temporal relationships between multiple TAKs with optional fuzzy compliance scoring.
 
@@ -519,6 +552,17 @@ y → years (365 days)
     <attributes>...</attributes>
     <tuple-order>...</tuple-order>  <!-- BEFORE merge -->
     <merge require-all="..."/>
+</raw-concept>
+```
+
+#### Parameterized Raw Concepts
+```xml
+<raw-concept name="...">
+    <categories>...</categories>
+    <description>...</description>
+    <derived-from name="..." tak="..."/>         <!-- Single TAK reference, no idx -->
+    <parameters>...</parameters>
+    <functions>...</functions>
 </raw-concept>
 ```
 
@@ -702,6 +746,15 @@ else:
 - ✅ Nominal attributes have non-empty allowed values
 - ✅ Numeric attributes have valid ranges (min < max)
 - ✅ `tuple-order` lists exactly all declared attributes (for `concept-type="raw"`)
+
+#### Parameterized Raw Concepts
+- ✅ The parent TAK referenced in `<derived-from>` must exist and be a raw concept.
+- ✅ All parameters in `<parameters>` must reference valid TAKs or constants and have a `default` value.
+- ✅ Each `<function>` must reference valid indices and parameter refs.
+- ✅ The function name in `<function name="...">` must be registered and available.
+- ✅ No duplicate parameter refs or names.
+- ✅ Output shape and columns must match the parent raw concept (except for ConceptName/Value).
+- ✅ All parameterized raw concepts must be registered before any TAKs that depend on them (e.g., states, events).
 
 #### Events/Contexts
 - ✅ Derived-from TAKs exist and are RawConcepts
@@ -984,9 +1037,44 @@ PatientId | ConceptName  | StartDateTime       | Value                | Abstract
 1000      | BASAL_BITZUA | 2024-01-01 21:00:00 | (15, SubCutaneous)   | raw-concept
 ```
 
+### Example 2: Raw Concept (Parameterized)
+
+**File:** `parameterized-raw-concepts/M-SHR_MEASURE.xml`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="M-SHR_MEASURE">
+    <categories>Measurements</categories>
+    <description>Measurement of M-SHR ratio (glucose / first glucose measure)</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    <parameters>
+        <parameter name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="P1" default="120"/>
+    </parameters>
+    <functions>
+        <function name="div">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+        </function>
+    </functions>
+</parameterized-raw-concept>
+```
+
+**Input from cache:**
+```
+PatientId | ConceptName           | StartDateTime       | Value
+1000      | GLUCOSE_MEASURE       | 2024-01-01 08:00:00 | (100,)
+1000      | FIRST_GLUCOSE_MEASURE | 2024-01-01 07:00:00 | (50,)
+```
+
+**OutputPatientData:**
+```
+PatientId | ConceptName     | StartDateTime       | Value   | AbstractionType
+1000      | M-SHR_MEASURE   | 2024-01-01 08:00:00 | (2.0,)  | raw-concept
+```
+
 ---
 
-### Example 2: Event (Multi-Source with OR logic)
+### Example 3: Event (Multi-Source with OR logic)
 
 **File:** `events/DISGLYCEMIA.xml`
 
@@ -1018,7 +1106,7 @@ PatientId | ConceptName  | StartDateTime       | Value                | Abstract
 
 ---
 
-### Example 3: State (Discretization + Merging)
+### Example 4: State (Discretization + Merging)
 
 **File:** `states/GLUCOSE_MEASURE.xml`
 
@@ -1060,7 +1148,7 @@ StartDateTime | EndDateTime | Value
 
 ---
 
-### Example 4: Trend (Slope-Based)
+### Example 5: Trend (Slope-Based)
 
 **File:** `trends/GLUCOSE_MEASURE.xml`
 
@@ -1100,7 +1188,7 @@ StartDateTime | EndDateTime | Value
 
 ---
 
-### Example 5: Context (Windowing + Clipping)
+### Example 6: Context (Windowing + Clipping)
 
 **File:** `contexts/BASAL_BITZUA.xml`
 
@@ -1150,7 +1238,7 @@ StartDateTime | EndDateTime
 21:00         | 05:00  (clipped by DEATH event)
 ```
 
-### Example 6: Pattern (Glucose Measure on Admission)
+### Example 7: Pattern (Glucose Measure on Admission)
 
 **File:** `patterns/GLUCOSE_MEASURE_ON_ADMISSION.xml`
 
@@ -1252,7 +1340,7 @@ Output:
 
 ---
 
-### Example 7: Pattern with Value Compliance (Insulin Dosage)
+### Example 8: Pattern with Value Compliance (Insulin Dosage)
 
 **File:** `patterns/INSULIN_ON_ADMISSION.xml`
 

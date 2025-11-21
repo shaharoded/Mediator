@@ -563,4 +563,62 @@
         </xs:complexType>
     </xs:element>
     
+    <!-- ========================= -->
+    <!-- Parameterized Raw Concept TAK -->
+    <!-- ========================= -->
+    <xs:element name="parameterized-raw-concept">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="categories" type="xs:string"/>
+                <xs:element name="description" type="xs:string"/>
+                <xs:element name="derived-from">
+                    <xs:complexType>
+                        <xs:attribute name="name" type="xs:string" use="required"/>
+                        <xs:attribute name="tak" type="xs:string" use="required"/>
+                        <xs:attribute name="idx" type="xs:nonNegativeInteger" use="optional"/>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="parameters" minOccurs="0">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="parameter" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:attribute name="name" type="xs:string" use="required"/>
+                                    <xs:attribute name="tak" type="xs:string" use="required"/>
+                                    <xs:attribute name="idx" type="xs:nonNegativeInteger" use="optional"/>
+                                    <xs:attribute name="ref" type="xs:string" use="required"/>
+                                    <xs:attribute name="default" type="xs:string" use="required"/>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="functions">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="function" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:sequence>
+                                        <xs:element name="value">
+                                            <xs:complexType>
+                                                <xs:attribute name="idx" type="xs:nonNegativeInteger" use="required"/>
+                                            </xs:complexType>
+                                        </xs:element>
+                                        <xs:element name="parameter" minOccurs="0" maxOccurs="unbounded">
+                                            <xs:complexType>
+                                                <xs:attribute name="ref" type="xs:string" use="required"/>
+                                            </xs:complexType>
+                                        </xs:element>
+                                    </xs:sequence>
+                                    <xs:attribute name="name" type="xs:string" use="required"/>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+            </xs:sequence>
+            <xs:attribute name="name" type="xs:string" use="required"/>
+        </xs:complexType>
+    </xs:element>
+    
 </xs:schema>
