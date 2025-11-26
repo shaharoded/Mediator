@@ -5,23 +5,28 @@
     <derived-from name="BICARBONATE_MEASURE" tak="raw-concept"/>
 
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-after="8h" interpolate="true" max-skip="1"/>
+    <persistence good-after="48h" interpolate="true" max-skip="1"/>
 
     <!-- Discretize and abstract -->
     <abstraction-rules>
-        <rule value="Low" operator="and">
+        <rule value="Severe Acidosis" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="22"/>
+                <allowed-value min="0" max="15"/>
+            </attribute>
+        </rule>
+        <rule value="Moderate Acidosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="15" max="22"/>
             </attribute>
         </rule>
         <rule value="Normal" operator="and">
             <attribute idx="0">
-                <allowed-value min="22" max="26"/>
+                <allowed-value min="22" max="28"/>
             </attribute>
         </rule>
-        <rule value="High" operator="and">
+        <rule value="Alkalosis" operator="and">
             <attribute idx="0">
-                <allowed-value min="26"/>
+                <allowed-value min="28"/>
             </attribute>
         </rule>
     </abstraction-rules>

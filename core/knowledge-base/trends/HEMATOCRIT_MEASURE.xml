@@ -2,12 +2,12 @@
 <trend name="HEMATOCRIT_MEASURE_TREND">
     <categories>Measurements</categories>
     <description>Trend for the measurements of HEMATOCRIT</description>
-    <derived-from name="HEMATOCRIT_MEASURE" tak="raw-concept" idx="0" significant-variation="5"/>
+    <derived-from name="HEMATOCRIT_MEASURE" tak="raw-concept" idx="0" significant-variation="3"/>
 
     <!-- Each point will be classified as either "steady" or "changing" based on this window -->
-    <time-steady value="12h"/>
+    <time-steady value="48h"/>
 
     <!-- maximum difference between consecutive points to merge if both has the same classification -->
-    <persistence good-after="24h"/>
+    <persistence good-after="72h"/>
 
 </trend>

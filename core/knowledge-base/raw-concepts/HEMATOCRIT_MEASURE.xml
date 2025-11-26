@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="HEMATOCRIT_MEASURE" concept-type="raw-numeric">
     <categories>Measurements</categories>
-    <description>Raw concept to manage the measurement of HEMATOCRIT</description>
+    <description>Raw concept to manage the measurement of HEMATOCRIT in units of %</description>
     <attributes>
         <attribute name="HEMATOCRIT_MEASURE" type="numeric">
             <numeric-allowed-values>

@@ -5,13 +5,18 @@
     <derived-from name="POTASSIUM_MEASURE" tak="raw-concept"/>
 
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-after="8h" interpolate="true" max-skip="1"/>
+    <persistence good-after="24h" interpolate="true" max-skip="1"/>
 
     <!-- Discretize and abstract -->
     <abstraction-rules>
         <rule value="Severe Hypokalemia" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="3.0"/>
+                <allowed-value min="0" max="2.5"/>
+            </attribute>
+        </rule>
+        <rule value="Moderate Hypokalemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="2.5" max="3.0"/>
             </attribute>
         </rule>
         <rule value="Mild Hypokalemia" operator="and">
@@ -24,9 +29,19 @@
                 <allowed-value min="3.5" max="5.0"/>
             </attribute>
         </rule>
-        <rule value="Hyperkalemia" operator="and">
+        <rule value="Mild Hyperkalemia" operator="and">
             <attribute idx="0">
-                <allowed-value min="5.0"/>
+                <allowed-value min="5.0" max="5.5"/>
+            </attribute>
+        </rule>
+        <rule value="Moderate Hyperkalemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="5.5" max="6.0"/>
+            </attribute>
+        </rule>
+        <rule value="Severe Hyperkalemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="6.0"/>
             </attribute>
         </rule>
     </abstraction-rules>

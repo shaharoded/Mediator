@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<trend name="PLT_MEASURE_TREND">
+<trend name="INFECTION_WBC_MEASURE_TREND">
     <categories>Measurements</categories>
-    <description>Trend for the measurements of PLT</description>
-    <derived-from name="PLT_MEASURE" tak="raw-concept" idx="0" significant-variation="50"/>
+    <description>Trend for the measurements of WHITE BLOOD CELLS for infection determination (using LEUKOCYTES in 10³/µL units)</description>
+    <derived-from name="INFECTION_WBC_MEASURE" tak="raw-concept" idx="0" significant-variation="3"/>
 
     <!-- Each point will be classified as either "steady" or "changing" based on this window -->
     <time-steady value="48h"/>
 
     <!-- maximum difference between consecutive points to merge if both has the same classification -->
-    <persistence good-after="96h"/>
+    <persistence good-after="72h"/>
 
 </trend>

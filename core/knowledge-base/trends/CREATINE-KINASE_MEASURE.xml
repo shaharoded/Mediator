@@ -2,7 +2,7 @@
 <trend name="CREATINE-KINASE_MEASURE_TREND">
     <categories>Measurements</categories>
     <description>Trend for the measurements of CREATINE-KINASE</description>
-    <derived-from name="CREATINE-KINASE_MEASURE" tak="raw-concept" idx="0" significant-variation="300"/>
+    <derived-from name="CREATINE-KINASE_MEASURE" tak="raw-concept" idx="0" significant-variation="1000"/>
 
     <!-- Each point will be classified as either "steady" or "changing" based on this window -->
     <time-steady value="24h"/>

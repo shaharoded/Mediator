@@ -11,12 +11,12 @@
     <abstraction-rules>
         <rule value="Severe Neutropenia" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="0.5"/>
+                <allowed-value min="0" max="1.0"/>
             </attribute>
         </rule>
         <rule value="Mild Neutropenia" operator="and">
             <attribute idx="0">
-                <allowed-value min="0.5" max="1.5"/>
+                <allowed-value min="1.0" max="1.5"/>
             </attribute>
         </rule>
         <rule value="Normal" operator="and">
@@ -24,17 +24,17 @@
                 <allowed-value min="1.5" max="7.5"/>
             </attribute>
         </rule>
-        <rule value="Moderate" operator="and">
+        <rule value="Mild Neutrophilia" operator="and">
             <attribute idx="0">
-                <allowed-value min="7.5" max="10"/>
+                <allowed-value min="7.5" max="12"/>
             </attribute>
         </rule>
-        <rule value="Severe" operator="and">
+        <rule value="Moderate Neutrophilia" operator="and">
             <attribute idx="0">
-                <allowed-value min="10" max="20"/>
+                <allowed-value min="12" max="20"/>
             </attribute>
         </rule>
-        <rule value="Extreme" operator="and">
+        <rule value="Severe Neutrophilia" operator="and">
             <attribute idx="0">
                 <allowed-value min="20"/>
             </attribute>

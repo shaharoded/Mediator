@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="ALBUMIN_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of ALBUMIN by serum, excluding ratio units</description>
+    <derived-from name="ALBUMIN_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="7d" interpolate="true" max-skip="1"/>
+
+    <!-- Discretize and abstract -->
+    <abstraction-rules>
+        <rule value="Severe Hypoalbuminemia" operator="and">
+            <attribute idx="0">
+                <allowed-value max="2.5"/>
+            </attribute>
+        </rule>
+        <rule value="Moderate Hypoalbuminemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="2.5" max="3"/>
+            </attribute>
+        </rule>
+        <rule value="Mild hypoalbuminemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="3" max="3.5"/>
+            </attribute>
+        </rule>
+        <rule value="Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="3.5"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>

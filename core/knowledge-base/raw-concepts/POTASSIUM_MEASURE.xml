@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="POTASSIUM_MEASURE" concept-type="raw-numeric">
     <categories>Measurements</categories>
-    <description>Raw concept to manage the measurement of POTASSIUM</description>
+    <description>Raw concept to manage the measurement of blood POTASSIUM (K⁺) in units of mmol/L</description>
     <attributes>
         <attribute name="POTASSIUM_MEASURE" type="numeric">
             <numeric-allowed-values>

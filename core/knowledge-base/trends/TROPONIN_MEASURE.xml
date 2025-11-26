@@ -2,12 +2,12 @@
 <trend name="TROPONIN_MEASURE_TREND">
     <categories>Measurements</categories>
     <description>Trend for the measurements of TROPONIN</description>
-    <derived-from name="TROPONIN_MEASURE" tak="raw-concept" idx="0" significant-variation="100"/>
+    <derived-from name="TROPONIN_MEASURE" tak="raw-concept" idx="0" significant-variation="5"/>
 
     <!-- Each point will be classified as either "steady" or "changing" based on this window -->
     <time-steady value="6h"/>
 
     <!-- maximum difference between consecutive points to merge if both has the same classification -->
-    <persistence good-after="9h"/>
+    <persistence good-after="24h"/>
 
 </trend>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="INFECTION_WBC_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of WHITE BLOOD CELLS for infection determination</description>
+    <derived-from name="INFECTION_WBC_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="72h" interpolate="true" max-skip="1"/>
+
+    <!-- Discretize and abstract -->
+    <abstraction-rules>
+        <rule value="Severe Leukopenia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="2"/>
+            </attribute>
+        </rule>
+        <rule value="Mild Leukopenia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="2" max="4"/>
+            </attribute>
+        </rule>
+        <rule value="Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="4" max="11"/>
+            </attribute>
+        </rule>
+        <rule value="Mild Leukocytosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="11" max="20"/>
+            </attribute>
+        </rule>
+        <rule value="Severe Leukocytosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="20" max="40"/>
+            </attribute>
+        </rule>
+        <rule value="Extreme Leukocytosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="40"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>

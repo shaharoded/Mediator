@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="WEIGHT_MEASURE" concept-type="raw-numeric">
     <categories>Measurements</categories>
-    <description>Raw concept for measurement of WEIGHT, used to assess proper medication dosages</description>
+    <description>Raw concept for measurement of WEIGHT (in KG), used to assess proper medication dosages</description>
     <attributes>
         <attribute name="WEIGHT_MEASURE" type="numeric">
             <numeric-allowed-values>

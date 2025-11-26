@@ -2,12 +2,12 @@
 <trend name="KETONES_SERUM_MEASURE_TREND">
     <categories>Measurements</categories>
     <description>Trend for the measurements of KETONES_SERUM</description>
-    <derived-from name="KETONES_SERUM_MEASURE" tak="raw-concept" idx="0" significant-variation="15"/>
+    <derived-from name="KETONES_SERUM_MEASURE" tak="raw-concept" idx="0" significant-variation="3"/>
 
     <!-- Each point will be classified as either "steady" or "changing" based on this window -->
-    <time-steady value="6h"/>
+    <time-steady value="24"/>
 
     <!-- maximum difference between consecutive points to merge if both has the same classification -->
-    <persistence good-after="12h"/>
+    <persistence good-after="48h"/>
 
 </trend>

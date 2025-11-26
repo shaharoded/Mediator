@@ -2,12 +2,12 @@
 <trend name="POTASSIUM_MEASURE_TREND">
     <categories>Measurements</categories>
     <description>Trend for the measurements of POTASSIUM</description>
-    <derived-from name="POTASSIUM_MEASURE" tak="raw-concept" idx="0" significant-variation="0.5"/>
+    <derived-from name="POTASSIUM_MEASURE" tak="raw-concept" idx="0" significant-variation="0.3"/>
 
     <!-- Each point will be classified as either "steady" or "changing" based on this window -->
-    <time-steady value="6h"/>
+    <time-steady value="12h"/>
 
     <!-- maximum difference between consecutive points to merge if both has the same classification -->
-    <persistence good-after="8h"/>
+    <persistence good-after="24h"/>
 
 </trend>

@@ -4,7 +4,7 @@
     <description>Captures if DEX was preformed within resonable time of admission</description>
     <derived-from>
         <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
-        <attribute name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="BASE_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
         <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
     </derived-from>
  

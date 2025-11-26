@@ -1,32 +1,37 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <state name="KETONES_SERUM_MEASURE_STATE">
     <categories>Measurements</categories>
-    <description>Abstraction for the measurements of KETONES (by Serum)</description>
+    <description>Abstraction for the measurements of KETONES (by Serum) in mg/dL units</description>
     <derived-from name="KETONES_SERUM_MEASURE" tak="raw-concept"/>
 
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-after="12h" interpolate="true" max-skip="1"/>
+    <persistence good-after="48h" interpolate="true" max-skip="1"/>
 
     <!-- Discretize and abstract -->
     <abstraction-rules>
         <rule value="Normal" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="10"/>
+                <allowed-value min="0" max="6.25"/>
             </attribute>
         </rule>
-        <rule value="Mild Ketosis" operator="and">
+        <rule value="Mild Ketonemia" operator="and">
             <attribute idx="0">
-                <allowed-value min="10" max="30"/>
+                <allowed-value min="6.25" max="15.6"/>
             </attribute>
         </rule>
-        <rule value="Ketosis" operator="and">
+        <rule value="Moderate Ketonemia" operator="and">
             <attribute idx="0">
-                <allowed-value min="30" max="80"/>
+                <allowed-value min="15.6" max="31.2"/>
             </attribute>
         </rule>
-        <rule value="Severe Ketosis" operator="and">
+        <rule value="High Ketones" operator="and">
             <attribute idx="0">
-                <allowed-value min="80"/>
+                <allowed-value min="31.2" max="62.4"/>
+            </attribute>
+        </rule>
+        <rule value="Critical Ketones" operator="and">
+            <attribute idx="0">
+                <allowed-value min="62.4"/>
             </attribute>
         </rule>
     </abstraction-rules>

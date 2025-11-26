@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="HEART_RATE_MEASURE" concept-type="raw-numeric">
     <categories>Measurements</categories>
-    <description>Raw concept to manage the measurement of HEART_RATE</description>
+    <description>Raw concept to manage the measurement of HEART_RATE in units of BpM</description>
     <attributes>
         <attribute name="HEART_RATE_MEASURE" type="numeric">
             <numeric-allowed-values>
-                <allowed-value min="0" max="250"/>
+                <allowed-value min="0" max="280"/>
             </numeric-allowed-values>
         </attribute>
     </attributes>

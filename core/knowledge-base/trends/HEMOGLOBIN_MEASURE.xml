@@ -2,12 +2,12 @@
 <trend name="HEMOGLOBIN_MEASURE_TREND">
     <categories>Measurements</categories>
     <description>Trend for the measurements of HEMOGLOBIN</description>
-    <derived-from name="HEMOGLOBIN_MEASURE" tak="raw-concept" idx="0" significant-variation="1.5"/>
+    <derived-from name="HEMOGLOBIN_MEASURE" tak="raw-concept" idx="0" significant-variation="1"/>
 
     <!-- Each point will be classified as either "steady" or "changing" based on this window -->
-    <time-steady value="12h"/>
+    <time-steady value="72h"/>
 
     <!-- maximum difference between consecutive points to merge if both has the same classification -->
-    <persistence good-after="24h"/>
+    <persistence good-after="96h"/>
 
 </trend>

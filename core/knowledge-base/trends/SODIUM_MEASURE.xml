@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<trend name="SODIUM_BLOOD_MEASURE_TREND">
+<trend name="SODIUM_MEASURE_TREND">
     <categories>Measurements</categories>
     <description>Trend for the measurements of SODIUM (Blood)</description>
-    <derived-from name="SODIUM_BLOOD_MEASURE" tak="raw-concept" idx="0" significant-variation="5"/>
+    <derived-from name="SODIUM_MEASURE" tak="raw-concept" idx="0" significant-variation="3"/>
 
     <!-- Each point will be classified as either "steady" or "changing" based on this window -->
-    <time-steady value="12h"/>
+    <time-steady value="24h"/>
 
     <!-- maximum difference between consecutive points to merge if both has the same classification -->
-    <persistence good-after="18h"/>
+    <persistence good-after="48h"/>
 
 </trend>

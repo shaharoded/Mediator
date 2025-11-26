@@ -2,12 +2,12 @@
 <trend name="BICARBONATE_MEASURE_TREND">
     <categories>Measurements</categories>
     <description>Trend for the measurements of BICARBONATE</description>
-    <derived-from name="BICARBONATE_MEASURE" tak="raw-concept" idx="0" significant-variation="2"/>
+    <derived-from name="BICARBONATE_MEASURE" tak="raw-concept" idx="0" significant-variation="3"/>
 
     <!-- Each point will be classified as either "steady" or "changing" based on this window -->
-    <time-steady value="12h"/>
+    <time-steady value="24h"/>
 
     <!-- maximum difference between consecutive points to merge if both has the same classification -->
-    <persistence good-after="18h"/>
+    <persistence good-after="48h"/>
 
 </trend>

@@ -2,12 +2,12 @@
 <trend name="PH_MEASURE_TREND">
     <categories>Measurements</categories>
     <description>Trend for the measurements of PH</description>
-    <derived-from name="PH_MEASURE" tak="raw-concept" idx="0" significant-variation="0.1"/>
+    <derived-from name="PH_MEASURE" tak="raw-concept" idx="0" significant-variation="0.05"/>
 
     <!-- Each point will be classified as either "steady" or "changing" based on this window -->
-    <time-steady value="4h"/>
+    <time-steady value="12h"/>
 
     <!-- maximum difference between consecutive points to merge if both has the same classification -->
-    <persistence good-after="6h"/>
+    <persistence good-after="24h"/>
 
 </trend>

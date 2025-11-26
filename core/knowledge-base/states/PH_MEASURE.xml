@@ -9,19 +9,34 @@
 
     <!-- Discretize and abstract -->
     <abstraction-rules>
-        <rule value="Acidosis" operator="and">
+        <rule value="Severe Acidosis" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="7.2"/>
+                <allowed-value min="0" max="7.0"/>
+            </attribute>
+        </rule>
+        <rule value="Moderate Acidosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="7.0" max="7.2"/>
+            </attribute>
+        </rule>
+        <rule value="Mild Acidosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="7.2" max="7.35"/>
             </attribute>
         </rule>
         <rule value="Normal" operator="and">
             <attribute idx="0">
-                <allowed-value min="7.2" max="7.45"/>
+                <allowed-value min="7.35" max="7.45"/>
             </attribute>
         </rule>
-        <rule value="Alkalosis" operator="and">
+        <rule value="Mild Alkalosis" operator="and">
             <attribute idx="0">
-                <allowed-value min="7.45"/>
+                <allowed-value min="7.45" max="7.55"/>
+            </attribute>
+        </rule>
+        <rule value="Severe Alkalosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="7.55"/>
             </attribute>
         </rule>
     </abstraction-rules>

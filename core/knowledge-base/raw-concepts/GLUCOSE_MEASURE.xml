@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="GLUCOSE_MEASURE" concept-type="raw-numeric">
     <categories>Measurements</categories>
-    <description>Raw concept to manage the measurement of GLUCOSE</description>
+    <description>Raw concept to manage the measurement of GLUCOSE in units of mg/dL</description>
     <attributes>
         <attribute name="GLUCOSE_MEASURE" type="numeric">
             <numeric-allowed-values>

@@ -9,19 +9,29 @@
 
     <!-- Discretize and abstract -->
     <abstraction-rules>
-        <rule value="Low" operator="and">
+        <rule value="Critical Anemia" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="13"/>
+                <allowed-value min="0" max="7"/>
+            </attribute>
+        </rule>
+        <rule value="Moderate Anemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="7" max="10"/>
+            </attribute>
+        </rule>
+        <rule value="Mild Anemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="10" max="12"/>
             </attribute>
         </rule>
         <rule value="Normal" operator="and">
             <attribute idx="0">
-                <allowed-value min="13" max="17.5"/>
+                <allowed-value min="12" max="16"/>
             </attribute>
         </rule>
-        <rule value="High" operator="and">
+        <rule value="Polycythemia" operator="and">
             <attribute idx="0">
-                <allowed-value min="17.5"/>
+                <allowed-value min="16"/>
             </attribute>
         </rule>
     </abstraction-rules>
