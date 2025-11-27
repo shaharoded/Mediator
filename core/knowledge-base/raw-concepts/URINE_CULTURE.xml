@@ -1,13 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="URINE_CULTURE" concept-type="raw-nominal">
     <categories>Measurements</categories>
-    <description>Raw concept to state a URINE CULTURE was performed, and it's result</description>
+    <description>Raw concept to state a URINE CULTURE was performed (with no result - partial information)</description>
     <attributes>
-        <attribute name="URINE_CULTURE" type="nominal">
-            <nominal-allowed-values>
-                <allowed-value value="Positive"/>
-                <allowed-value value="Negative"/>
-            </nominal-allowed-values>
-        </attribute>
+        <attribute name="URINE_CULTURE" type="boolean"/>
     </attributes>
 </raw-concept>
