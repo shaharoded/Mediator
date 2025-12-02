@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<trend name="ALANINE-AMINOTRANSFERASE_MEASURE_TREND">
+<trend name="ALBUMIN_MEASURE_TREND">
     <categories>Measurements</categories>
-    <description>Trend for the measurements of ALANINE-AMINOTRANSFERASE</description>
-    <derived-from name="ALANINE-AMINOTRANSFERASE_MEASURE" tak="raw-concept" idx="0" significant-variation="0.5"/>
+    <description>Trend for the measurements of ALBUMIN</description>
+    <derived-from name="ALBUMIN_MEASURE" tak="raw-concept" idx="0" significant-variation="0.5"/>
 
     <!-- Each point will be classified as either "steady" or "changing" based on this window -->
     <time-steady value="4d"/>

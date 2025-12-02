@@ -18,9 +18,6 @@
             <attribute idx="0">
                 <allowed-value min="10" max="20"/>
             </attribute>
-            <attribute idx="1">
-                <allowed-value equal="SubCutaneous"/>
-            </attribute>
         </rule>
         <rule value="SubCutaneous High" operator="and">
             <attribute idx="0">

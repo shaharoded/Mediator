@@ -5,7 +5,7 @@
     <derived-from>
         <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="A1"/>
         <attribute name="BASAL_BITZUA" tak="raw-concept" idx="0" ref="A2"/>
-        <attribute name="INSULIN_IV_BITZUA" tak="raw-concept" idx="0" ref="A3"/>
+        <attribute name="INSULIN_BITZUA" tak="raw-concept" idx="0" ref="A3"/>
     </derived-from>
 
     <abstraction-rules>

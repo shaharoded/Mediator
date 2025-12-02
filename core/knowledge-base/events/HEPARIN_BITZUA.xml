@@ -5,7 +5,7 @@
     <derived-from>
         <!-- ref optional when no abstraction-rules -->
         <attribute name="HEPARIN_IV_BITZUA" tak="raw-concept" idx="0" ref='A1'/>
-        <attribute name="HEPARIN_PO_BITZUA" tak="raw-concept" idx="0" ref='A2'/>
+        <attribute name="HEPARIN_SC_BITZUA" tak="raw-concept" idx="0" ref='A2'/>
     </derived-from>
 
     <abstraction-rules>
@@ -14,7 +14,7 @@
                 <allowed-value equal="True"/>
             </attribute>
         </rule>
-        <rule value="PO" operator="or">
+        <rule value="SC" operator="or">
             <attribute ref="A2">
                 <allowed-value equal="True"/>
             </attribute>
