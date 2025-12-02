@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="HEPARIN_SC_BITZUA" concept-type="raw-boolean">
+    <categories>DrugAdministration</categories>
+    <description>Raw concept to mark heparin administration event (SC - less severe)</description>
+    <attributes>
+        <attribute name="HEPARIN_SC_BITZUA" type="boolean"/>
+    </attributes>
+</raw-concept>

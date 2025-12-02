@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="HYPERTONIC-SALINE_BITZUA" concept-type="raw-boolean">
     <categories>DrugAdministration</categories>
-    <description>Raw concept to mark hypertonic saline administration event</description>
+    <description>Raw concept to mark hypertonic saline administration event (IV only)</description>
     <attributes>
         <attribute name="HYPERTONIC-SALINE_BITZUA" type="boolean"/>
     </attributes>

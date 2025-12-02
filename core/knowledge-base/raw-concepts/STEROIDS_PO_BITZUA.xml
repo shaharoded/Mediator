@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="STEROIDS_PO_BITZUA" concept-type="raw-boolean">
+    <categories>DrugAdministration</categories>
+    <description>Raw concept to mark steroids administration event (PO - oral route)</description>
+    <attributes>
+        <attribute name="STEROIDS_PO_BITZUA" type="boolean"/>
+    </attributes>
+</raw-concept>

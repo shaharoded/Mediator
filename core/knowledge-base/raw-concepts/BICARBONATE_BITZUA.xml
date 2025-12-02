@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="BICARBONATE_BITZUA" concept-type="raw-boolean">
     <categories>DrugAdministration</categories>
-    <description>Raw concept to mark bicarbonate administration event</description>
+    <description>Raw concept to mark calcium-bicarbonate administration event (IV only)</description>
     <attributes>
         <attribute name="BICARBONATE_BITZUA" type="boolean"/>
     </attributes>

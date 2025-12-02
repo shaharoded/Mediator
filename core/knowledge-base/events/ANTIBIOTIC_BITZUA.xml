@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="ANTIBIOTIC_BITZUA_EVENT">
+    <categories>DrugAdministration</categories>
+    <description>Marks Antibiotic Drugs administration event (IV or PO)</description>
+    <derived-from>
+        <!-- ref optional when no abstraction-rules -->
+        <attribute name="ANTIBIOTIC_IV_BITZUA" tak="raw-concept" idx="0" ref='A1'/>
+        <attribute name="ANTIBIOTIC_PO_BITZUA" tak="raw-concept" idx="0" ref='A2'/>
+    </derived-from>
+
+    <abstraction-rules>
+        <rule value="IV" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+        <rule value="PO" operator="or">
+            <attribute ref="A2">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</event>

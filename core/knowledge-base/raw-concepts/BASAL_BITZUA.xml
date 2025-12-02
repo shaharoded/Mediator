@@ -1,27 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<raw-concept name="BASAL_BITZUA" concept-type="raw">
+<raw-concept name="BASAL_BITZUA" concept-type="raw-numeric">
     <categories>DrugAdministration</categories>
-    <description>Raw concept to manage the administration of BASAL (long term) insulin</description>
+    <description>Raw concept to manage the administration of BASAL (long term) insulin, which is SubCutaneous by default</description>
     <attributes>
         <attribute name="BASAL_DOSAGE" type="numeric">
             <numeric-allowed-values>
-                <allowed-value min="0" max="100"/>
+                <allowed-value min="0" max="300"/>
             </numeric-allowed-values>
         </attribute>
-        <attribute name="BASAL_ROUTE" type="nominal">
-            <nominal-allowed-values>
-                <allowed-value value="SubCutaneous"/>
-                <allowed-value value="IntraVenous"/>
-            </nominal-allowed-values>
-        </attribute>
     </attributes>
-
-    <!-- Tuple-order BEFORE merge -->
-    <tuple-order>
-        <attribute name="BASAL_DOSAGE"/>
-        <attribute name="BASAL_ROUTE"/>
-    </tuple-order>
-
-    <!-- Merge dosage+route if observed together; each is optional -->
-    <merge require-all="false"/>
 </raw-concept>

@@ -1,28 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <state name="BOLUS_BITZUA_STATE">
-    <categories>Medications</categories>
+    <categories>DrugAdministration</categories>
     <description>Abstraction for the dosage and route of administration of BOLUS insulin</description>
     <derived-from name="BOLUS_BITZUA" tak="raw-concept"/>
     
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-after="8h" interpolate="true" max-skip="1"/>
+    <persistence good-after="8h" interpolate="false"/>
 
     <!-- Discretize and abstract -->
     <abstraction-rules>
         <rule value="SubCutaneous Low" operator="and">
             <attribute idx="0">
                 <allowed-value min="0" max="10"/>
-            </attribute>
-            <attribute idx="1">
-                <allowed-value equal="SubCutaneous"/>
-            </attribute>
-        </rule>
-        <rule value="IntraVenous Low" operator="and">
-            <attribute idx="0">
-                <allowed-value min="0" max="10"/>
-            </attribute>
-            <attribute idx="1">
-                <allowed-value equal="IntraVenous"/>
             </attribute>
         </rule>
         <rule value="SubCutaneous Medium" operator="and">
@@ -33,28 +22,9 @@
                 <allowed-value equal="SubCutaneous"/>
             </attribute>
         </rule>
-        <rule value="IntraVenous Medium" operator="and">
-            <attribute idx="0">
-                <allowed-value min="10" max="20"/>
-            </attribute>
-            <attribute idx="1">
-                <allowed-value equal="IntraVenous"/>
-            </attribute>
-        </rule>
         <rule value="SubCutaneous High" operator="and">
             <attribute idx="0">
                 <allowed-value min="20"/>
-            </attribute>
-            <attribute idx="1">
-                <allowed-value equal="SubCutaneous"/>
-            </attribute>
-        </rule>
-        <rule value="IntraVenous High" operator="and">
-            <attribute idx="0">
-                <allowed-value min="20"/>
-            </attribute>
-            <attribute idx="1">
-                <allowed-value equal="IntraVenous"/>
             </attribute>
         </rule>
     </abstraction-rules>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <event name="BICARBONATE_BITZUA_EVENT">
     <categories>DrugAdministration</categories>
-    <description>Marks Bicarbonate administration event</description>
+    <description>Marks Bicarbonate administration event (IV only)</description>
     <derived-from>
         <!-- ref optional when no abstraction-rules -->
         <attribute name="BICARBONATE_BITZUA" tak="raw-concept" idx="0" ref='A1'/>
