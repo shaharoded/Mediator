@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ANTIDIABETIC_BITZUA" concept-type="raw-boolean">
+    <categories>DrugAdministration</categories>
+    <description>Raw concept to mark antidiabetic drugs administration event (used only to monitor if were stopped during the first 3 days)</description>
+    <attributes>
+        <attribute name="ANTIDIABETIC_PO_CONTEXT" type="boolean"/>
+        <attribute name="ANTIDIABETIC_SC_CONTEXT" type="boolean"/>
+    </attributes>
+</raw-concept>

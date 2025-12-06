@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <parameterized-raw-concept name="M-SHR_MEASURE">
     <categories>Measurements</categories>
-    <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
+    <description>Raw concept to manage the temporal measurement of M-SHR ratio (glucose / base glucose measure)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
     
     <!-- Will use the closest instance to the beginning of the pattern -->
