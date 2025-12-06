@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<raw-concept name="DEMENTIA" concept-type="raw-boolean">
-    <categories>Complications</categories>
-    <description>Raw concept to mark a dementia event, inputed from 'Observation'</description>
-    <attributes>
-        <attribute name="DEMENTIA" type="boolean"/>
-    </attributes>
-</raw-concept>

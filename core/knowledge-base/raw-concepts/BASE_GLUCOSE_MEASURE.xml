@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="BASE_GLUCOSE_MEASURE" concept-type="raw-numeric">
     <categories>Measurements</categories>
-    <description>Raw concept to manage the first measurement of GLUCOSE in admission or HBA1C calculated glucose level</description>
+    <description>Raw concept to manage base GLUCOSE level derived from glucose tolerance or HBA1C calculated glucose level</description>
     <attributes>
         <attribute name="BASE_GLUCOSE_MEASURE" type="numeric">
             <numeric-allowed-values>
