@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="GLUCOSE_MEASURE_ON_HYPER_PATTERN" concept-type="local-pattern">
+    <categories>RoutineTreatment</categories>
+    <description>Captures if glucose measurement was performed within a reasonable time frame after insulin admission</description>
+    <derived-from>
+        <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="BASAL_BITZUA" tak="raw-concept" idx="0" ref="A2"/>
+        <attribute name="INSULIN_BITZUA" tak="raw-concept" idx="0" ref="A3"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+ 
+    <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
+    <abstraction-rules>
+        <rule>
+            <!-- Relation between 2 KBTA objects -->
+            <temporal-relation how='before' max-distance='24h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                    <attribute ref="A2">
+                        <allowed-value min="0"/>
+                    </attribute>
+                    <attribute ref="A3">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="8h" trapezeD="24h"/>
+                    </function>
+                </time-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="INSULIN_ON_HIPOGLYCEMIA_PATTERN" concept-type="local-pattern">
+    <categories>RoutineTreatment</categories>
+    <description>Captures if long term INSULIN (BASAL) was reduced after low glucose measured</description>
+    <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
+    <derived-from>
+        <attribute name="LOW_GLUCOSE_CONTEXT" tak="context" ref="A1"/>
+        <attribute name="BASAL_BITZUA_RATIO" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+
+    <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
+    <abstraction-rules>
+        <rule>
+            <!-- Relation between 2 KBTA objects -->
+            <!-- max-distance is not the recommended distance, but the max acceptable one -->
+            <temporal-relation how='overlap'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <value-constraint-compliance>
+                    <target>
+                        <attribute ref="E1"/>
+                    </target>
+                    <function name="id">
+                        <trapeze trapezeA="0" trapezeB="0" trapezeC="0.99" trapezeD="1"/>
+                    </function>
+                </value-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>

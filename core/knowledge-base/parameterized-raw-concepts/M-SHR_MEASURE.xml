@@ -6,7 +6,7 @@
     
     <!-- Will use the closest instance to the beginning of the pattern -->
     <parameters>
-        <parameter name="BASE_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="P1" default="120"/>
+        <parameter name="BASE_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="P1"/>
     </parameters>
 
     <functions>

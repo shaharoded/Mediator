@@ -1,30 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<pattern name="INSULIN_ON_HIGH_GLUCOSE_PATTERN" concept-type="local-pattern">
+<pattern name="STOP_ANTIDIABETICS_ON_ADMISSION_PATTERN" concept-type="local-pattern">
     <categories>Admission</categories>
-    <description>Captures if INSULIN (BASAL/BOLUS) was performed within reasonable time after high glucose measured</description>
+    <description>Captures if perscribed antidiabetic medications were stopped during the first 3 days of admission</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
     <derived-from>
-        <attribute name="MEAL_CONTEXT" tak="context" ref="C1"/>
-        <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="A1"/>
-        <!-- BOLUS_BITZUA is used to clip HIGH_GLUCOSE_CONTEXT, so "before" relation will fit -->
-        <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
+        <attribute name="ANTIDIABETIC_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
     </derived-from>
 
     <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
     <abstraction-rules>
         <rule>
-            <!-- OPTIONAL: Contextual Information relevant if begins at / before the last event of the pattern starts-->
-            <context>
-                <attribute ref="C1">
-                    <allowed-value equal="Breakfast"/>
-                    <allowed-value equal="Lunch"/>
-                    <allowed-value equal="Dinner"/>
-                </attribute>
-            </context>
-
             <!-- Relation between 2 KBTA objects -->
             <!-- max-distance is not the recommended distance, but the max acceptable one -->
-            <temporal-relation how='before' max-distance='2h'>
+            <temporal-relation how='before' min-distance="2h" max-distance='14d'>
                 <anchor>
                     <attribute ref="A1">
                         <allowed-value equal="True"/>
@@ -41,7 +30,7 @@
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="1h" trapezeD="2h"/>
+                        <trapeze trapezeA="2h" trapezeB="72h" trapezeC="14d" trapezeD="14d"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>

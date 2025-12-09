@@ -26,7 +26,7 @@
         </rule>
         <rule value="Hyperglycemia" operator="or">
             <attribute ref="A1">
-                <allowed-value min="250"/>  <!-- >= 250 -->
+                <allowed-value min="180"/>  <!-- >= 180 -->
             </attribute>
             <attribute ref="A2">
                 <allowed-value equal="True"/>

@@ -1,8 +1,13 @@
 """
 TO-DO:
- - Re-check the dosage distribution in medications for states and max values.
+ - Need to add min-distance to "before" on pattern schema, that ignores events that are too close.
+ - I need a flag to patterns that I didn't find. For example, had hyper, no following measure, so no score? I need a logic that for every hyper event must satisfy with measure after within reasonable time.
  - What happens on local pattern if I define something like glucose every 12 hours? Will the anchor catch the closest option? What will happen if I define a context to it as well? Might "skip" smaller pattern-intervals just because the larger one also fits, which might distory the QA.
  - We have empty QA row when no pattern is found, but what about when we only find patterns some of the days? How to say "there should have been an instance here"? Maybe global pattern?
+ - For relative insulin dosage, need to allow 'default' to be optional in parameterized raw concept, for data leakage, limit parameter to before the event, if doesn't exist. parameters in compliance must demand default, but for anything temporal - not must.
+ - check if trapezoid works backwards as well, meaning if I have min-distance=2h, and trapezoidA=0h, will it give score 0 for events 0-2h before anchor, or will it give score 1? Need to make sure it gives score 0.
+ - Currently if I'm looking for "before" pattern, and I have the same pattern but as "overlap", this instance is not captured, meaning also no QA. need to think.
+    - select='last' doesn't make sense with time constraint QA. need to think or block option.
  - define that max-distance=0 for 'before' will also capture 'overlap', so that if context window overlaps with event, it is included. As long as anchor.StartTime < event.StartTime, we can treat "before" as inclusive of overlap.
  - define Overlap(Pattern) to use for complex context. Should check if 2+ contexts (or any other concept) overlap and if so will return their overlap window (should include +- good before/after?).
  """
