@@ -1,6 +1,5 @@
 """
 TO-DO:
- - Need to add min-distance to "before" on pattern schema, that ignores events that are too close.
  - I need a flag to patterns that I didn't find. For example, had hyper, no following measure, so no score? I need a logic that for every hyper event must satisfy with measure after within reasonable time.
  - What happens on local pattern if I define something like glucose every 12 hours? Will the anchor catch the closest option? What will happen if I define a context to it as well? Might "skip" smaller pattern-intervals just because the larger one also fits, which might distory the QA.
  - We have empty QA row when no pattern is found, but what about when we only find patterns some of the days? How to say "there should have been an instance here"? Maybe global pattern?

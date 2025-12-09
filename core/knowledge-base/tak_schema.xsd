@@ -473,6 +473,7 @@
                                                     </xs:simpleType>
                                                 </xs:attribute>
                                                 <xs:attribute name="max-distance" type="durationString" use="optional"/>
+                                                <xs:attribute name="min-distance" type="durationString" use="optional"/>
                                             </xs:complexType>
                                         </xs:element>
                                         <xs:element name="compliance-function" minOccurs="0">

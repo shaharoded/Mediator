@@ -159,7 +159,7 @@ This TAK knowledge base was developed for analyzing diabetes management during h
 **Use Case:** Detect relationships between 2+ concepts across time
 
 **Only Patterns can:**
-- Define temporal relationships (before/overlap with max-distance)
+- Define temporal relationships (overlap/before with min-distance/max-distance)
 - Combine concepts from different time points
 - Score compliance with clinical guidelines using fuzzy time/value windows
 
@@ -172,7 +172,7 @@ This TAK knowledge base was developed for analyzing diabetes management during h
     </derived-from>
     <abstraction-rules>
         <rule>
-            <temporal-relation how='before' max-distance='12h'>
+            <temporal-relation how='before' max-distance='0h' max-distance='12h'>
                 <anchor><attribute ref="A1">...</attribute></anchor>
                 <event select='first'><attribute ref="E1">...</attribute></event>
             </temporal-relation>
@@ -783,6 +783,7 @@ else:
 - ✅ `idx` values within bounds for raw-concept tuples
 - ✅ `time-constraint-compliance` only valid for `how='before'`
 - ✅ `max-distance >= trapezeD` (pattern captures all valid instances)
+- ✅ `min-distance <= trapezeA` (pattern captures all valid instances)
 - ✅ Value-constraint targets must reference **anchor or event** (not context/parameter)
 - ✅ Compliance function names exist in `external_functions.REPO`
 - ✅ Parameter refs declared in `<parameters>` block
@@ -1457,11 +1458,11 @@ Output:
 
 ## Pattern Design Best Practices
 
-### 1. Choose Appropriate `max-distance`
+### 1. Choose Appropriate `max-distance` / `min-distance`
 
-**Rule:** `max-distance` should be **≥ trapezeD** (if using time-constraint compliance).
+**Rule:** `max-distance` should be **≥ trapezeD** and `min-distance` should be **≤ trapezeA** (if using time-constraint compliance), 
 
-**Rationale:** Pattern matching uses `max-distance` to filter candidates. If `max-distance < trapezeD`, valid instances may be missed.
+**Rationale:** Pattern matching uses `max-distance` to filter candidates. If `max-distance < trapezeD`, valid instances may be missed (Same for `min-distance`).
 
 ```xml
 <!-- ❌ Bad: max-distance too small -->

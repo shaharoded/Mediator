@@ -792,14 +792,20 @@ def test_pattern_validation_requires_max_distance_for_before(tmp_path: Path):
     admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
     glucose_path = write_xml(tmp_path, "GLUCOSE.xml", RAW_GLUCOSE_XML)
     pattern_path = write_xml(tmp_path, "BAD_PATTERN.xml", bad_pattern_xml)
-    
+
     repo = TAKRepository()
     repo.register(RawConcept.parse(admission_path))
     repo.register(RawConcept.parse(glucose_path))
     set_tak_repository(repo)
-    
+
     with pytest.raises(ValueError, match="requires max-distance"):
         LocalPattern.parse(pattern_path)
+
+    # Test with missing min-distance (should default to 0s)
+    valid_pattern_xml = PATTERN_SIMPLE_XML.replace("min-distance='0s'", "")
+    pattern_path = write_xml(tmp_path, "VALID_PATTERN.xml", valid_pattern_xml)
+    pattern = LocalPattern.parse(pattern_path)
+    assert pattern is not None, "Pattern should parse successfully with default min-distance"
 
 
 def test_pattern_validation_max_distance_ge_trapezeD(tmp_path: Path):
@@ -977,23 +983,39 @@ def test_time_compliance_full(repo_time_compliance):
     assert row["TimeConstraintScore"] == 1.0
 
 
-def test_time_compliance_partial(repo_time_compliance):
-    """Time compliance: glucose at 10h (in [8h, 12h] → score=0.5)."""
-    admission_tak = repo_time_compliance.get("ADMISSION_EVENT")
-    glucose_tak = repo_time_compliance.get("GLUCOSE_MEASURE")
-    pattern_tak = repo_time_compliance.get("GLUCOSE_ON_ADMISSION_TIME")
-    
+def test_time_compliance_partial(repo_time_compliance, tmp_path):
+    """Time compliance: glucose at 10h (in [8h, 12h] → score=0.5), with min-distance."""
+    # Modify the pattern to include min-distance
+    pattern_xml_with_min_distance = PATTERN_TIME_COMPLIANCE_XML.replace(
+        "max-distance='12h'",
+        "min-distance='6h' max-distance='12h'"
+    ).replace(
+        'name="GLUCOSE_ON_ADMISSION_TIME"',
+        'name="GLUCOSE_ON_ADMISSION_TIME_MIN_DISTANCE"'
+    ).replace('<trapeze trapezeA="0h" trapezeB="0h" trapezeC="8h" trapezeD="12h"/>', 
+              '<trapeze trapezeA="6h" trapezeB="6h" trapezeC="8h" trapezeD="12h"/>')
+    pattern_path = write_xml(tmp_path, "PATTERN_TIME_MIN_DISTANCE.xml", pattern_xml_with_min_distance)
+
+    repo = repo_time_compliance
+    pattern_tak = LocalPattern.parse(pattern_path)
+    repo.register(pattern_tak)
+
+    admission_tak = repo.get("ADMISSION_EVENT")
+    glucose_tak = repo.get("GLUCOSE_MEASURE")
+    pattern_tak = repo.get("GLUCOSE_ON_ADMISSION_TIME_MIN_DISTANCE")
+
     df_raw = pd.DataFrame([
         (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
-        (1, "GLUCOSE_LAB", make_ts("18:00"), make_ts("18:00"), 120),  # 10h gap
-    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
-    
+        (1, "GLUCOSE_LAB", make_ts("13:00"), make_ts("13:00"), 120),  # 5h gap (below min-distance)
+        (1, "GLUCOSE_LAB", make_ts("18:00"), make_ts("18:00"), 150),  # 10h gap (within range)
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+
     df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
     df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
     df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
-    
+
     df_out = pattern_tak.apply(df_input)
-    
+
     assert len(df_out) == 1
     row = df_out.iloc[0]
     assert row["Value"] == "Partial"
@@ -1428,7 +1450,7 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, t
     basal_tak = repo.get("BASAL_BITZUA")
     weight_tak = repo.get("WEIGHT_MEASURE")
     
-    # Create test data (only once!)
+    # Create test data (only once)
     df_raw = pd.DataFrame([
         (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
         (1, "BASAL_DOSAGE", make_ts("10:00"), make_ts("10:00"), 10),  # 2h gap, 10 units
@@ -1766,7 +1788,7 @@ def test_debug_glucose_on_admission_multi_rule(tmp_path: Path):
   </attributes>
 </raw-concept>
 """
-    
+
     event_admission_xml = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <event name="ADMISSION_EVENT">
@@ -1784,7 +1806,7 @@ def test_debug_glucose_on_admission_multi_rule(tmp_path: Path):
     </abstraction-rules>
 </event>
 """
-    
+
     raw_glucose_xml = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="GLUCOSE_MEASURE" concept-type="raw-numeric">
@@ -1799,7 +1821,7 @@ def test_debug_glucose_on_admission_multi_rule(tmp_path: Path):
   </attributes>
 </raw-concept>
 """
-    
+
     raw_diabetes_xml = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="DIABETES_DIAGNOSIS" concept-type="raw-boolean">
@@ -1810,7 +1832,7 @@ def test_debug_glucose_on_admission_multi_rule(tmp_path: Path):
   </attributes>
 </raw-concept>
 """
-    
+
     context_diabetes_xml = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <context name="DIABETES_DIAGNOSIS_CONTEXT">
@@ -1831,7 +1853,7 @@ def test_debug_glucose_on_admission_multi_rule(tmp_path: Path):
     </context-windows>
 </context>
 """
-    
+
     pattern_glucose_xml = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <pattern name="GLUCOSE_MEASURE_ON_ADMISSION_PATTERN" concept-type="local-pattern">
@@ -1893,7 +1915,7 @@ def test_debug_glucose_on_admission_multi_rule(tmp_path: Path):
     </abstraction-rules>
 </pattern>
 """
-    
+
     # Write XMLs
     write_xml(tmp_path, "ADMISSION_RAW.xml", raw_admission_xml)
     write_xml(tmp_path, "ADMISSION_EVENT.xml", event_admission_xml)
@@ -1901,20 +1923,20 @@ def test_debug_glucose_on_admission_multi_rule(tmp_path: Path):
     write_xml(tmp_path, "DIABETES_DIAGNOSIS.xml", raw_diabetes_xml)
     write_xml(tmp_path, "DIABETES_CONTEXT.xml", context_diabetes_xml)
     write_xml(tmp_path, "PATTERN_GLUCOSE.xml", pattern_glucose_xml)
-    
+
     # Build repository
     repo = TAKRepository()
     repo.register(RawConcept.parse(tmp_path / "ADMISSION_RAW.xml"))
     repo.register(RawConcept.parse(tmp_path / "GLUCOSE_MEASURE.xml"))
     repo.register(RawConcept.parse(tmp_path / "DIABETES_DIAGNOSIS.xml"))
-    
+
     set_tak_repository(repo)
-    
+
     from core.tak.event import Event
     repo.register(Event.parse(tmp_path / "ADMISSION_EVENT.xml"))
     repo.register(Context.parse(tmp_path / "DIABETES_CONTEXT.xml"))
     repo.register(LocalPattern.parse(tmp_path / "PATTERN_GLUCOSE.xml"))
-    
+
     # Get TAKs
     admission_raw = repo.get("ADMISSION")
     admission_event = repo.get("ADMISSION_EVENT")
@@ -1922,30 +1944,30 @@ def test_debug_glucose_on_admission_multi_rule(tmp_path: Path):
     diabetes_raw = repo.get("DIABETES_DIAGNOSIS")
     diabetes_context = repo.get("DIABETES_DIAGNOSIS_CONTEXT")
     pattern = repo.get("GLUCOSE_MEASURE_ON_ADMISSION_PATTERN")
-    
+
     # Test case: glucose at 10h (should match first rule with partial compliance)
     df_raw = pd.DataFrame([
         (1000, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
-        (1000, "GLUCOSE_MEASURE", make_ts("18:00"), make_ts("18:00"), 150),
+        (1000, "GLUCOSE_MEASURE", make_ts("18:00"), make_ts("18:00"), 120),
         (1000, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
-    
+
     df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
     df_admission_event = admission_event.apply(df_admission_raw)
     df_glucose = glucose_raw.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_MEASURE"])
     df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
     df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
-    
+
     df_pattern_input = pd.concat([df_admission_event, df_glucose, df_diabetes_context], ignore_index=True)
-    
+
     print("\n=== DEBUG: Pattern input ===")
     print(df_pattern_input)
-    
+
     df_out = pattern.apply(df_pattern_input)
-    
+
     print("\n=== DEBUG: Pattern output ===")
     print(df_out)
-    
+
     assert len(df_out) == 1
     assert df_out.iloc[0]["Value"] == "Partial"
     assert df_out.iloc[0]["TimeConstraintScore"] == pytest.approx(0.5)

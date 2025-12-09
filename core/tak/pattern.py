@@ -166,12 +166,19 @@ class LocalPattern(Pattern):
             if how not in ("before", "overlap"):
                 raise ValueError(f"{name}: temporal-relation how='{how}' must be 'before' or 'overlap'")
             max_distance = tr_el.attrib.get("max-distance")
-            if how == "before" and not max_distance:
-                raise ValueError(f"{name}: temporal-relation how='before' requires max-distance")
-            
+            min_distance = tr_el.attrib.get("min-distance")
+
+            # Ensure max-distance and min-distance are not None
+            if how == "before":
+                if not max_distance:
+                    raise ValueError(f"{name}: temporal-relation how='before' requires max-distance")
+                if not min_distance:
+                    min_distance = "0s"  # Default to 0 seconds if not provided
+
             relation_spec = {
                 "how": how,
-                "max_distance": max_distance
+                "max_distance": max_distance,
+                "min_distance": min_distance
             }
             
             # Parse anchor
@@ -321,6 +328,12 @@ class LocalPattern(Pattern):
                         raise ValueError(
                             f"{name}: temporal-relation max-distance '{max_distance}' must be >= "
                             f"time-constraint-compliance trapezeD '{trapez_raw[3]}' "
+                            f"(otherwise pattern may miss valid instances)"
+                        )
+                    if parse_duration(trapez_raw[0]) < parse_duration(min_distance):
+                        raise ValueError(
+                            f"{name}: temporal-relation min-distance '{min_distance}' must be <= "
+                            f"time-constraint-compliance trapezeA '{trapez_raw[0]}' "
                             f"(otherwise pattern may miss valid instances)"
                         )
                     
@@ -872,7 +885,8 @@ class LocalPattern(Pattern):
         
         # Extract temporal relation spec
         how = rule.relation_spec.get("how")
-        max_delta = rule.max_delta # str representation or None
+        max_delta = rule.max_delta
+        min_delta = rule.min_delta
         
         # Vectorized temporal check (before="event.start must be after anchor.end")
         if how == "before":
@@ -882,6 +896,8 @@ class LocalPattern(Pattern):
                 
                 # Vectorized mask: event.start > anchor.end AND (if max_delta) event.start - anchor.end <= max_delta
                 mask = (events["StartDateTime"] > anchor_end)
+                if min_delta is not None:
+                    mask &= ((events["StartDateTime"] - anchor_end) >= min_delta)
                 if max_delta is not None:
                     mask &= ((events["StartDateTime"] - anchor_end) <= max_delta)
                 

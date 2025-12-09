@@ -241,8 +241,11 @@ class TemporalRelationRule(TAKRule):
         self.relation_spec = relation_spec
         self.context_spec = context_spec or {}
         self.max_delta: Optional[timedelta] = None
+        self.min_delta: Optional[timedelta] = None
         if relation_spec.get("max_distance"):
             self.max_delta = parse_duration(relation_spec["max_distance"])
+        if relation_spec.get("min_distance"):
+            self.min_delta = parse_duration(relation_spec["min_distance"])
         
         # Compliance functions (optional)
         self.time_constraint_compliance = time_constraint_compliance  # {func_name, trapez, parameters}
@@ -278,7 +281,7 @@ class TemporalRelationRule(TAKRule):
     def _temporal_match(self, anchor_row: pd.Series, event_row: pd.Series) -> bool:
         """
         Check if the temporal relation between anchor and event rows holds.
-        Respects "overlap" and "before" relationships (with <max_distance> restrictions).
+        Respects "overlap" and "before" relationships (with <max/min_distance> restrictions).
         """
         if self.relation_spec["how"] == "overlap":
             return not (
@@ -288,9 +291,12 @@ class TemporalRelationRule(TAKRule):
         # how == "before"
         if anchor_row["EndDateTime"] > event_row["StartDateTime"]:
             return False
+        delta = event_row["StartDateTime"] - anchor_row["EndDateTime"]
+        if self.min_delta is not None and delta < self.min_delta:
+            return False
         if self.max_delta is None:
             return True
-        return (event_row["StartDateTime"] - anchor_row["EndDateTime"]) <= self.max_delta
+        return delta <= self.max_delta
 
     def _context_satisfied(
         self,
