@@ -372,17 +372,17 @@ class ParameterizedRawConcept(RawConcept):
         if root.tag != "parameterized-raw-concept":
             raise ValueError(f"{xml_path} is not a parameterized-raw-concept file")
 
-        name = root.attrib["name"]
+        tak_name = root.attrib["name"]
         cats = tuple(s.strip() for s in (root.findtext("categories") or "").split(",") if s.strip())
         desc = root.findtext("description") or ""
 
         # Parse derived-from (must be single raw-concept)
         df_el = root.find("derived-from")
         if df_el is None or "name" not in df_el.attrib or "tak" not in df_el.attrib:
-            raise ValueError(f"{name}: <derived-from> must have name and tak")
+            raise ValueError(f"{tak_name}: <derived-from> must have name and tak")
         parent_name = df_el.attrib["name"]
         if df_el.attrib["tak"] != "raw-concept":
-            raise ValueError(f"{name}: <derived-from> must point to a raw-concept")
+            raise ValueError(f"{tak_name}: <derived-from> must point to a raw-concept")
         parent_idx_map = []
         if "idx" in df_el.attrib:
             parent_idx_map = [int(df_el.attrib["idx"])]
@@ -394,10 +394,15 @@ class ParameterizedRawConcept(RawConcept):
         params_el = root.find("parameters")
         if params_el is not None:
             for param_el in params_el.findall("parameter"):
+                param_name = param_el.attrib.get("name")
+                how = param_el.attrib.get("how", "all")
+                if param_name == parent_name and how == "all":
+                    raise ValueError(f"{tak_name}: parameter cannot reference the parent TAK '{parent_name}' with how='all', this is temporal data leakage. Use how='before' instead.")
                 param = {
                     "name": param_el.attrib["name"],
                     "tak": param_el.attrib["tak"],
                     "idx": int(param_el.attrib["idx"]) if "idx" in param_el.attrib else 0,
+                    "how": param_el.attrib.get("how", "all"),  # 'before' or 'all'
                     "ref": param_el.attrib["ref"],
                     "default": param_el.attrib.get("default")
                 }
@@ -406,7 +411,7 @@ class ParameterizedRawConcept(RawConcept):
         # Parse functions (must exist, at least one, and value idx is required)
         functions_el = root.find("functions")
         if functions_el is None:
-            raise ValueError(f"{name}: <functions> block is required")
+            raise ValueError(f"{tak_name}: <functions> block is required")
         functions = []
         for func_el in functions_el.findall("function"):
             value_el = func_el.find("value")
@@ -419,13 +424,13 @@ class ParameterizedRawConcept(RawConcept):
             }
             functions.append(func)
         if not functions:
-            raise ValueError(f"{name}: must define at least one <function>")
+            raise ValueError(f"{tak_name}: must define at least one <function>")
 
         # Parent attributes/tuple_order/etc. are inherited after repo is loaded
         repo = get_tak_repository()
         parent = repo.get(parent_name)
         if not isinstance(parent, RawConcept):
-            raise ValueError(f"{name}: parent '{parent_name}' is not a RawConcept")
+            raise ValueError(f"{tak_name}: parent '{parent_name}' is not a RawConcept")
         if parent_idx_map is None:
             parent_idx_map = list(range(len(parent.tuple_order)))
         # Inherit all structure from parent
@@ -435,7 +440,7 @@ class ParameterizedRawConcept(RawConcept):
         merge_require_all = parent.merge_require_all
 
         obj = cls(
-            name=name,
+            name=tak_name,
             categories=cats,
             description=desc,
             derived_from=parent_name,
@@ -475,10 +480,6 @@ class ParameterizedRawConcept(RawConcept):
                 )
             if "idx" not in param:
                 param["idx"] = 0
-            if param.get("default") is None:
-                raise ValueError(
-                    f"{self.name}: parameter '{param['name']}' must have a default value (required if TAK is missing or no row is found)"
-                )
 
         for func in self.functions:
             func_name = func["name"]
@@ -490,8 +491,8 @@ class ParameterizedRawConcept(RawConcept):
 
     def _resolve_parameters_for_row(self, row, df):
         """
-        For a given row, resolve parameter values by finding the closest-in-time parameter row,
-        or using default if not found. idx is optional (default 0). Default is always required.
+        Resolve parameter values by finding the closest-in-time parameter row,
+        or using default if not found. Adds support for 'how' flag ('before' or 'all').
         """
         resolved = {}
         if not self.parameters:
@@ -500,29 +501,37 @@ class ParameterizedRawConcept(RawConcept):
         for param in self.parameters:
             param_rows = df[df["ConceptName"] == param["name"]].copy()
             idx = param.get("idx", 0)
+            how = param.get("how", "all")  # Default to 'all' if not specified
+
             if not param_rows.empty:
-                # Find closest in time
-                param_rows["TimeDist"] = (param_rows["StartDateTime"] - row_time).abs()
-                closest_idx = param_rows["TimeDist"].idxmin()
-                val = param_rows.loc[closest_idx, "Value"]
-                if isinstance(val, tuple):
-                    val = val[idx]
-                resolved[param["ref"]] = val
-            else:
-                # Try to parse default as float if possible
-                default_val = param.get("default")
+                if how == "before":
+                    param_rows = param_rows[param_rows["StartDateTime"] < row_time]
+                if not param_rows.empty:
+                    # Find closest in time
+                    param_rows["TimeDist"] = (param_rows["StartDateTime"] - row_time).abs()
+                    closest_idx = param_rows["TimeDist"].idxmin()
+                    val = param_rows.loc[closest_idx, "Value"]
+                    if isinstance(val, tuple):
+                        val = val[idx]
+                    resolved[param["ref"]] = val
+                    continue
+
+            # If no match and no default, skip this parameter
+            default_val = param.get("default")
+            if default_val is not None:
                 try:
                     default_val = float(default_val)
                 except (TypeError, ValueError):
                     pass
                 resolved[param["ref"]] = default_val
+            else:
+                return None  # Signal unresolved parameters
         return resolved
 
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Apply: expects input df to contain all parent raw-concept output rows (with tuple Value)
         and all parameter rows (if any). Applies function chain in-place on the tuple at the referenced idx.
-        Uses apply_external_function and resolves parameters per row (closest in time).
         """
         repo = get_tak_repository()
         parent = repo.get(self.derived_from)
@@ -534,6 +543,8 @@ class ParameterizedRawConcept(RawConcept):
         for _, row in parent_rows.iterrows():
             tuple_val = list(row["Value"])  # mutable copy
             param_values = self._resolve_parameters_for_row(row, df)
+            if param_values is None:  # Skip if parameters cannot be resolved
+                continue
             for func in self.functions:
                 func_name = func["name"]
                 value_idx = func["value_idx"]
@@ -553,4 +564,6 @@ class ParameterizedRawConcept(RawConcept):
                 "AbstractionType": self.family
             })
         out = pd.DataFrame(out_rows)
+        if out.empty:
+             return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
         return out[["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"]]

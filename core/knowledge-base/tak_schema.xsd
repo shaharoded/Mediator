@@ -588,7 +588,15 @@
                                     <xs:attribute name="tak" type="xs:string" use="required"/>
                                     <xs:attribute name="idx" type="xs:nonNegativeInteger" use="optional"/>
                                     <xs:attribute name="ref" type="xs:string" use="required"/>
-                                    <xs:attribute name="default" type="xs:string" use="required"/>
+                                    <xs:attribute name="default" type="xs:string" use="optional"/>
+                                    <xs:attribute name="how" use="required">
+                                        <xs:simpleType>
+                                            <xs:restriction base="xs:string">
+                                                <xs:enumeration value="all"/>
+                                                <xs:enumeration value="before"/>
+                                            </xs:restriction>
+                                        </xs:simpleType>
+                                    </xs:attribute>
                                 </xs:complexType>
                             </xs:element>
                         </xs:sequence>

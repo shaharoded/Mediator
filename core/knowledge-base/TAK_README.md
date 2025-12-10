@@ -238,17 +238,19 @@ This TAK knowledge base was developed for analyzing diabetes management during h
 
 **Purpose:**  
 Parameterized Raw Concepts allow you to define a new raw concept as a function of an existing raw concept and one or more parameters (such as the first value of another measurement, or a patient-specific attribute). This enables dynamic calculation of derived values at the raw abstraction level, before higher-level abstractions like events, states, or patterns.
+Note that this TAK needs to resolve it's parameter on the row level, which may increase it's calculation times.
 
 **Key Features:**
 - **Derived-from:** References a parent raw concept (e.g., GLUCOSE_MEASURE).
-- **Parameters:** References additional raw concepts or constants, resolved per patient and per row (e.g., FIRST_GLUCOSE_MEASURE, WEIGHT_MEASURE).
+- **Parameters:** References additional raw concepts or constants, resolved per patient and per row (e.g., BASE_GLUCOSE_MEASURE, WEIGHT_MEASURE).
 - **Functions:** Specifies how to combine the parent value and parameters using a named function (e.g., division, multiplication).
 - **Default values:** Each parameter must have a default value, used if no matching row is found for the patient.
 
 **Algorithm:**
 1. For each row of the parent raw concept, resolve parameter values:
     - If a matching parameter row exists (by name and closest in time), use its value.
-    - Otherwise, use the parameter's default value.
+    - Otherwise, use the parameter's default value. If no default and no match - return empty results df.
+    - `how='before'/'all'` controls if the reolved value is taken from all patient timeline, or just a predecessor row.
 2. Apply the specified function (e.g., `div`) to the parent value and parameter(s).
 3. Emit a new row with the result as the value, and the same temporal columns as the parent.
 

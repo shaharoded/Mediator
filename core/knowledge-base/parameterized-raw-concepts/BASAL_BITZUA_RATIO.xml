@@ -6,7 +6,7 @@
     
     <!-- Will use the closest instance to the beginning of the pattern -->
     <parameters>
-        <parameter name="BASAL_BITZUA" tak="raw-concept" idx="0" ref="P1"/>
+        <parameter name="BASAL_BITZUA" tak="raw-concept" idx="0" how='before' ref="P1"/>
     </parameters>
 
     <functions>

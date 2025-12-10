@@ -90,7 +90,7 @@ PARAM_RAW_XML = """\
     <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
     <parameters>
-        <parameter name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="P1" default="120"/>
+        <parameter name="BASE_GLUCOSE_MEASURE" tak="raw-concept" how='all' idx="0" ref="P1" default="120"/>
     </parameters>
     <functions>
         <function name="div">
@@ -269,7 +269,7 @@ def test_parse_parameterized_raw_concept(tmp_path: Path):
     tak = ParameterizedRawConcept.parse(param_path)
     repo.register(tak)
     assert tak.name == "M-SHR_MEASURE"
-    assert tak.parent_name == "GLUCOSE_MEASURE"
+    assert tak.derived_from == "GLUCOSE_MEASURE"
     assert len(tak.parameters) == 1
     assert len(tak.functions) == 1
 
@@ -286,7 +286,7 @@ def test_apply_parameterized_raw_concept(tmp_path: Path):
     # Simulate input: two glucose measurements, one as parameter
     df = pd.DataFrame([
         (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
-        (1, "FIRST_GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
+        (1, "BASE_GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     out = tak.apply(df)
     assert len(out) == 1
@@ -305,7 +305,7 @@ def test_apply_parameterized_raw_concept_with_default_param(tmp_path: Path):
     <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
     <parameters>
-        <parameter name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="P1" default="25"/>
+        <parameter name="BASE_GLUCOSE_MEASURE" tak="raw-concept" idx="0" how='before' ref="P1" default="25"/>
     </parameters>
     <functions>
         <function name="div">
@@ -342,7 +342,7 @@ def test_apply_parameterized_raw_concept_with_param_row(tmp_path: Path):
     <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
     <parameters>
-        <parameter name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="P1" default="25"/>
+        <parameter name="BASE_GLUCOSE_MEASURE" tak="raw-concept" idx="0" how='before' ref="P1" default="25"/>
     </parameters>
     <functions>
         <function name="div">
@@ -362,7 +362,7 @@ def test_apply_parameterized_raw_concept_with_param_row(tmp_path: Path):
     # Simulate input: main value and param row (param row should be used, not default)
     df = pd.DataFrame([
         (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
-        (1, "FIRST_GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
+        (1, "BASE_GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     out = tak.apply(df)
     assert len(out) == 1
@@ -388,9 +388,106 @@ def test_parameterized_raw_concept_output_shape(tmp_path: Path):
     parent_out = parent.apply(parent_input).reset_index(drop=True)
     df_in = pd.DataFrame([
         (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
-        (1, "FIRST_GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
+        (1, "BASE_GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
     tak_out = tak.apply(df_in).reset_index(drop=True)
     assert tak_out.shape[0] == parent_out.shape[0]
     for col in ["PatientId", "StartDateTime", "EndDateTime"]:
         assert all(parent_out[col].values == tak_out[col].values)
+
+
+def test_apply_parameterized_raw_concept_with_how_flag(tmp_path: Path):
+    """Test apply logic for parameterized-raw-concept with 'how' flag and different parameter TAKs."""
+    # Define the parameterized-raw-concept XML
+    param_raw_xml_how = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="M-SHR_MEASURE">
+    <categories>Measurements</categories>
+    <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    <parameters>
+        <parameter name="{param_name}" tak="raw-concept" idx="0" ref="P1" how="{how}"/>
+    </parameters>
+    <functions>
+        <function name="div">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+        </function>
+    </functions>
+</parameterized-raw-concept>
+"""
+
+    # Register GLUCOSE_MEASURE and BASE_GLUCOSE_MEASURE TAKs
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    base_glucose_path = write_xml(tmp_path, "BASE_GLUCOSE_MEASURE.xml", RAW_NUMERIC_XML.replace("GLUCOSE_MEASURE", "BASE_GLUCOSE_MEASURE"))
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(base_glucose_path))
+
+    # Case 1: Parameter is GLUCOSE_MEASURE, before the instance
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml_how.format(param_name="GLUCOSE_MEASURE", how="before"))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    # Case 1: Parameter row exists and is before the derived-from row
+    df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
+    out = tak.apply(df)
+    assert len(out) == 1 # Expecting 1 row as first row is used as parameter
+    assert out.iloc[0]["Value"][0] == 2.0  # 100 / 50
+    assert out.iloc[0]["ConceptName"] == "M-SHR_MEASURE"
+
+    df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), (200,), "raw-concept"),
+
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
+    out = tak.apply(df)
+    assert len(out) == 2
+    # Row 1 (08:00): 100 / 50 (closest before is 07:00) = 2.0
+    assert out.iloc[0]["Value"][0] == 2.0
+    # Row 2 (10:00): 200 / 100 (closest before is 08:00) = 2.0
+    assert out.iloc[1]["Value"][0] == 2.0
+    assert out.iloc[1]["ConceptName"] == "M-SHR_MEASURE"
+
+    # Clean up previous registration to avoid duplicate name error
+    if "M-SHR_MEASURE" in repo.taks:
+        del repo.taks["M-SHR_MEASURE"]
+
+    # Case 2: Parameter is BASE_GLUCOSE_MEASURE
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml_how.format(param_name="BASE_GLUCOSE_MEASURE", how="all"))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
+        (1, "BASE_GLUCOSE_MEASURE", make_ts("11:00"), make_ts("11:00"), (50,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), (200,), "raw-concept"),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
+    out = tak.apply(df)
+    assert len(out) == 2
+    # Row 1 (08:00): 100 / 50 (closest is 11:00) = 2.0
+    assert out.iloc[0]["Value"][0] == 2.0
+    # Row 2 (10:00): 200 / 50 (closest is 11:00) = 4.0
+    assert out.iloc[1]["Value"][0] == 4.0
+    assert out.iloc[0]["ConceptName"] == "M-SHR_MEASURE"
+
+    # Clean up previous registration
+    if "M-SHR_MEASURE" in repo.taks:
+        del repo.taks["M-SHR_MEASURE"]
+
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml_how.format(param_name="BASE_GLUCOSE_MEASURE", how="before"))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
+        (1, "BASE_GLUCOSE_MEASURE", make_ts("11:00"), make_ts("11:00"), (50,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), (200,), "raw-concept"),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
+    out = tak.apply(df)
+    assert len(out) == 0  # No valid 'before' parameter available
