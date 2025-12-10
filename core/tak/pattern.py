@@ -172,6 +172,11 @@ class LocalPattern(Pattern):
             if how == "before":
                 if not max_distance:
                     raise ValueError(f"{name}: temporal-relation how='before' requires max-distance")
+                else:
+                    # Validate format
+                    d = parse_duration(max_distance)
+                    if d == 0:
+                        raise ValueError(f"{name}: temporal-relation max-distance must be > 0, otherwise use 'overlap' relation")
                 if not min_distance:
                     min_distance = "0s"  # Default to 0 seconds if not provided
 
@@ -335,6 +340,16 @@ class LocalPattern(Pattern):
                             f"{name}: temporal-relation min-distance '{min_distance}' must be <= "
                             f"time-constraint-compliance trapezeA '{trapez_raw[0]}' "
                             f"(otherwise pattern may miss valid instances)"
+                        )
+                    if parse_duration(trapez_raw[1]) > parse_duration(trapez_raw[0]) and event_spec.get("select") == "first":
+                        logger.warning(
+                            f"{name}: time-constraint-compliance trapezeB '{trapez_raw[1]}' > trapezeA '{trapez_raw[0]}' "
+                            f"may lead to unexpected scoring when event select='first'"
+                        )
+                    if parse_duration(trapez_raw[2]) < parse_duration(trapez_raw[3]) and event_spec.get("select") == "last":
+                        logger.warning(
+                            f"{name}: time-constraint-compliance trapezeC '{trapez_raw[2]}' < trapezeD '{trapez_raw[3]}' "
+                            f"may lead to unexpected scoring when event select='last'"
                         )
                     
                     # Extract parameter refs (if any)

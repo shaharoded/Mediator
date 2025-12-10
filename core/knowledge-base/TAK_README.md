@@ -1496,6 +1496,8 @@ Output:
 
 **Alternative:** Use `select="last"` for end-of-episode checks.
 
+>> Important: understand the logic you will be enforcing. If chose select='last' and time constrait trapezoid punishes for actions not performed soon enough, you caused a data issue. The same happens for trapezoid that checks if action was done too soon with flipped trapezoid.
+
 ### 3. Design Trapez for Clinical Thresholds
 
 **Time-Constraint Example (Glucose on Admission):**
