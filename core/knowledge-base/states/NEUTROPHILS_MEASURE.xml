@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <state name="NEUTROPHILS_MEASURE_STATE">
     <categories>Measurements</categories>
-    <description>Abstraction for the measurements of NEUTROPHILS</description>
+    <description>Abstraction for the measurements of NEUTROPHILS (units 10e3/mL)</description>
     <derived-from name="NEUTROPHILS_MEASURE" tak="raw-concept"/>
 
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->

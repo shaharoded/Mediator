@@ -72,7 +72,7 @@ class Context(TAK):
                 raise ValueError(f"{name}: <derived-from><attribute> must have 'name' and 'tak' attributes")
             
             tak_type = attr_el.attrib["tak"]
-            if tak_type != "raw-concept":
+            if tak_type not in ["raw-concept", "parameterized-raw-concept"]:
                 raise ValueError(f"{name}: Contexts can only be derived from 'raw-concept'.")
             
             # idx only required for raw-concept

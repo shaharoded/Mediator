@@ -92,6 +92,27 @@ def add(x, *args):
         result += arg
     return result
 
+@register("subtract")
+def subtract(x, *args):
+    """
+    Subtract all parameters from trapez value.
+    
+    Args:
+        x: Base trapez value
+        *args: Parameters to subtract
+    
+    Returns:
+        Result of subtracting all parameters from x
+    
+    Example:
+        add(10, 5) → 15
+        add(10, 5, 3) → 18
+    """
+    result = x
+    for arg in args:
+        result -= arg
+    return result
+
 
 # --- Custom Functions (Example) ---
 # Users can add their own functions below using the @register() decorator

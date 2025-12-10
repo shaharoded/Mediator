@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<pattern name="GLUCOSE_MEASURE_ON_HYPER_PATTERN" concept-type="local-pattern">
+<pattern name="GLUCOSE_MEASURE_ON_INSULIN_PATTERN" concept-type="local-pattern">
     <categories>RoutineTreatment</categories>
     <description>Captures if glucose measurement was performed within a reasonable time frame after insulin admission</description>
     <derived-from>

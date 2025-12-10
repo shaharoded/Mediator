@@ -1,6 +1,5 @@
 """
 TO-DO:
- - Add 'dynamic' flag to parameterized raw concepts that decides is retrieving the parameter once (hospitalization baseline) or every time (sliding window baseline).
  - We can currently react to unused pattern anchors, but we also need global patterns that simply scan the output and tell if a recurring event happened at least N times in a given time window.
  """
 

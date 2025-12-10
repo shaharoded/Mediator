@@ -364,7 +364,7 @@ class LocalPattern(Pattern):
                     
                     time_constraint_compliance = {
                         "func_name": func_name,
-                        "trapez": trapez_raw,  # Store as strings (will be processed by apply_external_function)
+                        "trapeze": trapez_raw,  # Store as strings (will be processed by apply_external_function)
                         "parameters": param_refs
                     }
                 
@@ -423,7 +423,7 @@ class LocalPattern(Pattern):
                     
                     value_constraint_compliance = {
                         "func_name": func_name,
-                        "trapez": trapez_raw,  # Stored as floats
+                        "trapeze": trapez_raw,  # Stored as floats
                         "targets": target_refs,
                         "parameters": param_refs
                     }
@@ -1164,7 +1164,7 @@ class LocalPattern(Pattern):
         try:
             trapez_node = apply_external_function_on_trapez(
                 tcc_spec["func_name"],  # positional
-                tcc_spec["trapez"],     # positional
+                tcc_spec["trapeze"],     # positional
                 "time-constraint",      # positional
                 *param_vals
             )
@@ -1231,7 +1231,7 @@ class LocalPattern(Pattern):
         try:
             trapez_node = apply_external_function_on_trapez(
                 vcc_spec["func_name"],  # positional
-                vcc_spec["trapez"],     # positional
+                vcc_spec["trapeze"],     # positional
                 "value-constraint",     # positional
                 *param_vals
             )

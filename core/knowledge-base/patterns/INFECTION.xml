@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="INFECTION_PATTERN" concept-type="local-pattern">
+    <categories>Complications</categories>
+    <description>Captures suspected infection events using measurements and observations</description>
+    <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
+    <derived-from>
+        <attribute name="BODY_TEMPERATURE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="INFECTION_WBC_MEASURE" tak="raw-concept" idx="0" ref="A2"/>
+        <attribute name="NEUTROPHILS_MEASURE" tak="raw-concept" idx="0" ref="A3"/>
+        <attribute name="BLOOD_CULTURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="URINE_CULTURE" tak="raw-concept" idx="0" ref="E2"/>
+        <attribute name="CHEST_XRAY" tak="raw-concept" idx="0" ref="E3"/>
+    </derived-from>
+
+    <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
+    <abstraction-rules>
+        <rule>
+            <!-- Relation between 2 KBTA objects -->
+            <!-- max-distance is not the recommended distance, but the max acceptable one -->
+            <temporal-relation how='before' max-distance='24h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value min="37.8"/>  <!-- >= 37.8 -->
+                    </attribute>
+                    <attribute ref="A2">
+                        <allowed-value min="11"/>  <!-- >= 11 -->
+                    </attribute>
+                    <attribute ref="A2">
+                        <allowed-value max="4"/>  <!-- <= 4 -->
+                    </attribute>
+                    <attribute ref="A3">
+                        <allowed-value max="1.5"/>  <!-- <= 1.5 -->
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                    <attribute ref="E2">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                    <attribute ref="E3">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+        </rule>
+    </abstraction-rules>
+</pattern>

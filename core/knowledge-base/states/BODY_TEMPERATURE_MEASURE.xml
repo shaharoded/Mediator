@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<state name="BODY_TEMPERATURE_MEASURE_STATE">
+    <categories>Measurements</categories>
+    <description>Abstraction for the measurements of BODY TEMPERATURE</description>
+    <derived-from name="BODY_TEMPERATURE_MEASURE" tak="raw-concept"/>
+
+    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
+    <persistence good-after="6h" interpolate="true" max-skip="1"/>
+
+    <!-- Discretize and abstract -->
+    <abstraction-rules>
+        <rule value="Severe Hypothermia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="0" max="35"/>
+            </attribute>
+        </rule>
+        <rule value="Mild Hypothermia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="35" max="35.9"/>
+            </attribute>
+        </rule>
+        <rule value="Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="35.9" max="37.7"/>
+            </attribute>
+        </rule>
+        <rule value="Low Fever" operator="and">
+            <attribute idx="0">
+                <allowed-value min="37.7" max="38.3"/>
+            </attribute>
+        </rule>
+        <rule value="Mild Fever" operator="and">
+            <attribute idx="0">
+                <allowed-value min="38.3" max="39.0"/>
+            </attribute>
+        </rule>
+        <rule value="High Fever" operator="and">
+            <attribute idx="0">
+                <allowed-value min="39.0"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</state>
