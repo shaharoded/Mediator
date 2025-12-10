@@ -251,6 +251,7 @@ Note that this TAK needs to resolve it's parameter on the row level, which may i
     - If a matching parameter row exists (by name and closest in time), use its value.
     - Otherwise, use the parameter's default value. If no default and no match - return empty results df.
     - `how='before'/'all'` controls if the reolved value is taken from all patient timeline, or just a predecessor row.
+    - `dynamic='true'/'false'` controls if the parameter is resolved once (steady baseline) or at every occurrence (sliding window).
 2. Apply the specified function (e.g., `div`) to the parent value and parameter(s).
 3. Emit a new row with the result as the value, and the same temporal columns as the parent.
 
@@ -1051,7 +1052,7 @@ PatientId | ConceptName  | StartDateTime       | Value                | Abstract
     <description>Measurement of M-SHR ratio (glucose / first glucose measure)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
     <parameters>
-        <parameter name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="P1" default="120"/>
+        <parameter name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" how='all' dynamic='true' ref="P1" default="120"/>
     </parameters>
     <functions>
         <function name="div">

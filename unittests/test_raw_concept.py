@@ -90,7 +90,7 @@ PARAM_RAW_XML = """\
     <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
     <parameters>
-        <parameter name="BASE_GLUCOSE_MEASURE" tak="raw-concept" how='all' idx="0" ref="P1" default="120"/>
+        <parameter name="BASE_GLUCOSE_MEASURE" tak="raw-concept" how='all' dynamic='true' idx="0" ref="P1" default="120"/>
     </parameters>
     <functions>
         <function name="div">
@@ -305,7 +305,7 @@ def test_apply_parameterized_raw_concept_with_default_param(tmp_path: Path):
     <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
     <parameters>
-        <parameter name="BASE_GLUCOSE_MEASURE" tak="raw-concept" idx="0" how='before' ref="P1" default="25"/>
+        <parameter name="BASE_GLUCOSE_MEASURE" tak="raw-concept" idx="0" how='before' dynamic='false' ref="P1" default="25"/>
     </parameters>
     <functions>
         <function name="div">
@@ -342,7 +342,7 @@ def test_apply_parameterized_raw_concept_with_param_row(tmp_path: Path):
     <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
     <parameters>
-        <parameter name="BASE_GLUCOSE_MEASURE" tak="raw-concept" idx="0" how='before' ref="P1" default="25"/>
+        <parameter name="BASE_GLUCOSE_MEASURE" tak="raw-concept" idx="0" how='before' dynamic='false' ref="P1" default="25"/>
     </parameters>
     <functions>
         <function name="div">
@@ -406,7 +406,7 @@ def test_apply_parameterized_raw_concept_with_how_flag(tmp_path: Path):
     <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
     <parameters>
-        <parameter name="{param_name}" tak="raw-concept" idx="0" ref="P1" how="{how}"/>
+        <parameter name="{param_name}" tak="raw-concept" idx="0" ref="P1" how="{how}" dynamic="{dynamic}"/>
     </parameters>
     <functions>
         <function name="div">
@@ -426,7 +426,7 @@ def test_apply_parameterized_raw_concept_with_how_flag(tmp_path: Path):
     repo.register(RawConcept.parse(base_glucose_path))
 
     # Case 1: Parameter is GLUCOSE_MEASURE, before the instance
-    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml_how.format(param_name="GLUCOSE_MEASURE", how="before"))
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml_how.format(param_name="GLUCOSE_MEASURE", how="before", dynamic="true"))
     tak = ParameterizedRawConcept.parse(param_path)
     repo.register(tak)
 
@@ -459,7 +459,7 @@ def test_apply_parameterized_raw_concept_with_how_flag(tmp_path: Path):
         del repo.taks["M-SHR_MEASURE"]
 
     # Case 2: Parameter is BASE_GLUCOSE_MEASURE
-    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml_how.format(param_name="BASE_GLUCOSE_MEASURE", how="all"))
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml_how.format(param_name="BASE_GLUCOSE_MEASURE", how="all", dynamic="true"))
     tak = ParameterizedRawConcept.parse(param_path)
     repo.register(tak)
 
@@ -480,7 +480,7 @@ def test_apply_parameterized_raw_concept_with_how_flag(tmp_path: Path):
     if "M-SHR_MEASURE" in repo.taks:
         del repo.taks["M-SHR_MEASURE"]
 
-    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml_how.format(param_name="BASE_GLUCOSE_MEASURE", how="before"))
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml_how.format(param_name="BASE_GLUCOSE_MEASURE", how="before", dynamic="true"))
     tak = ParameterizedRawConcept.parse(param_path)
     repo.register(tak)
 
@@ -491,3 +491,33 @@ def test_apply_parameterized_raw_concept_with_how_flag(tmp_path: Path):
     ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
     out = tak.apply(df)
     assert len(out) == 0  # No valid 'before' parameter available
+
+    # Clean up previous registration
+    if "M-SHR_MEASURE" in repo.taks:
+        del repo.taks["M-SHR_MEASURE"]
+
+    # Case 4: dynamic="false" (Static Baseline)
+    # Parameter is BASE_GLUCOSE_MEASURE, how="before"
+    # Logic: Resolve parameter ONCE based on first row's time (08:00).
+    # Param at 07:00 (50) is valid. Param at 09:00 (80) is ignored even for the 10:00 row.
+    param_path = write_xml(tmp_path, "M-SHR_MEASURE.xml", param_raw_xml_how.format(param_name="BASE_GLUCOSE_MEASURE", how="before", dynamic="false"))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (100,), "raw-concept"),
+        (1, "BASE_GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (50,), "raw-concept"),
+        (1, "BASE_GLUCOSE_MEASURE", make_ts("09:00"), make_ts("09:00"), (80,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), (200,), "raw-concept"),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
+    
+    out = tak.apply(df)
+    assert len(out) == 2
+    
+    # Row 1 (08:00): Ref time 08:00. Closest before is 07:00 (50). Result: 100/50 = 2.0
+    assert out.iloc[0]["Value"][0] == 2.0
+    
+    # Row 2 (10:00): Ref time is STILL 08:00 (baseline). Closest before 08:00 is 07:00 (50).
+    # Even though 09:00 (80) exists and is before 10:00, it is ignored because dynamic=false.
+    # Result: 200/50 = 4.0. (If dynamic=true, it would be 200/80 = 2.5)
+    assert out.iloc[1]["Value"][0] == 4.0

@@ -399,10 +399,11 @@ class ParameterizedRawConcept(RawConcept):
                 if param_name == parent_name and how == "all":
                     raise ValueError(f"{tak_name}: parameter cannot reference the parent TAK '{parent_name}' with how='all', this is temporal data leakage. Use how='before' instead.")
                 param = {
-                    "name": param_el.attrib["name"],
+                    "name": param_name,
                     "tak": param_el.attrib["tak"],
                     "idx": int(param_el.attrib["idx"]) if "idx" in param_el.attrib else 0,
-                    "how": param_el.attrib.get("how", "all"),  # 'before' or 'all'
+                    "how": how,  # 'before' or 'all'
+                    "dynamic": param_el.attrib.get("dynamic", "true").lower() == "true",
                     "ref": param_el.attrib["ref"],
                     "default": param_el.attrib.get("default")
                 }
@@ -489,44 +490,40 @@ class ParameterizedRawConcept(RawConcept):
             if not (0 <= value_idx < parent_tuple_len):
                 raise ValueError(f"{self.name}: function '{func_name}' value_idx={value_idx} out of bounds for parent tuple size {parent_tuple_len}")
 
-    def _resolve_parameters_for_row(self, row, df):
+    def _resolve_parameter_value(self, param: Dict[str, Any], ref_time: pd.Timestamp, df: pd.DataFrame) -> Any:
         """
-        Resolve parameter values by finding the closest-in-time parameter row,
-        or using default if not found. Adds support for 'how' flag ('before' or 'all').
+        Helper: Resolve a single parameter value relative to a specific reference time.
         """
-        resolved = {}
-        if not self.parameters:
-            return resolved
-        row_time = row["StartDateTime"]
-        for param in self.parameters:
-            param_rows = df[df["ConceptName"] == param["name"]].copy()
+        param_rows = df[df["ConceptName"] == param["name"]]
+        
+        # 1. Filter by 'how' (temporal constraint)
+        if not param_rows.empty:
+            how = param.get("how", "all")
+            if how == "before":
+                param_rows = param_rows[param_rows["StartDateTime"] < ref_time]
+        
+        # 2. Find closest in time
+        if not param_rows.empty:
+            # Calculate absolute time distance
+            # Note: We use .values to avoid index alignment issues during subtraction if indices differ
+            dists = (param_rows["StartDateTime"] - ref_time).abs()
+            closest_idx = dists.idxmin()
+            
+            val = param_rows.loc[closest_idx, "Value"]
             idx = param.get("idx", 0)
-            how = param.get("how", "all")  # Default to 'all' if not specified
+            if isinstance(val, tuple):
+                val = val[idx]
+            return val
 
-            if not param_rows.empty:
-                if how == "before":
-                    param_rows = param_rows[param_rows["StartDateTime"] < row_time]
-                if not param_rows.empty:
-                    # Find closest in time
-                    param_rows["TimeDist"] = (param_rows["StartDateTime"] - row_time).abs()
-                    closest_idx = param_rows["TimeDist"].idxmin()
-                    val = param_rows.loc[closest_idx, "Value"]
-                    if isinstance(val, tuple):
-                        val = val[idx]
-                    resolved[param["ref"]] = val
-                    continue
-
-            # If no match and no default, skip this parameter
-            default_val = param.get("default")
-            if default_val is not None:
-                try:
-                    default_val = float(default_val)
-                except (TypeError, ValueError):
-                    pass
-                resolved[param["ref"]] = default_val
-            else:
-                return None  # Signal unresolved parameters
-        return resolved
+        # 3. Fallback to default
+        default_val = param.get("default")
+        if default_val is not None:
+            try:
+                return float(default_val)
+            except (TypeError, ValueError):
+                return default_val
+        
+        return None # Unresolved
 
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -539,22 +536,58 @@ class ParameterizedRawConcept(RawConcept):
         if parent_rows.empty:
             return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
 
+        # Separate parameters by dynamic flag
+        static_params = [p for p in self.parameters if not p["dynamic"]]
+        dynamic_params = [p for p in self.parameters if p["dynamic"]]
+
+        # Pre-calculate static parameters ONCE
+        # Reference time for static params is the StartDateTime of the FIRST parent row
+        # (Baseline logic: what was the state at the beginning of this concept's timeline?)
+        static_values = {}
+        if static_params:
+            baseline_time = parent_rows.iloc[0]["StartDateTime"]
+            for param in static_params:
+                val = self._resolve_parameter_value(param, baseline_time, df)
+                if val is None:
+                    # If a static parameter cannot be resolved (and no default), 
+                    # we might fail the whole concept or just skip rows. 
+                    # Current logic: if any param is None, we skip the row.
+                    # So we mark it as None here.
+                    static_values[param["ref"]] = None
+                else:
+                    static_values[param["ref"]] = val
+
         out_rows = []
         for _, row in parent_rows.iterrows():
             tuple_val = list(row["Value"])  # mutable copy
-            param_values = self._resolve_parameters_for_row(row, df)
-            if param_values is None:  # Skip if parameters cannot be resolved
+            
+            # Start with static values
+            current_param_values = static_values.copy()
+            
+            # Resolve dynamic parameters for this specific row
+            row_time = row["StartDateTime"]
+            for param in dynamic_params:
+                val = self._resolve_parameter_value(param, row_time, df)
+                current_param_values[param["ref"]] = val
+
+            # Check if any parameter failed to resolve
+            if any(v is None for v in current_param_values.values()):
                 continue
+
+            # Apply functions
             for func in self.functions:
                 func_name = func["name"]
                 value_idx = func["value_idx"]
                 param_refs = func["param_refs"]
+                
                 args = [tuple_val[value_idx]]
                 for ref in param_refs:
-                    args.append(param_values.get(ref))
+                    args.append(current_param_values.get(ref))
+                
                 # Use apply_external_function instead of REPO directly
                 result = apply_external_function(func_name, *args)
                 tuple_val[value_idx] = result  # in-place update
+            
             out_rows.append({
                 "PatientId": row["PatientId"],
                 "ConceptName": self.name,
@@ -563,6 +596,7 @@ class ParameterizedRawConcept(RawConcept):
                 "Value": tuple(tuple_val),
                 "AbstractionType": self.family
             })
+        
         out = pd.DataFrame(out_rows)
         if out.empty:
              return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])

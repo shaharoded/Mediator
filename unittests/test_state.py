@@ -592,7 +592,7 @@ def test_state_from_parameterized_raw_concept(tmp_path: Path):
     <description>Raw concept to manage the measurement of M-SHR ratio (glucose / first glucose measure)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
     <parameters>
-        <parameter name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" how='before' ref="P1" default="120"/>
+        <parameter name="FIRST_GLUCOSE_MEASURE" tak="raw-concept" idx="0" how='before' dynamic='false' ref="P1" default="120"/>
     </parameters>
     <functions>
         <function name="div">
