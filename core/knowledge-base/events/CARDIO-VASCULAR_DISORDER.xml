@@ -5,12 +5,17 @@
     <derived-from>
         <!-- ref optional when no abstraction-rules -->
         <attribute name="CARDIO-VASCULAR_DISORDER" tak="raw-concept" idx="0" ref='A1'/>
+        <attribute name="TROPONIN_MEASURE" tak="raw-concept" idx="0" ref='A2'/>
     </derived-from>
 
     <abstraction-rules>
         <rule value="True" operator="or">
             <attribute ref="A1">
                 <allowed-value equal="True"/>
+            </attribute>
+            <attribute ref="A2">
+                <!-- X3 of the high value in the normal range -->
+                <allowed-value min="600"/>
             </attribute>
         </rule>
     </abstraction-rules>
