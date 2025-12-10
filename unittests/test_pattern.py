@@ -879,7 +879,7 @@ def test_pattern_found_simple(repo_simple_pattern):
 
 
 def test_pattern_not_found_no_event(repo_simple_pattern):
-    """Pattern not found: no glucose measure."""
+    """Pattern not found: no glucose measure. Expect specific missed opportunity."""
     admission_tak = repo_simple_pattern.get("ADMISSION_EVENT")
     pattern_tak = repo_simple_pattern.get("GLUCOSE_ON_ADMISSION_SIMPLE")
     
@@ -893,12 +893,13 @@ def test_pattern_not_found_no_event(repo_simple_pattern):
     assert len(df_out) == 1
     row = df_out.iloc[0]
     assert row["Value"] == "False"
-    assert pd.isna(row["StartDateTime"])
+    # NEW: We expect the specific anchor time, not NaT
+    assert row["StartDateTime"] == make_ts("08:00") 
     assert pd.isna(row["EndDateTime"])
 
 
 def test_pattern_not_found_event_too_late(repo_simple_pattern):
-    """Pattern not found: glucose at 14h (outside 12h window)."""
+    """Pattern not found: glucose at 14h. Expect specific missed opportunity."""
     admission_tak = repo_simple_pattern.get("ADMISSION_EVENT")
     glucose_tak = repo_simple_pattern.get("GLUCOSE_MEASURE")
     pattern_tak = repo_simple_pattern.get("GLUCOSE_ON_ADMISSION_SIMPLE")
@@ -915,7 +916,10 @@ def test_pattern_not_found_event_too_late(repo_simple_pattern):
     df_out = pattern_tak.apply(df_input)
     
     assert len(df_out) == 1
-    assert df_out.iloc[0]["Value"] == "False"
+    row = df_out.iloc[0]
+    assert row["Value"] == "False"
+    # NEW: We expect the specific anchor time
+    assert row["StartDateTime"] == make_ts("08:00")
 
 
 def test_pattern_one_to_one_pairing(repo_simple_pattern):
@@ -955,7 +959,105 @@ def test_pattern_one_to_one_pairing(repo_simple_pattern):
     assert len(df_out) == 2
     assert all(df_out["Value"] == "True")
 
+# -----------------------------
+# Tests: Missed Opportunities & Filtering Logic
+# -----------------------------
 
+def test_missed_opportunity_mixed_results(repo_simple_pattern):
+    """
+    Scenario: 2 Anchors.
+    - Anchor 1 (08:00) matches Event (09:00) -> True
+    - Anchor 2 (12:00) has no event -> False (Specific)
+    """
+    admission_tak = repo_simple_pattern.get("ADMISSION_EVENT")
+    glucose_tak = repo_simple_pattern.get("GLUCOSE_MEASURE")
+    pattern_tak = repo_simple_pattern.get("GLUCOSE_ON_ADMISSION_SIMPLE")
+    
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("09:00"), make_ts("09:00"), 100),
+        (1, "ADMISSION", make_ts("12:00"), make_ts("12:00"), "True"),
+        # No glucose for second admission
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
+    df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
+    
+    df_out = pattern_tak.apply(df_input).sort_values("StartDateTime").reset_index(drop=True)
+    
+    assert len(df_out) == 2
+    
+    # First row: True pattern
+    assert df_out.iloc[0]["Value"] == "True"
+    assert df_out.iloc[0]["StartDateTime"] == make_ts("08:00")
+    
+    # Second row: Specific False (Missed Opportunity)
+    assert df_out.iloc[1]["Value"] == "False"
+    assert df_out.iloc[1]["StartDateTime"] == make_ts("12:00")
+    assert pd.isna(df_out.iloc[1]["EndDateTime"])
+
+
+def test_missed_opportunity_filtered_by_context(repo_with_context):
+    """
+    Condition 1: Unmatched anchor MUST satisfy context to be reported as False.
+    Scenario: 
+    - Anchor (08:00) exists.
+    - No Event.
+    - No Context (Diabetes).
+    Result: Should NOT report specific False. Since no other patterns exist, 
+            it falls back to Generic False (NaT).
+    """
+    admission_tak = repo_with_context.get("ADMISSION_EVENT")
+    pattern_tak = repo_with_context.get("GLUCOSE_ON_ADMISSION_CONTEXT")
+    
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        # No DIABETES context
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission = admission_tak.apply(df_raw)
+    # No context data generated
+    
+    df_out = pattern_tak.apply(df_admission)
+    
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["Value"] == "False"
+    # Because the specific anchor was filtered out by lack of context,
+    # the system found 0 instances. It returns the Generic False (NaT).
+    assert pd.isna(row["StartDateTime"]) 
+
+
+def test_missed_opportunity_filtered_by_overlap(repo_simple_pattern):
+    """
+    Condition 2: Unmatched anchor inside a successful interval is ignored.
+    Scenario:
+    - Anchor 1 (08:00) matches Event (12:00). Interval: [08:00, 12:00].
+    - Anchor 2 (10:00) is unused.
+    Result: Anchor 2 is inside Anchor 1's interval. Should be ignored.
+            Output should contain only 1 True row.
+    """
+    admission_tak = repo_simple_pattern.get("ADMISSION_EVENT")
+    glucose_tak = repo_simple_pattern.get("GLUCOSE_MEASURE")
+    pattern_tak = repo_simple_pattern.get("GLUCOSE_ON_ADMISSION_SIMPLE")
+    
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("12:00"), make_ts("12:00"), 100), # Matches A1
+        (1, "ADMISSION", make_ts("10:00"), make_ts("10:00"), "True"), # Unused, inside [08, 12]
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
+    df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
+    
+    df_out = pattern_tak.apply(df_input)
+    
+    assert len(df_out) == 1
+    assert df_out.iloc[0]["Value"] == "True"
+    assert df_out.iloc[0]["StartDateTime"] == make_ts("08:00")
+    
 # -----------------------------
 # Tests: Time-Constraint Compliance
 # -----------------------------

@@ -561,4 +561,14 @@ For detailed information about TAK families, XML schema, validation rules, and e
 
 ---
 
+## Possible Additions
+
+The following are not important for my use case but might be nice for other applications:
+
+1. Define Overlap(Pattern) to use for complex context. Should check if 2+ contexts (or any other concept) overlap and if so will return their overlap window (can possibly include +- good before/after).
+
+2. Currently parameters in pattern compliance resolve once per patient. Maybe we want to resolve them per each pattern instance (like in parameterized-raw-concept)? For things like BMI as parameter it's not important, but if parameter is "last insulin dose" and we want to check each pattern instance against different value, then it's useful (but also solveable and clearer by using parameterized-raw-concept as anchor/event).
+
+---
+
 **Maintained by:** Shahar Oded

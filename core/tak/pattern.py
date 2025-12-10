@@ -780,9 +780,18 @@ class LocalPattern(Pattern):
         Returns:
             List of pattern instance dicts with scores
         """
+        # Ensure stable indices for global tracking across rules
+        patient_df = patient_df.reset_index(drop=True)
         instances = []
         
-        # Track used indices for one-to-one matching
+        # Track successful intervals to filter "missed" anchors later
+        # List of (StartDateTime, EndDateTime)
+        successful_intervals = []
+        
+        # Track potential "False" instances (unmatched anchors)
+        potential_falses = []
+
+        # Track used indices (globally across all rules)
         used_anchor_ids = set()
         used_event_ids = set()
         
@@ -806,81 +815,172 @@ class LocalPattern(Pattern):
             events = self._extract_candidates(patient_df, rule.relation_spec.get("event"))
             contexts = self._extract_candidates(patient_df, rule.context_spec) if rule.context_spec else None
             
-            if anchors.empty or events.empty:
-                continue  # EARLY EXIT: no candidates → skip rule
+            if anchors.empty:
+                continue  # EARLY EXIT: no candidates → skip rule (no events should not exit!)
             
-            # Sort by select preference
-            anchor_order = self._order_indices(anchors, rule.relation_spec.get("anchor", {}))
-            event_order = self._order_indices(events, rule.relation_spec.get("event", {}))
-            
-            # OPTIMIZATION: Pre-filter temporal matches (vectorized before nested loop)
-            # This reduces O(N²) nested loop to O(N×M) where M is # of valid candidates.
-            valid_pairs = self._prefilter_temporal_matches(
-                anchors, events, anchor_order, event_order, rule
-            )
-            
-            # Iterate over valid pairs (one-to-one pairing)
-            for anchor_idx, event_idx in valid_pairs:
-                if anchor_idx in used_anchor_ids or event_idx in used_event_ids:
-                    continue  # Already used
+            if not events.empty:
+                # Sort by select preference
+                anchor_order = self._order_indices(anchors, rule.relation_spec.get("anchor", {}))
+                event_order = self._order_indices(events, rule.relation_spec.get("event", {}))
                 
-                anchor_row = anchors.loc[anchor_idx]
-                event_row = events.loc[event_idx]
+                # OPTIMIZATION: Pre-filter temporal matches (vectorized before nested loop)
+                # This reduces O(N²) nested loop to O(N×M) where M is # of valid candidates.
+                valid_pairs = self._prefilter_temporal_matches(
+                    anchors, events, anchor_order, event_order, rule
+                )
                 
-                # Check full rule match (context + detailed constraints)
-                if not rule.matches(anchor_row, event_row, contexts):
-                    continue
+                # Iterate over valid pairs (one-to-one pairing)
+                for anchor_idx, event_idx in valid_pairs:
+                    if anchor_idx in used_anchor_ids or event_idx in used_event_ids:
+                        continue  # Already used
+                    
+                    anchor_row = anchors.loc[anchor_idx]
+                    event_row = events.loc[event_idx]
+                    
+                    # Check full rule match (context + detailed constraints)
+                    if not rule.matches(anchor_row, event_row, contexts):
+                        continue
+                    
+                    # Pattern found! Compute compliance scores (None if no compliance function)
+                    time_score = None
+                    value_score = None
+                    
+                    # Refine parameters if needed (use anchor start time as reference)
+                    if has_compliance and self.parameters:
+                        # OPTIMIZATION: Only re-resolve if anchor time differs significantly from ref_time
+                        # (For most patients with < 100 records, this is overkill; skip for now)
+                        pass  # Use pre-computed parameter_values
+                    
+                    # Compute time-constraint compliance (only if function exists)
+                    if rule.time_constraint_compliance:
+                        time_score = self._compute_time_compliance(
+                            anchor_row=anchor_row,
+                            event_row=event_row,
+                            tcc_spec=rule.time_constraint_compliance,
+                            parameter_values=parameter_values
+                        )
+                    
+                    # Compute value-constraint compliance (only if function exists)
+                    if rule.value_constraint_compliance:
+                        value_score = self._compute_value_compliance(
+                            anchor_row=anchor_row,
+                            event_row=event_row,
+                            vcc_spec=rule.value_constraint_compliance,
+                            parameter_values=parameter_values
+                        )
+                    
+                    # Classify pattern instance based on scores
+                    combined_score = self._compute_combined_score(time_score, value_score)
+                    
+                    if combined_score == 1.0:
+                        value_label = "True"
+                    elif combined_score > 0.0:
+                        value_label = "Partial"
+                    else:
+                        value_label = "False"
+                    
+                    instances.append({
+                        "StartDateTime": anchor_row["StartDateTime"],
+                        "EndDateTime": event_row["EndDateTime"],
+                        "Value": value_label,
+                        "TimeConstraintScore": time_score,
+                        "ValueConstraintScore": value_score
+                    })
+                    
+                    successful_intervals.append((anchor_row["StartDateTime"], event_row["EndDateTime"]))
+                    used_anchor_ids.add(anchor_idx)
+                    used_event_ids.add(event_idx)
                 
-                # Pattern found! Compute compliance scores (None if no compliance function)
-                time_score = None
-                value_score = None
+            # --- Handle Unmatched Anchors (Potential False) ---
+            unused_anchor_idxs = set(anchors.index) - used_anchor_ids
+            if not unused_anchor_idxs:
+                continue
+
+            # Prepare for Context Check (Condition 1)
+            sorted_candidate_times = None
+            if rule.context_spec:
+                # Combine anchor and event start times to find "next instance"
+                # We need all candidates for this rule to define the timeline
+                all_starts = []
+                if not anchors.empty:
+                    all_starts.append(anchors["StartDateTime"])
+                if not events.empty:
+                    all_starts.append(events["StartDateTime"])
                 
-                # Refine parameters if needed (use anchor start time as reference)
-                if has_compliance and self.parameters:
-                    # OPTIMIZATION: Only re-resolve if anchor time differs significantly from ref_time
-                    # (For most patients with < 100 records, this is overkill; skip for now)
-                    pass  # Use pre-computed parameter_values
-                
-                # Compute time-constraint compliance (only if function exists)
-                if rule.time_constraint_compliance:
-                    time_score = self._compute_time_compliance(
-                        anchor_row=anchor_row,
-                        event_row=event_row,
-                        tcc_spec=rule.time_constraint_compliance,
-                        parameter_values=parameter_values
-                    )
-                
-                # Compute value-constraint compliance (only if function exists)
-                if rule.value_constraint_compliance:
-                    value_score = self._compute_value_compliance(
-                        anchor_row=anchor_row,
-                        event_row=event_row,
-                        vcc_spec=rule.value_constraint_compliance,
-                        parameter_values=parameter_values
-                    )
-                
-                # Classify pattern instance based on scores
-                combined_score = self._compute_combined_score(time_score, value_score)
-                
-                if combined_score == 1.0:
-                    value_label = "True"
-                elif combined_score > 0.0:
-                    value_label = "Partial"
+                if all_starts:
+                    sorted_candidate_times = pd.concat(all_starts).sort_values().unique()
                 else:
-                    value_label = "False"
+                    sorted_candidate_times = pd.Series([], dtype='datetime64[ns]')
+
+            for idx in unused_anchor_idxs:
+                anchor_row = anchors.loc[idx]
+                start_dt = anchor_row["StartDateTime"]
                 
-                instances.append({
-                    "StartDateTime": anchor_row["StartDateTime"],
-                    "EndDateTime": event_row["EndDateTime"],
-                    "Value": value_label,
-                    "TimeConstraintScore": time_score,
-                    "ValueConstraintScore": value_score
+                # Condition 1: Context Satisfaction
+                # "satisfied between the instance of this anchor and the next instance of an anchor or event"
+                if rule.context_spec:
+                    if sorted_candidate_times is None or len(sorted_candidate_times) == 0:
+                        continue # Should not happen if anchors exist
+
+                    # Find next instance time
+                    # searchsorted returns index where start_dt would be inserted to maintain order
+                    # side='right' gives index of first element > start_dt
+                    pos = sorted_candidate_times.searchsorted(start_dt, side='right')
+                    
+                    if pos < len(sorted_candidate_times):
+                        next_dt = sorted_candidate_times[pos]
+                        
+                        # Check overlap with [start_dt, next_dt]
+                        # Context must overlap this interval
+                        if contexts is None or contexts.empty:
+                            continue # Context required but none found
+
+                        # Overlap logic: max(start1, start2) < min(end1, end2)
+                        # Here: max(ctx.Start, start_dt) < min(ctx.End, next_dt)
+                        # Simplified: ctx.End > start_dt AND ctx.Start < next_dt
+                        ctx_overlap = contexts[
+                            (contexts["EndDateTime"] > start_dt) & 
+                            (contexts["StartDateTime"] < next_dt)
+                        ]
+                        
+                        if ctx_overlap.empty:
+                            continue # Context not satisfied in the gap
+                    else:
+                        # No next instance found (this is the last anchor/event)
+                        # If no next instance, we cannot verify "between this and next".
+                        # We skip adding it as False.
+                        continue
+
+                # Add to potential falses
+                potential_falses.append({
+                    "StartDateTime": start_dt,
+                    "EndDateTime": pd.NaT,
+                    "Value": "False",
+                    "TimeConstraintScore": 0.0,
+                    "ValueConstraintScore": 0.0
                 })
-                
-                used_anchor_ids.add(anchor_idx)
-                used_event_ids.add(event_idx)
+
+        # --- Condition 2: Filter Potential Falses based on Successful Intervals ---
+        # "another anchor that came before the anchor at time T, is not satisfied by an event that came after time T, 
+        # meaning the anchor we want to add as "unfullfilled" is not captured in the middle of another instance's interval."
+        
+        for pf in potential_falses:
+            pf_start = pf["StartDateTime"]
+            is_covered = False
+            
+            for (succ_start, succ_end) in successful_intervals:
+                # Check if pf_start is strictly inside a successful interval
+                # (or start matches but it's covered by the duration)
+                # Using succ_start <= pf_start < succ_end covers most cases
+                if succ_start <= pf_start < succ_end:
+                    is_covered = True
+                    break
+            
+            if not is_covered:
+                instances.append(pf)
         
         return instances
+            
 
     def _prefilter_temporal_matches(
         self,
@@ -1215,7 +1315,10 @@ class LocalPattern(Pattern):
             return pd.DataFrame(columns=df.columns)
         # Combine and sort (single sort operation)
         combined = pd.concat(masked_parts, ignore_index=False).sort_values("StartDateTime")
-        return combined.reset_index(drop=True)
+        
+        # Do NOT reset index. Keep original patient_df indices so 'used_anchor_ids' 
+        # works correctly across different rules (global tracking).
+        return combined
 
     def _order_indices(self, df: pd.DataFrame, spec: Dict[str, Any]) -> List[int]:
         """

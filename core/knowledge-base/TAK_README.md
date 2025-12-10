@@ -446,7 +446,7 @@ Patterns use **ref-based indexing** to reference attributes/parameters (similar 
    - Break after first match (greedy pairing)
 
 5. **Compliance Scoring (Optional):**
-   - **Parameters resolved ONCE per patient** (closest to pattern start time, or default)
+   - **Parameters resolved ONCE per patient** (closest to the first pattern start time, or default)
    - **Time-constraint:** Score actual time gap using trapezoidal function
    - **Value-constraint:** Score target attribute values (from anchor/event)
    - **Combined score:** Average of time + value scores (allows partial compliance on one dimension)

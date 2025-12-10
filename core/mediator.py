@@ -2,7 +2,6 @@
 TO-DO:
  - I need a flag to patterns that I didn't find. For example, had hyper, no following measure, so no score? I need a logic that for every hyper event must satisfy with measure after within reasonable time.
  - We have empty QA row when no pattern is found, but what about when we only find patterns some of the days? How to say "there should have been an instance here"? Maybe global pattern?
- - define Overlap(Pattern) to use for complex context. Should check if 2+ contexts (or any other concept) overlap and if so will return their overlap window (should include +- good before/after?).
  """
 
 from __future__ import annotations
@@ -597,9 +596,11 @@ class Mediator:
                 pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore"])
             )
         
-        # Main output: only rows with valid timestamps (not NaT)
-        # This filters out "False" patterns (which have NaT timestamps)
-        df_main = df[df["StartDateTime"].notna()][["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"]].copy()
+        # Main output: Exclude "False" patterns
+        # We filter by Value != 'False' to remove:
+        # 1. Generic "no pattern found" rows (Start=NaT, End=NaT)
+        # 2. Specific "missed opportunity" rows (Start=Valid, End=NaT)
+        df_main = df[df["Value"] != "False"][["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"]].copy()
         
         # QA scores: all rows (including "False" with NaT)
         # Extract compliance score columns
