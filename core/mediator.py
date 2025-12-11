@@ -1,7 +1,7 @@
 """
 TO-DO:
- - We can currently react to unused pattern anchors, but we also need global patterns that simply scan the output and tell if a recurring event happened at least N times in a given time window.
- """
+ - I might have a problem with the empty local patterns and the global clippers. heck it out.
+  """
 
 from __future__ import annotations
 from typing import Optional, List, Dict, Any, Union, Tuple
@@ -24,7 +24,7 @@ from .tak.event import Event
 from .tak.state import State
 from .tak.trend import Trend
 from .tak.context import Context
-from .tak.pattern import Pattern, LocalPattern
+from .tak.pattern import Pattern, LocalPattern, GlobalPattern
 from .config import TAK_FOLDER
 
 # Add parent directory to path for backend imports
@@ -172,7 +172,8 @@ class Mediator:
             ("States", self.kb_path / "states", State, self.states),
             ("Trends", self.kb_path / "trends", Trend, self.trends),
             ("Contexts", self.kb_path / "contexts", Context, self.contexts),
-            ("Patterns", self.kb_path / "patterns", LocalPattern, self.patterns)
+            ("Local Patterns", self.kb_path / "local patterns", LocalPattern, self.patterns),
+            ("Global Patterns", self.kb_path / "global patterns", GlobalPattern, self.patterns)
         ]
         
         total_files = sum(len(list(path.glob("*.xml"))) for _, path, _, _ in phases if path.exists())
@@ -432,7 +433,7 @@ class Mediator:
         # OPTIMIZED: Vectorized unpivot using pd.melt
         df_melted = df_scores.melt(
             id_vars=["PatientId", "ConceptName", "StartDateTime", "EndDateTime"],
-            value_vars=["TimeConstraintScore", "ValueConstraintScore"],
+            value_vars=["TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore"],
             var_name="ComplianceType",
             value_name="ComplianceScore"
         )
@@ -444,7 +445,8 @@ class Mediator:
         
         df_melted["ComplianceType"] = df_melted["ComplianceType"].map({
             "TimeConstraintScore": "TimeConstraint",
-            "ValueConstraintScore": "ValueConstraint"
+            "ValueConstraintScore": "ValueConstraint",
+            "CyclicConstraintScore": "CyclicConstraint"
         })
         
         rows = [
@@ -584,7 +586,7 @@ class Mediator:
         
         Args:
             df: Pattern output with columns [PatientId, ConceptName, StartDateTime, EndDateTime, 
-                                            Value, TimeConstraintScore, ValueConstraintScore, AbstractionType]
+                                            Value, TimeConstraintScore, ValueConstraintScore, CyclicConstraintScore, AbstractionType]
         
         Returns:
             Tuple of (main_output_df, qa_scores_df)
@@ -592,7 +594,7 @@ class Mediator:
         if df.empty:
             return (
                 pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"]),
-                pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore"])
+                pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore"])
             )
         
         # Main output: Exclude "False" patterns
@@ -603,7 +605,7 @@ class Mediator:
         
         # QA scores: all rows (including "False" with NaT)
         # Extract compliance score columns
-        df_scores = df[["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore"]].copy()
+        df_scores = df[["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore"]].copy()
         
         # Fill NaT with sentinel date for DB insertion (approx. 2262-04-11 23:47:16)
         sentinel_date = pd.Timestamp.max

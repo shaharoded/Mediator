@@ -361,6 +361,66 @@ class TemporalRelationRule(TAKRule):
         return overlap_mask.any()
 
 
+class CyclicRule(TAKRule):
+    """
+    Cyclic rule for GlobalPattern. Assures the inner-window conditions are met.
+    Ensures relevant events (can be any concept) occur min/max times within time windows.
+    """
+    def __init__(
+        self,
+        start: str,
+        end: str,
+        time_window: str,
+        min_occurrences: int,
+        max_occurrences: int,
+        event_spec: Dict[str, Any],
+        context_spec: Optional[Dict[str, Any]] = None,
+        cyclic_constraint_compliance: Optional[Dict[str, Any]] = None,
+        value_constraint_compliance: Optional[Dict[str, Any]] = None,
+    ):
+        self.start = parse_duration(start)
+        self.end = parse_duration(end)
+        self.time_window = parse_duration(time_window)
+        self.min_occurrences = min_occurrences
+        self.max_occurrences = max_occurrences
+        self.event_spec = event_spec
+        self.context_spec = context_spec
+        self.cyclic_constraint_compliance = cyclic_constraint_compliance
+        self.value_constraint_compliance = value_constraint_compliance
+
+    def matches(self, event_row: pd.Series, window_start: pd.Timestamp, window_end: pd.Timestamp, contexts: Optional[pd.DataFrame]) -> bool:
+        """
+        There is no event_row for cyclic rules; only window and context matter.
+        For every window we'll check if the context is satisfied, and then filter events directly on the time frame.
+        """
+        pass
+
+    def context_satisfied(self, window_start: pd.Timestamp, window_end: pd.Timestamp, contexts: Optional[pd.DataFrame]) -> bool:
+        if not self.context_spec or not self.context_spec.get("attributes"):
+            return True
+        if contexts is None or contexts.empty:
+            return False
+        
+        # ASSUMPTION: Only ONE context attribute (enforced in validation)
+        attr_name, attr_spec = next(iter(self.context_spec["attributes"].items()))
+        allowed_values = attr_spec.get("allowed_values", set())
+        
+        if not allowed_values:
+            attr_mask = (contexts["ConceptName"] == attr_name)
+            if not attr_mask.any(): return False
+            matching_contexts = contexts[attr_mask]
+        else:
+            concept_mask = (contexts["ConceptName"] == attr_name)
+            value_mask = contexts["Value"].astype(str).isin(allowed_values)
+            combined_mask = concept_mask & value_mask
+            if not combined_mask.any(): return False
+            matching_contexts = contexts[combined_mask]
+        
+        # Check temporal overlap with window
+        overlap_mask = (matching_contexts["StartDateTime"] < window_end) & (matching_contexts["EndDateTime"] > window_start)
+        return overlap_mask.any()
+
+
 def validate_xml_against_schema(xml_path: Path, schema_path: Optional[Path] = None) -> None:
     """
     Validate XML file against XSD schema.

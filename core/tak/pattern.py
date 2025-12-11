@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 import logging
 logger = logging.getLogger(__name__)
 
-from .tak import TAK, validate_xml_against_schema, TemporalRelationRule
+from .tak import TAK, validate_xml_against_schema, TemporalRelationRule, CyclicRule
 from .utils import apply_external_function_on_trapez, parse_duration
 from .repository import get_tak_repository
 from .raw_concept import RawConcept
@@ -26,13 +26,137 @@ class Pattern(TAK):
     ):
         super().__init__(name=name, categories=categories, description=description, family=family)
         self.derived_from = derived_from
+        self.parameters = []
 
     @classmethod
     def parse(cls, xml_path: Union[str, Path]) -> "Pattern":
-        raise NotImplementedError("Use LocalPattern or GlobalPattern subclasses.")
+        xml_path = Path(xml_path)
+        validate_xml_against_schema(xml_path)
+        root = ET.parse(xml_path).getroot()
+        concept_type = root.attrib.get("concept-type")
+        
+        if concept_type == "local-pattern":
+            return LocalPattern.parse(xml_path)
+        elif concept_type == "global-pattern":
+            return GlobalPattern.parse(xml_path)
+        else:
+            raise ValueError(f"Unknown concept-type '{concept_type}' in {xml_path}")
 
     def validate(self) -> None:
         raise NotImplementedError("Use LocalPattern or GlobalPattern subclasses.")
+
+    def _resolve_parameters(self, pattern_start: pd.Timestamp, patient_df: pd.DataFrame) -> Dict[str, Union[float, str]]:
+        resolved = {}
+        if not self.parameters: return resolved
+        param_specs_by_name = {p["name"]: p for p in self.parameters}
+        patient_df = patient_df.copy()
+        patient_df["TimeDist"] = (patient_df["StartDateTime"] - pattern_start).abs()
+        param_names = list(param_specs_by_name.keys())
+        param_df = patient_df[patient_df["ConceptName"].isin(param_names)]
+        if param_df.empty:
+            for param_spec in self.parameters:
+                resolved[param_spec["ref"]] = self._parse_parameter_value(param_spec["default"])
+            return resolved
+        closest_indices = param_df.groupby("ConceptName")["TimeDist"].idxmin()
+        for param_spec in self.parameters:
+            param_ref = param_spec["ref"]
+            param_name = param_spec["name"]
+            param_idx = param_spec["idx"]
+            param_default = param_spec["default"]
+            if param_name not in closest_indices:
+                resolved[param_ref] = self._parse_parameter_value(param_default)
+                continue
+            closest_idx = closest_indices[param_name]
+            closest_row = patient_df.loc[closest_idx]
+            val = closest_row["Value"]
+            if isinstance(val, tuple):
+                val = val[param_idx] if param_idx < len(val) else None
+            if val is not None:
+                resolved[param_ref] = self._parse_parameter_value(val)
+            else:
+                resolved[param_ref] = self._parse_parameter_value(param_default)
+        return resolved
+
+    @staticmethod
+    def _parse_parameter_value(val: Any) -> Union[float, str]:
+        try: return float(val)
+        except (ValueError, TypeError): pass
+        if isinstance(val, str):
+            try: return parse_duration(val).total_seconds()
+            except (ValueError, AttributeError): pass
+        return str(val)
+
+    def _extract_candidates(self, df: pd.DataFrame, spec: Optional[Dict[str, Any]]) -> pd.DataFrame:
+        attrs = spec.get("attributes", {})
+        if not attrs: return pd.DataFrame(columns=df.columns)
+        masked_parts = []
+        for attr_name, constraints in attrs.items():
+            idx = constraints.get("idx", 0)
+            rows = df[df["ConceptName"] == attr_name].copy()
+            if rows.empty: continue
+            if idx == 0:
+                rows["__value__"] = rows["Value"].apply(lambda v: v[0] if isinstance(v, tuple) and len(v) > 0 else v)
+            else:
+                rows["__value__"] = rows["Value"].apply(lambda v: v[idx] if isinstance(v, tuple) and idx < len(v) else None)
+            allowed = constraints.get("allowed_values") or set()
+            if allowed: rows = rows[rows["__value__"].astype(str).isin(allowed)]
+            if constraints.get("min") is not None:
+                numeric_vals = pd.to_numeric(rows["__value__"], errors="coerce")
+                rows = rows[numeric_vals >= constraints["min"]]
+            if constraints.get("max") is not None:
+                numeric_vals = pd.to_numeric(rows["__value__"], errors="coerce")
+                rows = rows[numeric_vals <= constraints["max"]]
+            if not rows.empty: masked_parts.append(rows)
+        if not masked_parts: return pd.DataFrame(columns=df.columns)
+        return pd.concat(masked_parts, ignore_index=False).sort_values("StartDateTime")
+    
+    @staticmethod
+    def _extract_value(value: Any, idx: Optional[int]) -> Any:
+        """
+        Extract value from tuple (raw-concept) or string representation.
+        Used for value compliance checks (numeric values).
+        """
+        if isinstance(value, tuple):
+            value = value[idx] if idx < len(value) else None
+                    
+        if isinstance(value, str) and value.startswith("(") and value.endswith(")"):
+            try:
+                import ast
+                value = ast.literal_eval(value)
+                if isinstance(value, tuple):
+                    if idx < len(value):
+                        value = value[idx]
+                    else:
+                        value = None
+            except (ValueError, SyntaxError):
+                pass
+        try:
+            value = float(value)
+        except (ValueError, TypeError):
+            pass
+        return value
+    
+    @staticmethod
+    def _compute_combined_score(scores: Optional[List[Optional[float]]]) -> float:
+        """
+        Combine compliance scores.
+        
+        Strategy:
+        - If len(scores) > 1: average (allows partial compliance on one dimension to count)
+        - If only one exists: use that score (other dimension is not constrained)
+        - If neither exists: return 1.0 (no compliance constraints = full compliance)
+        
+        Examples:
+        - time=1.0, value=0.0 → avg=0.5 → "Partial" 
+        - time=0.5, value=1.0 → avg=0.75 → "Partial"
+        - time=1.0, value=None → 1.0 → "True"
+        """
+        scores = [s for s in (scores or []) if s is not None]
+        
+        if not scores:
+            return 1.0  # No compliance functions → full compliance
+        return sum(scores) / len(scores)
+
 
 class LocalPattern(Pattern):
     """
@@ -295,6 +419,9 @@ class LocalPattern(Pattern):
             
             cf_el = rule_el.find("compliance-function")
             if cf_el is not None:
+                if cf_el.find("cyclic-constraint-compliance") is not None:
+                    raise ValueError(f"{name}: LocalPattern cannot have cyclic-constraint-compliance; only time and value compliance allowed.")
+        
                 # Parse time-constraint-compliance
                 tcc_el = cf_el.find("time-constraint-compliance")
                 if tcc_el is not None:
@@ -328,7 +455,7 @@ class LocalPattern(Pattern):
                     if None in trapez_raw:
                         raise ValueError(f"{name}: time-constraint-compliance trapeze must have all 4 attributes (A, B, C, D)")
                     
-                    # Validate max_distance >= trapezeD (pattern must capture all valid instances)
+                    # Validate max_distance >= trapezD (pattern must capture all valid instances)
                     if parse_duration(trapez_raw[3]) > parse_duration(max_distance):
                         raise ValueError(
                             f"{name}: temporal-relation max-distance '{max_distance}' must be >= "
@@ -723,6 +850,7 @@ class LocalPattern(Pattern):
           - Value ("True" | "Partial" | "False")
           - TimeConstraintScore (0-1, if time-constraint compliance exists, else None)
           - ValueConstraintScore (0-1, if value-constraint compliance exists, else None)
+          - CyclicConstraintScore (always None for LocalPattern)
           - AbstractionType ("local-pattern")
         """
         logger.info("[%s] apply() start | input_rows=%d", self.name, len(df))
@@ -735,7 +863,7 @@ class LocalPattern(Pattern):
             logger.info("[%s] apply() end | no patient data", self.name)
             return pd.DataFrame(columns=[
                 "PatientId", "ConceptName", "StartDateTime", "EndDateTime", 
-                "Value", "TimeConstraintScore", "ValueConstraintScore", "AbstractionType"
+                "Value", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore", "AbstractionType"
             ])
         
         # Find all anchor-event pairs satisfying temporal relations
@@ -756,6 +884,7 @@ class LocalPattern(Pattern):
                 "Value": "False",
                 "TimeConstraintScore": 0.0 if has_time_compliance else None,
                 "ValueConstraintScore": 0.0 if has_value_compliance else None,
+                "CyclicConstraintScore": None,
                 "AbstractionType": self.family
             }])
         
@@ -766,9 +895,13 @@ class LocalPattern(Pattern):
         out["AbstractionType"] = self.family
         
         logger.info("[%s] apply() end | output_rows=%d", self.name, len(out))
+        
+        # Add CyclicConstraintScore as NaN for consistency
+        out["CyclicConstraintScore"] = None
+        
         return out[[
             "PatientId", "ConceptName", "StartDateTime", "EndDateTime", 
-            "Value", "TimeConstraintScore", "ValueConstraintScore", "AbstractionType"
+            "Value", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore", "AbstractionType"
         ]]
 
     def _find_pattern_instances(self, patient_df: pd.DataFrame) -> List[Dict[str, Any]]:
@@ -856,7 +989,7 @@ class LocalPattern(Pattern):
                         time_score = self._compute_time_compliance(
                             anchor_row=anchor_row,
                             event_row=event_row,
-                            tcc_spec=rule.time_constraint_compliance,
+                            rule=rule,
                             parameter_values=parameter_values
                         )
                     
@@ -865,19 +998,15 @@ class LocalPattern(Pattern):
                         value_score = self._compute_value_compliance(
                             anchor_row=anchor_row,
                             event_row=event_row,
-                            vcc_spec=rule.value_constraint_compliance,
+                            rule=rule,
                             parameter_values=parameter_values
                         )
                     
                     # Classify pattern instance based on scores
-                    combined_score = self._compute_combined_score(time_score, value_score)
+                    combined_score = self._compute_combined_score([time_score, value_score])
                     
-                    if combined_score == 1.0:
-                        value_label = "True"
-                    elif combined_score > 0.0:
-                        value_label = "Partial"
-                    else:
-                        value_label = "False"
+                    value_label = "True" if combined_score == 1.0 else ("Partial" if combined_score > 0 else "False")
+
                     
                     instances.append({
                         "StartDateTime": anchor_row["StartDateTime"],
@@ -1044,105 +1173,11 @@ class LocalPattern(Pattern):
         
         return valid_pairs
 
-    def _resolve_parameters(self, pattern_start: pd.Timestamp, patient_df: pd.DataFrame) -> Dict[str, Union[float, str]]:
-        """
-        Resolve parameter values: use closest record to pattern start time.
-        
-        OPTIMIZED: Vectorized groupby + idxmin (no apply() loops).
-        
-        Args:
-            pattern_start: Start time of pattern instance (anchor start)
-            patient_df: Patient's full data
-        
-        Returns:
-            Dict {param_ref: resolved_value (float, or original string if not parseable)}
-        """
-        resolved = {}
-        
-        if not self.parameters:
-            return resolved
-        
-        # Build dict of param names → param specs for quick lookup
-        param_specs_by_name = {p["name"]: p for p in self.parameters}
-        
-        # Vectorized: compute time distance for all rows at once
-        patient_df = patient_df.copy()  # Avoid SettingWithCopyWarning
-        patient_df["TimeDist"] = (patient_df["StartDateTime"] - pattern_start).abs()
-        
-        # Group by ConceptName and find index of row with min TimeDist
-        param_names = list(param_specs_by_name.keys())
-        param_df = patient_df[patient_df["ConceptName"].isin(param_names)]
-        
-        if param_df.empty:
-            # No parameter data found → use all defaults
-            for param_spec in self.parameters:
-                resolved[param_spec["ref"]] = self._parse_parameter_value(param_spec["default"])
-            return resolved
-        
-        # Vectorized: find closest row per parameter
-        closest_indices = param_df.groupby("ConceptName")["TimeDist"].idxmin()
-        
-        for param_spec in self.parameters:
-            param_ref = param_spec["ref"]
-            param_name = param_spec["name"]
-            param_idx = param_spec["idx"]
-            param_default = param_spec["default"]
-            
-            # Check if we found data for this parameter
-            if param_name not in closest_indices:
-                resolved[param_ref] = self._parse_parameter_value(param_default)
-                continue
-            
-            # Extract value from closest row
-            closest_idx = closest_indices[param_name]
-            closest_row = patient_df.loc[closest_idx]
-            val = closest_row["Value"]
-            
-            # Extract using idx (handle tuples)
-            if isinstance(val, tuple):
-                val = val[param_idx] if param_idx < len(val) else None
-            
-            if val is not None:
-                resolved[param_ref] = self._parse_parameter_value(val)
-            else:
-                resolved[param_ref] = self._parse_parameter_value(param_default)
-        
-        return resolved
-
-    @staticmethod
-    def _parse_parameter_value(val: Any) -> Union[float, str]:
-        """
-        Parse parameter value: try numeric → time-duration → string.
-        
-        Args:
-            val: Raw parameter value (can be float, int, or string)
-        
-        Returns:
-            - float: if numeric or time-duration (converted to seconds)
-            - str: if neither (pass to external function as-is)
-        """
-        # Try numeric conversion first
-        try:
-            return float(val)
-        except (ValueError, TypeError):
-            pass
-        
-        # Try time-duration parsing (e.g., "1h" → 3600.0 seconds)
-        if isinstance(val, str):
-            try:
-                duration = parse_duration(val)
-                return duration.total_seconds()  # Convert to float (seconds)
-            except (ValueError, AttributeError):
-                pass
-        
-        # Keep as string (external function will handle it)
-        return str(val)
-
     def _compute_time_compliance(
         self,
         anchor_row: pd.Series,
         event_row: pd.Series,
-        tcc_spec: Dict[str, Any],
+        rule: TemporalRelationRule,
         parameter_values: Dict[str, float]
     ) -> float:
         """
@@ -1158,6 +1193,7 @@ class LocalPattern(Pattern):
             float: Compliance score in [0, 1]
         """
         # Compute actual time gap (event.start - anchor.end)
+        tcc_spec = rule.time_constraint_compliance
         time_gap = event_row["StartDateTime"] - anchor_row["EndDateTime"]
         param_vals = [parameter_values[ref] for ref in tcc_spec["parameters"]]
         
@@ -1180,7 +1216,7 @@ class LocalPattern(Pattern):
         self,
         anchor_row: pd.Series,
         event_row: pd.Series,
-        vcc_spec: Dict[str, Any],
+        rule: TemporalRelationRule,
         parameter_values: Dict[str, float]
     ) -> float:
         """
@@ -1189,13 +1225,14 @@ class LocalPattern(Pattern):
         Args:
             anchor_row: Anchor row
             event_row: Event row
-            vcc_spec: {func_name, trapez, targets, parameters}
+            rule: TemporalRelationRule
             parameter_values: Resolved parameter values
         
         Returns:
             float: Compliance score in [0, 1] (minimum of all target scores)
         """
         # Extract target values (from anchor/event rows)
+        vcc_spec = rule.value_constraint_compliance
         target_values = []
         for target_ref in vcc_spec["targets"]:
             target_spec = self.derived_from_map.get(target_ref)
@@ -1212,15 +1249,14 @@ class LocalPattern(Pattern):
                 continue
             
             # Extract value using idx (handle tuples)
-            if isinstance(val, tuple):
-                idx = target_spec["idx"]
-                val = val[idx] if idx < len(val) else None
+            idx = target_spec["idx"] if isinstance(val, tuple) else None
+            val = self._extract_value(value=val, idx=idx)
             
             if val is not None:
                 try:
                     target_values.append(float(val))
                 except (ValueError, TypeError):
-                    logger.error(f"[{self.name}] Cannot convert target value to float: {val}")
+                    logger.error(f"[{self.name}] Cannot convert target value to float: {val}. Value-constraint compliance requires numeric values.")
         
         if not target_values:
             return 0.0
@@ -1242,84 +1278,6 @@ class LocalPattern(Pattern):
             logger.error(f"[{self.name}] Value-constraint compliance error: {e}")
             return 0.0
 
-    @staticmethod
-    def _compute_combined_score(time_score: Optional[float], value_score: Optional[float]) -> float:
-        """
-        Combine time and value compliance scores.
-        
-        Strategy:
-        - If both exist: average (allows partial compliance on one dimension to count)
-        - If only one exists: use that score (other dimension is not constrained)
-        - If neither exists: return 1.0 (no compliance constraints = full compliance)
-        
-        Examples:
-        - time=1.0, value=0.0 → avg=0.5 → "Partial" 
-        - time=0.5, value=1.0 → avg=0.75 → "Partial"
-        - time=1.0, value=None → 1.0 → "True"
-        """
-        scores = [s for s in [time_score, value_score] if s is not None]
-        
-        if not scores:
-            return 1.0  # No compliance functions → full compliance
-        return sum(scores) / len(scores)
-
-    def _extract_candidates(self, df: pd.DataFrame, spec: Optional[Dict[str, Any]]) -> pd.DataFrame:
-        """
-        Extract candidate rows for anchor/event/context attributes.
-        
-        OPTIMIZED: Vectorized boolean masks (no apply() loops).
-        Supports multiple attributes (OR semantics): any attribute that satisfies the constraints is eligible.
-        """
-        attrs = spec.get("attributes", {})
-        if not attrs:
-            return pd.DataFrame(columns=df.columns)
-
-        masked_parts = []
-        
-        for attr_name, constraints in attrs.items():
-            idx = constraints.get("idx", 0)
-            
-            # Filter to rows matching this ConceptName
-            rows = df[df["ConceptName"] == attr_name].copy()
-            if rows.empty:
-                continue
-            
-            # VECTORIZED: Extract value at idx for all rows at once        
-            if idx == 0:
-                # Common case: idx=0 (optimize for single-attr or first element)
-                rows["__value__"] = rows["Value"].apply(
-                    lambda v: v[0] if isinstance(v, tuple) and len(v) > 0 else v
-                )
-            else:
-                # General case: extract at idx
-                rows["__value__"] = rows["Value"].apply(
-                    lambda v: v[idx] if isinstance(v, tuple) and idx < len(v) else None
-                )
-            
-            # VECTORIZED: Apply constraints using boolean masks
-            allowed = constraints.get("allowed_values") or set()
-            if allowed:
-                rows = rows[rows["__value__"].astype(str).isin(allowed)]
-            if constraints.get("min") is not None:
-                # Convert to numeric (coerce errors to NaN), then filter
-                numeric_vals = pd.to_numeric(rows["__value__"], errors="coerce")
-                rows = rows[numeric_vals >= constraints["min"]]
-            if constraints.get("max") is not None:
-                numeric_vals = pd.to_numeric(rows["__value__"], errors="coerce")
-                rows = rows[numeric_vals <= constraints["max"]]
-            
-            if not rows.empty:
-                masked_parts.append(rows)
-
-        if not masked_parts:
-            return pd.DataFrame(columns=df.columns)
-        # Combine and sort (single sort operation)
-        combined = pd.concat(masked_parts, ignore_index=False).sort_values("StartDateTime")
-        
-        # Do NOT reset index. Keep original patient_df indices so 'used_anchor_ids' 
-        # works correctly across different rules (global tracking).
-        return combined
-
     def _order_indices(self, df: pd.DataFrame, spec: Dict[str, Any]) -> List[int]:
         """
         Sort indices by select preference (first=ascending, last=descending).
@@ -1331,17 +1289,561 @@ class LocalPattern(Pattern):
             return list(df.sort_values("StartDateTime", ascending=False).index)
         return list(df.sort_values("StartDateTime", ascending=True).index)
 
-    @staticmethod
-    def _extract_value(value: Any, idx: int) -> Any:
-        """Extract value from tuple (raw-concept) or string representation."""
-        if isinstance(value, tuple):
-            return value[idx] if idx < len(value) else None
-        if isinstance(value, str) and value.startswith("(") and value.endswith(")"):
-            try:
-                import ast
-                parsed = ast.literal_eval(value)
-                if isinstance(parsed, tuple):
-                    return parsed[idx] if idx < len(parsed) else None
-            except (ValueError, SyntaxError):
-                pass
-        return value
+
+class GlobalPattern(Pattern):
+    """
+    GlobalPattern: cyclic-based pattern abstraction.
+    Checks if events occur min/max times within time windows.
+    """
+    def __init__(
+        self,
+        name: str,
+        categories: Tuple[str, ...],
+        description: str,
+        derived_from: List[Dict[str, Any]],
+        parameters: List[Dict[str, Any]],
+        abstraction_rules: List[CyclicRule]
+    ):
+        super().__init__(
+            name=name,
+            categories=categories,
+            description=description,
+            derived_from=derived_from,
+            family="global-pattern"
+        )
+        self.parameters = parameters
+        self.abstraction_rules = abstraction_rules
+        
+        self.derived_from_map: Dict[str, Dict[str, Any]] = {
+            df["ref"]: df for df in derived_from
+        }
+
+    @classmethod
+    def parse(cls, xml_path: Union[str, Path]) -> "GlobalPattern":
+        xml_path = Path(xml_path)
+        root = ET.parse(xml_path).getroot()
+        
+        name = root.attrib["name"]
+        cats = tuple(s.strip() for s in (root.findtext("categories") or "").split(",") if s.strip())
+        desc = root.findtext("description") or ""
+        
+        # Parse derived-from
+        df_el = root.find("derived-from")
+        derived_from = []
+        declared_refs = set()
+        if df_el is not None:
+            for attr_el in df_el.findall("attribute"):
+                ref = attr_el.attrib["ref"]
+                declared_refs.add(ref)
+                tak_type = attr_el.attrib["tak"]
+                idx = int(attr_el.attrib.get("idx", 0))
+                derived_from.append({
+                    "ref": ref, "name": attr_el.attrib["name"], "tak": tak_type, "idx": idx
+                })
+
+        # Parse parameters
+        parameters = []
+        params_el = root.find("parameters")
+        if params_el is not None:
+            for param_el in params_el.findall("parameter"):
+                ref = param_el.attrib["ref"]
+                declared_refs.add(ref)
+                parameters.append({
+                    "ref": ref, "name": param_el.attrib["name"], 
+                    "tak": param_el.attrib["tak"], "idx": int(param_el.attrib.get("idx", 0)),
+                    "default": param_el.attrib.get("default")
+                })
+
+        derived_map = {d["name"]: d for d in derived_from}
+
+        # Parse abstraction-rules (CyclicRule)
+        abs_el = root.find("abstraction-rules")
+        abstraction_rules = []
+        
+        for rule_el in abs_el.findall("rule"):
+            cyclic_el = rule_el.find("cyclic")
+            if cyclic_el is None:
+                raise ValueError(f"{name}: GlobalPattern rule missing <cyclic>")
+            if any(attr not in cyclic_el.attrib for attr in ["start", "end", "time-window", "min-occurrences", "max-occurrences"]):
+                raise ValueError(f"{name}: GlobalPattern cyclic rule missing required attributes. Required: start, end, time-window, min-occurrences, max-occurrences")
+            
+            start = cyclic_el.attrib["start"]
+            end = cyclic_el.attrib["end"]
+            time_window = cyclic_el.attrib["time-window"]
+            min_occ = int(cyclic_el.attrib["min-occurrences"])
+            max_occ = int(cyclic_el.attrib["max-occurrences"])
+            
+            # Parse event
+            event_el = cyclic_el.find("event")
+            event_spec = {"attributes": {}}
+            for attr_el in event_el.findall("attribute"):
+                ref = attr_el.attrib["ref"]
+                df_entry = next((d for d in derived_from if d["ref"] == ref), None)
+                attr_name = df_entry["name"]
+                
+                allowed_values = set()
+                min_val = None
+                max_val = None
+                for av in attr_el.findall("allowed-value"):
+                    if "equal" in av.attrib: allowed_values.add(av.attrib["equal"])
+                    if "min" in av.attrib: min_val = float(av.attrib["min"])
+                    if "max" in av.attrib: max_val = float(av.attrib["max"])
+                
+                event_spec["attributes"][attr_name] = {
+                    "idx": df_entry["idx"], "allowed_values": allowed_values, "min": min_val, "max": max_val
+                }
+
+            # Parse context
+            context_spec = None
+            context_el = rule_el.find("context")
+            if context_el is not None:
+                context_spec = {"attributes": {}}
+                for attr_el in context_el.findall("attribute"):
+                    ref = attr_el.attrib["ref"]
+                    df_entry = next((d for d in derived_from if d["ref"] == ref), None)
+                    attr_name = df_entry["name"]
+                    allowed_values = set()
+                    for av in attr_el.findall("allowed-value"):
+                        if "equal" in av.attrib: allowed_values.add(av.attrib["equal"])
+                    context_spec["attributes"][attr_name] = {"idx": df_entry["idx"], "allowed_values": allowed_values}
+
+            # Parse compliance
+            cyclic_compliance = None
+            value_compliance = None
+            cf_el = rule_el.find("compliance-function")
+            if cf_el is not None:
+                if cf_el.find("time-constraint-compliance") is not None:
+                    raise ValueError(f"{name}: GlobalPattern cannot have time-constraint-compliance; only cyclic and value compliance allowed.")
+                
+                # Cyclic compliance
+                ccc_el = cf_el.find("cyclic-constraint-compliance")
+                if ccc_el is not None:
+                    func_el = ccc_el.find("function")
+                    trapez_el = func_el.find("trapeze")
+                    trapez_raw = (
+                        float(trapez_el.attrib["trapezeA"]), float(trapez_el.attrib["trapezeB"]),
+                        float(trapez_el.attrib["trapezeC"]), float(trapez_el.attrib["trapezeD"])
+                    )
+                    param_refs = [p.attrib["ref"] for p in func_el.findall("parameter")]
+                    cyclic_compliance = {
+                        "func_name": func_el.attrib["name"], "trapeze": trapez_raw, "parameters": param_refs
+                    }
+                
+                # Value compliance
+                vcc_el = cf_el.find("value-constraint-compliance")
+                if vcc_el is not None:
+                    func_el = vcc_el.find("function")
+                    trapez_el = func_el.find("trapeze")
+                    trapez_raw = (
+                        float(trapez_el.attrib["trapezeA"]), float(trapez_el.attrib["trapezeB"]),
+                        float(trapez_el.attrib["trapezeC"]), float(trapez_el.attrib["trapezeD"])
+                    )
+                    target_refs = [a.attrib["ref"] for a in vcc_el.find("target").findall("attribute")]
+                    param_refs = [p.attrib["ref"] for p in func_el.findall("parameter")]
+                    value_compliance = {
+                        "func_name": func_el.attrib["name"], "trapeze": trapez_raw, 
+                        "targets": target_refs, "parameters": param_refs
+                    }
+
+            abstraction_rules.append(CyclicRule(
+                start, end, time_window, min_occ, max_occ, event_spec, context_spec, cyclic_compliance, value_compliance
+            ))
+
+        return cls(name, cats, desc, derived_from, parameters, abstraction_rules)
+
+    def validate(self) -> None:
+        """Validate ref-based pattern structure and constraints."""
+        repo = get_tak_repository()
+        
+        # Build lookup maps: ref → derived_from entry
+        derived_from_by_ref = {item["ref"]: item for item in self.derived_from}
+        parameters_by_ref = {item["ref"]: item for item in self.parameters}
+        all_declared_refs = set(derived_from_by_ref.keys()) | set(parameters_by_ref.keys())
+        
+        # 1) Validate all derived-from TAKs exist and referenced correctly
+        for df in self.derived_from + self.parameters:
+            tak = repo.get(df["name"])
+            if tak is None:
+                raise ValueError(f"{self.name}: derived-from TAK '{df['name']}' (ref='{df['ref']}') not found in TAK repository")
+            
+            # If referencing raw-concept and idx specified, validate idx
+            if isinstance(tak, RawConcept):
+                if tak.concept_type == "raw":
+                    if df["idx"] >= len(tak.tuple_order):
+                        raise ValueError(f"{self.name}: ref '{df['ref']}' idx={df['idx']} out of bounds for '{df['name']}' (tuple_size={len(tak.tuple_order)})")
+                else:
+                    # raw-numeric, raw-nominal, raw-boolean: only idx=0 valid
+                    if df["idx"] != 0:
+                        raise ValueError(f"{self.name}: ref '{df['ref']}' idx={df['idx']} invalid for '{df['name']}' of type '{tak.concept_type}'; only idx=0 allowed")
+
+        # 2) Validate all used refs are declared
+        for rule in self.abstraction_rules:
+            # Check context refs
+            if rule.context_spec:
+                for attr_name in rule.context_spec.get("attributes", {}):
+                    # Find ref from derived_from that matches this attr_name
+                    df_entry = next((d for d in self.derived_from if d["name"] == attr_name), None)
+                    if df_entry is None:
+                        raise ValueError(f"{self.name}: context references unknown attribute '{attr_name}'")
+                    ref = df_entry["ref"]
+                    if ref not in all_declared_refs:
+                        raise ValueError(f"{self.name}: context uses undeclared ref '{ref}'")
+            
+            # Check event refs
+            for attr_name in rule.event_spec.get("attributes", {}):
+                df_entry = next((d for d in self.derived_from if d["name"] == attr_name), None)
+                if df_entry is None:
+                    raise ValueError(f"{self.name}: event references unknown attribute '{attr_name}'")
+                ref = df_entry["ref"]
+                if ref not in all_declared_refs:
+                    raise ValueError(f"{self.name}: event uses undeclared ref '{ref}'")
+            
+            # Check compliance function parameter refs
+            if rule.cyclic_constraint_compliance:
+                for param_ref in rule.cyclic_constraint_compliance.get("parameters", []):
+                    if param_ref not in all_declared_refs:
+                        raise ValueError(f"{self.name}: cyclic-constraint-compliance uses undeclared parameter ref '{param_ref}'")
+            
+            if rule.value_constraint_compliance:
+                # Check target refs
+                for target_ref in rule.value_constraint_compliance.get("targets", []):
+                    if target_ref not in all_declared_refs:
+                        raise ValueError(f"{self.name}: value-constraint-compliance target uses undeclared ref '{target_ref}'")
+                # Check parameter refs
+                for param_ref in rule.value_constraint_compliance.get("parameters", []):
+                    if param_ref not in all_declared_refs:
+                        raise ValueError(f"{self.name}: value-constraint-compliance uses undeclared parameter ref '{param_ref}'")
+
+        # Validate value-constraint-compliance targets
+        for rule in self.abstraction_rules:
+            if rule.value_constraint_compliance:
+                for target_ref in rule.value_constraint_compliance.get("targets", []):
+                    df_entry = derived_from_by_ref.get(target_ref)
+                    if df_entry is None:
+                        raise ValueError(f"{self.name}: value-constraint target ref '{target_ref}' not found in derived-from")
+                    
+                    # Check if target is used in event
+                    event_attrs = set(rule.event_spec.get("attributes", {}).keys())
+                    target_attr_name = df_entry["name"]
+                    
+                    if target_attr_name not in event_attrs:
+                        raise ValueError(
+                            f"{self.name}: value-constraint target ref '{target_ref}' ('{target_attr_name}') "
+                            f"must reference an attribute used in event"
+                        )
+
+        # 3) Validate numeric range constraints match TAK's attribute types
+        def _get_parent_attribute(tak, idx):
+            if isinstance(tak, RawConcept):
+                if tak.concept_type == "raw":
+                    attr_name = tak.tuple_order[idx]
+                    return next((a for a in tak.attributes if a["name"] == attr_name), None)
+                else:
+                    return tak.attributes[0] if tak.attributes else None
+            return None
+
+        for rule in self.abstraction_rules:
+            # Validate event attributes
+            for attr_name, attr_spec in rule.event_spec.get("attributes", {}).items():
+                df = next((d for d in self.derived_from if d["name"] == attr_name), None)
+                if df is None: 
+                    continue
+                
+                ref = df["ref"]
+                if ref not in derived_from_by_ref:
+                    continue
+                
+                tak = repo.get(df["name"])
+                if not isinstance(tak, RawConcept):
+                    continue
+                
+                parent_attr = _get_parent_attribute(tak, df["idx"])
+                if parent_attr is None:
+                    continue
+                
+                if parent_attr["type"] != "numeric":
+                    if attr_spec.get("min") is not None or attr_spec.get("max") is not None:
+                        raise ValueError(
+                            f"{self.name}: event attribute '{attr_name}' (ref='{ref}') has min/max constraints but attribute '{parent_attr['name']}' "
+                            f"is {parent_attr['type']} (not numeric). Use only 'equal' constraints for non-numeric attributes."
+                        )
+                else:
+                    if attr_spec.get("allowed_values"):
+                        raise ValueError(
+                            f"{self.name}: event attribute '{attr_name}' (ref='{ref}') has 'equal' constraint but attribute '{parent_attr['name']}' "
+                            f"is numeric. Use only 'min'/'max' constraints for numeric attributes."
+                        )
+                    tak_min = parent_attr.get("min")
+                    tak_max = parent_attr.get("max")
+                    rule_min = attr_spec.get("min")
+                    rule_max = attr_spec.get("max")
+                    
+                    if rule_min is not None and tak_max is not None and rule_min > tak_max:
+                        raise ValueError(f"{self.name}: event attribute '{attr_name}' (ref='{ref}') min={rule_min} exceeds TAK max={tak_max}")
+                    if rule_max is not None and tak_min is not None and rule_max < tak_min:
+                        raise ValueError(f"{self.name}: event attribute '{attr_name}' (ref='{ref}') max={rule_max} below TAK min={tak_min}")
+
+            # Validate context attributes (nominal only)
+            if rule.context_spec:
+                for attr_name, attr_spec in rule.context_spec.get("attributes", {}).items():
+                    df = next((d for d in self.derived_from if d["name"] == attr_name), None)
+                    if df is None: 
+                        continue
+                    
+                    ref = df["ref"]
+                    if ref not in derived_from_by_ref:
+                        continue
+                    
+                    tak = repo.get(df["name"])
+                    if not isinstance(tak, RawConcept):
+                        continue
+                    
+                    parent_attr = _get_parent_attribute(tak, df["idx"])
+                    if parent_attr is None:
+                        continue
+                    
+                    if attr_spec.get("min") is not None or attr_spec.get("max") is not None:
+                        raise ValueError(
+                            f"{self.name}: context attribute '{attr_name}' (ref='{ref}') has min/max constraints. Context attributes are nominal only; "
+                            f"use only 'equal' constraints."
+                        )
+
+        # Validate context blocks (only ONE attribute allowed per context block)
+        for rule in self.abstraction_rules:
+            if rule.context_spec and rule.context_spec.get("attributes"):
+                num_context_attrs = len(rule.context_spec["attributes"])
+                if num_context_attrs > 1:
+                    raise ValueError(
+                        f"{self.name}: Pattern context blocks can only reference ONE context TAK. "
+                        f"Found {num_context_attrs} context attributes in rule. "
+                        f"Reason: A single DataFrame row cannot match multiple ConceptName values simultaneously."
+                        f"You can consider a few differnt contexts (OR condition) by splitting to different rules."
+                        f"Or you can consider only the intersection of 2 or more contexts as context of it's own by defining this as a seperate <context> file."
+                    )
+
+    def apply(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Apply GlobalPattern to find and rate pattern instances.
+        
+        ASSUMPTION: Input df contains ONLY records relevant to this pattern (potential anchors/events/contexts/parameters).
+        All records belong to SINGLE patient.
+        
+        Output columns:
+          - PatientId
+          - ConceptName (pattern name)
+          - StartDateTime (anchor start)
+          - EndDateTime (event end)
+          - Value ("True" | "Partial" | "False")
+          - TimeConstraintScore (None, place holder. Only used in LocalPattern)
+          - ValueConstraintScore (0-1, if value-constraint compliance exists, else None)
+          - CyclicConstraintScore (0-1, if cyclic-constraint compliance exists, else None)
+          - AbstractionType ("local-pattern")
+        """
+        logger.info("[%s] apply() start | input_rows=%d", self.name, len(df))
+        
+        # Assumption: all records belong to same patient (if not empty)
+        patient_id = df.iloc[0]["PatientId"] if not df.empty else None
+        
+        # If no patient data, return empty DataFrame (no PatientId to emit False for)
+        if patient_id is None:
+            logger.info("[%s] apply() end | no patient data", self.name)
+            return pd.DataFrame(columns=[
+                "PatientId", "ConceptName", "StartDateTime", "EndDateTime", 
+                "Value", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore", "AbstractionType"
+            ])
+        
+        instances_map = {}
+        used_event_idxs = set()
+
+        # PRE-RESOLVE PARAMETERS ONCE (not per-rule)
+        # For patterns with compliance functions, compute parameters upfront
+        has_compliance = any(
+            r.cyclic_constraint_compliance or r.value_constraint_compliance 
+            for r in self.abstraction_rules
+        )
+        parameter_values = {}
+        if has_compliance and self.parameters:
+            # Use earliest anchor time as reference (will refine per-instance later if needed)
+            # For now, just use patient_df's first timestamp as proxy
+            if not df.empty:
+                parameter_values = self._resolve_parameters(df["StartDateTime"].min(), df)
+
+        for rule in self.abstraction_rules:
+            global_start = df["StartDateTime"].min() + rule.start
+            global_end = df["StartDateTime"].min() + rule.end
+            window_duration = rule.time_window
+            
+            # Get events and contexts for this rule. consistent across windows.
+            # Handles attribute filtering internally.
+            events = self._extract_candidates(df, rule.event_spec)
+            contexts = None
+            if rule.context_spec:
+                contexts = self._extract_candidates(df, rule.context_spec)
+            
+            current_start = global_start
+            while current_start < global_end:
+                current_end = current_start + window_duration
+                if current_end > global_end:
+                    continue  # Skip incomplete window at the end
+                
+                # Check if window is relevant (context satisfied)
+                if not rule.context_satisfied(current_start, current_end, contexts):
+                    current_start = current_end
+                    continue
+                
+                # Filter events
+                events_in_window = events[
+                    (events["StartDateTime"] >= current_start) & 
+                    (events["StartDateTime"] < current_end)
+                ].copy()
+                
+                valid_events_rows = []
+                candidate_indices = []
+                
+                if not events_in_window.empty:
+                    for idx, row in events_in_window.iterrows():
+                        if idx in used_event_idxs:
+                            continue
+                        valid_events_rows.append(row)
+                        candidate_indices.append(idx)
+                
+                count = len(valid_events_rows)
+                
+                v_score = None
+                c_score = None
+                cyclic_met = None
+
+                # Extract compliance scores per window
+                # If compliance is not defined, score remains None, 
+                # and _compute_combined_score will ignore and give 1, so label is correct.
+                # If compliance is defined but no events found, score remains 0.0.
+                # Cyclic Score is produced based on count only, so always compute if defined.
+                # Cyclic Score
+                if rule.cyclic_constraint_compliance:
+                    c_score = self._compute_cyclic_compliance(
+                        count=count, 
+                        rule=rule, 
+                        parameter_values=parameter_values
+                        )
+                else:
+                    # If there is no cyclic compliance function, check min/max bounds directly to determine the Value of the record
+                    cyclic_met = int(rule.min_occurrences <= count <= rule.max_occurrences)                    
+                
+                # Value Score
+                if rule.value_constraint_compliance:
+                    v_score = self._compute_value_compliance(
+                        valid_events_rows=valid_events_rows, 
+                        rule=rule, 
+                        parameter_values=parameter_values
+                        )
+                
+                # Combine window score
+                # Use cyclic_met if no cyclic compliance function is defined to get a label anyway based on cyclic requirement
+                w_score = self._compute_combined_score([c_score, v_score, cyclic_met])
+                
+                value_label = "True" if w_score == 1.0 else ("Partial" if w_score > 0 else "False")
+                
+                key = (current_start, current_end)
+                if key not in instances_map:
+                    instances_map[key] = {
+                        "PatientId": patient_id,
+                        "ConceptName": self.name,
+                        "StartDateTime": current_start,
+                        "EndDateTime": current_end,
+                        "Value": value_label,
+                        "TimeConstraintScore": None,
+                        "ValueConstraintScore": v_score,
+                        "CyclicConstraintScore": c_score,
+                        "AbstractionType": self.family
+                    }
+
+                    used_event_idxs.update(candidate_indices)
+                current_start = current_end
+        
+        instances = list(instances_map.values())
+        if not instances:
+             return pd.DataFrame(columns=[
+                "PatientId", "ConceptName", "StartDateTime", "EndDateTime", 
+                "Value", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore", "AbstractionType"
+            ])
+
+        return pd.DataFrame(instances).sort_values("StartDateTime")[[
+            "PatientId", "ConceptName", "StartDateTime", "EndDateTime", 
+            "Value", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore", "AbstractionType"
+        ]]
+    
+    def _compute_cyclic_compliance(
+        self,
+        count: int,
+        rule: CyclicRule,
+        parameter_values: Dict[str, float]
+    ) -> float:
+        """
+        Compute cyclic-constraint compliance score.
+        If compliance function exists, use it. Otherwise check min/max bounds.
+        """
+        spec = rule.cyclic_constraint_compliance
+        param_vals = [parameter_values[ref] for ref in spec["parameters"]]
+        try:
+            trapez_node = apply_external_function_on_trapez(
+                spec["func_name"], spec["trapeze"], "cyclic-constraint", *param_vals
+            )
+            return trapez_node.compliance_score(count)
+        except Exception as e:
+            logger.error(f"[{self.name}] Cyclic-constraint compliance error: {e}")
+            return 0.0
+
+    def _compute_value_compliance(
+        self,
+        valid_events_rows: List[pd.Series],
+        rule: CyclicRule,
+        parameter_values: Dict[str, float]
+    ) -> float:
+        """
+        Compute value-constraint compliance score for a set of events.
+        Returns None if no compliance spec or no events to check.
+        """
+        if not valid_events_rows:
+            # No events to check despite compliance is demanded, return 0.0 compliance
+            return 0.0
+        vcc_spec = rule.value_constraint_compliance
+        param_vals = [parameter_values[ref] for ref in vcc_spec["parameters"]]
+        
+        try:
+            trapez_node = apply_external_function_on_trapez(
+                vcc_spec["func_name"], vcc_spec["trapeze"], "value-constraint", *param_vals
+            )
+            
+            vals = []
+            target_refs = set(vcc_spec["targets"])
+            
+            for row in valid_events_rows:
+                c_name = row["ConceptName"]
+                # Find matching target spec
+                for t_ref in target_refs:
+                    t_spec = self.derived_from_map.get(t_ref)
+                    if t_spec and t_spec["name"] == c_name:
+                        val = row["Value"]
+                        idx = t_spec["idx"] if isinstance(val, tuple) else None
+                        val = self._extract_value(value=val, idx=idx)
+                        try:
+                            vals.append(float(val))
+                        except (ValueError, TypeError):
+                            logger.error(f"[{self.name}] Cannot convert target value to float: {val}. Value-constraint compliance requires numeric values.")
+                            pass
+                        break
+            
+            if not vals:
+                return 0.0
+                
+            scores = [trapez_node.compliance_score(v) for v in vals]
+            # Score is the avg of all event scores
+            return sum(scores) / len(scores)
+            
+        except Exception as e:
+            logger.error(f"[{self.name}] Value-constraint compliance error: {e}")
+            return 0.0
+    
+
+    
+

@@ -11,6 +11,7 @@
    - [Trends](#5-trends)
    - [Contexts](#6-contexts)
    - [Patterns (Local)](#7-patterns-local)
+   - [Patterns (Global)](#8-patterns-global)
 4. [XML Schema Reference](#xml-schema-reference)
 5. [Algorithms & Implementation](#algorithms--implementation)
 6. [Validation Rules](#validation-rules)
@@ -524,6 +525,48 @@ Parameters can be numeric, time-duration strings, or arbitrary strings (from all
 
 ---
 
+### 8. Patterns (Global)
+
+**Purpose:** Detect cyclic or frequency-based adherence over time windows (e.g., "Vitals checked every 24 hours").
+
+**Key Differences from Local Patterns:**
+- **Local:** Relates specific Anchor instance to specific Event instance (1-to-1 pairing).
+- **Global:** Checks frequency of Events within fixed time windows generated relative to the patient's timeline.
+
+**Key Parameters:**
+- `<cyclic>` — Defines the window generation logic:
+  - `start` / `end`: Offset from the global reference time (usually first record) to start/stop generating windows.
+  - `time-window`: Duration of each evaluation window.
+  - `min-occurrences` / `max-occurrences`: Hard constraints for "True" if no compliance function is used.
+- `<cyclic-constraint-compliance>` — Fuzzy scoring based on the **count** of events in the window.
+- `<value-constraint-compliance>` — Fuzzy scoring based on the **avg** of value compliance per relevant window.
+
+#### Algorithm
+
+1. **Window Generation:**
+   - Determine global start time (earliest timestamp in patient data).
+   - Generate windows of size `time-window` starting from `global_start + start` up to `global_start + end`.
+
+2. **Context Filtering:**
+   - If a `<context>` is defined, check if the context exists and overlaps the generated window.
+   - If context is not satisfied, the window is skipped (no instance generated).
+
+3. **Event Counting:**
+   - Count valid events (matching `<event>` spec) falling strictly within the window boundaries.
+
+4. **Scoring:**
+   - **Cyclic Score:** Maps the **count** of events to a score [0-1] using a trapezoid.
+     - *Example:* 1 check is 0.5 score, 2 checks is 1.0 score.
+   - **Value Score:** Maps the **values** of the events to a score [0-1].
+     - *Example:* If events exist, are their values within normal range?
+   - **Labeling:**
+     - If compliance functions exist: Derived from combined score.
+     - If no compliance functions: `True` if `min <= count <= max`, else `False`.
+
+**Output:** One row per relevant time window.
+
+---
+
 ## XML Schema Reference
 
 ### Duration Strings
@@ -602,7 +645,7 @@ y → years (365 days)
 </context>
 ```
 
-#### Patterns
+#### Patterns (Local)
 ```xml
 <pattern name="..." concept-type="local-pattern">
     <categories>...</categories>
@@ -612,6 +655,27 @@ y → years (365 days)
     <abstraction-rules>...</abstraction-rules>  <!-- One or more rules -->
 </pattern>
 ```
+
+#### Patterns (Global)
+```xml
+<pattern name="..." concept-type="global-pattern">
+    <categories>...</categories>
+    <description>...</description>
+    <derived-from>...</derived-from>
+    <parameters>...</parameters>
+    <abstraction-rules>
+        <rule>
+            <context>...</context>             <!-- Optional -->
+            <cyclic start="..." end="..." time-window="..." min-occurrences="..." max-occurrences="...">
+                <event>...</event>
+            </cyclic>
+            <compliance-function>
+                <cyclic-constraint-compliance>...</cyclic-constraint-compliance>
+                <value-constraint-compliance>...</value-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
 
 ---
 
@@ -1456,6 +1520,44 @@ Output:
   PatientId | ... | Value   | TimeConstraintScore | ValueConstraintScore
   1000      | ... | Partial | 1.0                 | 0.42
 ```
+### Example 9: Global Pattern (Routine Vitals Check)
+
+**File:** `patterns/ROUTINE_VITALS.xml`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="ROUTINE_VITALS_PATTERN" concept-type="global-pattern">
+    <categories>Routine</categories>
+    <description>Ensure glucose is checked at least once every 24h</description>
+    
+    <derived-from>
+        <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+ 
+    <abstraction-rules>
+        <rule>
+            <!-- Generate 24h windows for 14 days starting from admission -->
+            <cyclic start='0h' end='14d' time-window='24h' min-occurrences="1" max-occurrences="100">
+                <event>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </cyclic>
+
+            <compliance-function>
+                <!-- Cyclic Compliance: Score based on COUNT of events -->
+                <cyclic-constraint-compliance>
+                    <function name="id">
+                        <!-- 0 checks=0.0, 1 check=1.0, 100 checks=1.0 -->
+                        <trapeze trapezeA="0" trapezeB="1" trapezeC="100" trapezeD="100"/>
+                    </function>
+                </cyclic-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
 
 ---
 

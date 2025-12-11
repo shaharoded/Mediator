@@ -2291,3 +2291,361 @@ def test_debug_insulin_on_high_glucose_context_clipping(tmp_path: Path):
     assert len(df_out) == 1
     assert df_out.iloc[0]["Value"] == "True"
     assert df_out.iloc[0]["TimeConstraintScore"] == 1.0
+
+
+# -----------------------------
+# Global Pattern XML Fixtures
+# -----------------------------
+
+GLOBAL_PATTERN_SIMPLE_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="ROUTINE_VITALS_CHECK" concept-type="global-pattern">
+    <categories>Routine</categories>
+    <description>Check vitals every 24h</description>
+    <derived-from>
+        <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/> <!-- Anchor for start time -->
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <!-- Start 0h from anchor, end 48h from anchor. Window size 24h. -->
+            <!-- Expecting 2 windows: [0, 24], [24, 48] -->
+            <cyclic start='0h' end='48h' time-window='24h' min-occurrences="1" max-occurrences="10">
+                <event>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </cyclic>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+
+GLOBAL_PATTERN_CYCLIC_COMPLIANCE_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="STRICT_VITALS_CHECK" concept-type="global-pattern">
+    <categories>Routine</categories>
+    <description>Ideally 2 checks per 24h, 1 is partial</description>
+    <derived-from>
+        <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <cyclic start='0h' end='24h' time-window='24h' min-occurrences="1" max-occurrences="10">
+                <event>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </cyclic>
+            <compliance-function>
+                <cyclic-constraint-compliance>
+                    <function name="id">
+                        <!-- 1 check = 0.5 score, 2 checks = 1.0 score -->
+                        <trapeze trapezeA="0" trapezeB="2" trapezeC="10" trapezeD="100"/>
+                    </function>
+                </cyclic-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+
+GLOBAL_PATTERN_VALUE_COMPLIANCE_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="QUALITY_VITALS_CHECK" concept-type="global-pattern">
+    <categories>Quality</categories>
+    <description>Check every 24h, value should be below 140</description>
+    <derived-from>
+        <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <cyclic start='0h' end='24h' time-window='24h' min-occurrences="1" max-occurrences="10">
+                <event>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </cyclic>
+            <compliance-function>
+                <value-constraint-compliance>
+                    <target>
+                        <attribute ref="E1"/>
+                    </target>
+                    <function name="id">
+                        <!-- Value < 140 is score 1.0. Value 200 is score 0.0 -->
+                        <trapeze trapezeA="0" trapezeB="0" trapezeC="140" trapezeD="200"/>
+                    </function>
+                </value-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+
+GLOBAL_PATTERN_CONTEXT_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="ICU_VITALS_CHECK" concept-type="global-pattern">
+    <categories>Routine</categories>
+    <description>Check vitals only when in ICU context</description>
+    <derived-from>
+        <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <context>
+                <attribute ref="C1">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
+            <cyclic start='0h' end='48h' time-window='24h' min-occurrences="1" max-occurrences="10">
+                <event>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </cyclic>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+
+# -----------------------------
+# Global Pattern Fixtures
+# -----------------------------
+
+@pytest.fixture
+def repo_global_simple(tmp_path: Path) -> TAKRepository:
+    from core.tak.pattern import GlobalPattern
+    admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
+    glucose_path = write_xml(tmp_path, "GLUCOSE.xml", RAW_GLUCOSE_XML)
+    pattern_path = write_xml(tmp_path, "GLOBAL_SIMPLE.xml", GLOBAL_PATTERN_SIMPLE_XML)
+    
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(admission_path))
+    repo.register(RawConcept.parse(glucose_path))
+    set_tak_repository(repo)
+    repo.register(GlobalPattern.parse(pattern_path))
+    return repo
+
+@pytest.fixture
+def repo_global_cyclic_compliance(tmp_path: Path) -> TAKRepository:
+    from core.tak.pattern import GlobalPattern
+    admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
+    glucose_path = write_xml(tmp_path, "GLUCOSE.xml", RAW_GLUCOSE_XML)
+    pattern_path = write_xml(tmp_path, "GLOBAL_CYCLIC.xml", GLOBAL_PATTERN_CYCLIC_COMPLIANCE_XML)
+    
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(admission_path))
+    repo.register(RawConcept.parse(glucose_path))
+    set_tak_repository(repo)
+    repo.register(GlobalPattern.parse(pattern_path))
+    return repo
+
+@pytest.fixture
+def repo_global_value_compliance(tmp_path: Path) -> TAKRepository:
+    from core.tak.pattern import GlobalPattern
+    admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
+    glucose_path = write_xml(tmp_path, "GLUCOSE.xml", RAW_GLUCOSE_XML)
+    pattern_path = write_xml(tmp_path, "GLOBAL_VALUE.xml", GLOBAL_PATTERN_VALUE_COMPLIANCE_XML)
+    
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(admission_path))
+    repo.register(RawConcept.parse(glucose_path))
+    set_tak_repository(repo)
+    repo.register(GlobalPattern.parse(pattern_path))
+    return repo
+
+@pytest.fixture
+def repo_global_context(tmp_path: Path) -> TAKRepository:
+    from core.tak.pattern import GlobalPattern
+    admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
+    glucose_path = write_xml(tmp_path, "GLUCOSE.xml", RAW_GLUCOSE_XML)
+    diabetes_path = write_xml(tmp_path, "DIABETES.xml", RAW_DIABETES_XML)
+    context_path = write_xml(tmp_path, "DIABETES_CONTEXT.xml", CONTEXT_DIABETES_XML)
+    pattern_path = write_xml(tmp_path, "GLOBAL_CONTEXT.xml", GLOBAL_PATTERN_CONTEXT_XML)
+    
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(admission_path))
+    repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(diabetes_path))
+    set_tak_repository(repo)
+    repo.register(Context.parse(context_path))
+    repo.register(GlobalPattern.parse(pattern_path))
+    return repo
+
+# -----------------------------
+# Global Pattern Tests
+# -----------------------------
+
+def test_global_pattern_basic_windows(repo_global_simple):
+    """
+    Test basic global pattern:
+    - 2 windows of 24h each (0-24, 24-48).
+    - Events present in both.
+    - Expect 2 True instances.
+    """
+    admission_tak = repo_global_simple.get("ADMISSION_EVENT") # Actually raw-concept in fixture
+    glucose_tak = repo_global_simple.get("GLUCOSE_MEASURE")
+    pattern_tak = repo_global_simple.get("ROUTINE_VITALS_CHECK")
+    
+    # Admission at 08:00.
+    # Window 1: 08:00 -> 08:00+1d.
+    # Window 2: 08:00+1d -> 08:00+2d.
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100),       # In Window 1
+        (1, "GLUCOSE_LAB", make_ts("10:00", day=1), make_ts("10:00", day=1), 100), # In Window 2
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
+    df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
+    
+    df_out = pattern_tak.apply(df_input)
+    
+    assert len(df_out) == 2
+    
+    # Window 1
+    row1 = df_out.iloc[0]
+    assert row1["StartDateTime"] == make_ts("08:00")
+    assert row1["EndDateTime"] == make_ts("08:00", day=1)
+    assert row1["Value"] == "True"
+    
+    # Window 2
+    row2 = df_out.iloc[1]
+    assert row2["StartDateTime"] == make_ts("08:00", day=1)
+    assert row2["EndDateTime"] == make_ts("08:00", day=2)
+    assert row2["Value"] == "True"
+
+
+def test_global_pattern_missing_events_in_window(repo_global_simple):
+    """
+    Test global pattern with missing events:
+    - Window 1 has event -> True.
+    - Window 2 has NO event -> False (min-occurrences=1).
+    """
+    admission_tak = repo_global_simple.get("ADMISSION_EVENT")
+    glucose_tak = repo_global_simple.get("GLUCOSE_MEASURE")
+    pattern_tak = repo_global_simple.get("ROUTINE_VITALS_CHECK")
+    
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100), # Window 1 only
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
+    df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
+    
+    df_out = pattern_tak.apply(df_input)
+    
+    assert len(df_out) == 2
+    assert df_out.iloc[0]["Value"] == "True"
+    assert df_out.iloc[1]["Value"] == "False" # Count=0, Min=1
+
+
+def test_global_pattern_cyclic_compliance(repo_global_cyclic_compliance):
+    """
+    Test cyclic compliance:
+    - 1 event in window.
+    - Trapezoid: 0->0.0, 2->1.0.
+    - 1 event is halfway (linear interp 0 to 2) -> Score 0.5.
+    """
+    admission_tak = repo_global_cyclic_compliance.get("ADMISSION_EVENT")
+    glucose_tak = repo_global_cyclic_compliance.get("GLUCOSE_MEASURE")
+    pattern_tak = repo_global_cyclic_compliance.get("STRICT_VITALS_CHECK")
+    
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100), # 1 event
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
+    df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
+    
+    df_out = pattern_tak.apply(df_input)
+    
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["Value"] == "Partial"
+    assert row["CyclicConstraintScore"] == 0.5
+
+
+def test_global_pattern_value_compliance(repo_global_value_compliance):
+    """
+    Test value compliance:
+    - 1 event with value 170.
+    - Trapezoid: <140 -> 1.0, 200 -> 0.0.
+    - 170 is halfway between 140 and 200 -> Score 0.5.
+    """
+    admission_tak = repo_global_value_compliance.get("ADMISSION_EVENT")
+    glucose_tak = repo_global_value_compliance.get("GLUCOSE_MEASURE")
+    pattern_tak = repo_global_value_compliance.get("QUALITY_VITALS_CHECK")
+    
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 170),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
+    df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
+    
+    df_out = pattern_tak.apply(df_input)
+    
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["Value"] == "Partial"
+    assert row["ValueConstraintScore"] == pytest.approx(0.5)
+    # Cyclic score is None (hard constraint met -> 1.0 implicitly for label)
+    # Combined = (1.0 + 0.5) / 2 = 0.75 -> Partial
+    # Wait, logic: if cyclic score is None, we use hard constraint (1.0).
+    # Combined = (1.0 + 0.5) / 2 = 0.75.
+
+
+def test_global_pattern_context_filtering(repo_global_context):
+    """
+    Test context filtering:
+    - Window 1 (0-24h): Context exists -> Instance generated.
+    - Window 2 (24-48h): Context missing -> No instance generated.
+    """
+    admission_tak = repo_global_context.get("ADMISSION_EVENT")
+    glucose_tak = repo_global_context.get("GLUCOSE_MEASURE")
+    diabetes_tak = repo_global_context.get("DIABETES_DIAGNOSIS")
+    context_tak = repo_global_context.get("DIABETES_DIAGNOSIS_CONTEXT")
+    pattern_tak = repo_global_context.get("ICU_VITALS_CHECK")
+    
+    # Context only lasts 24h (persistence 0h before/after for simplicity in this test setup, 
+    # though fixture says 720h. Let's rely on the fact that we only provide data that creates context for specific time).
+    # Actually, the fixture CONTEXT_DIABETES_XML has persistence 720h.
+    # We need to simulate a context that ends.
+    # Let's assume we provide a context row manually to control it exactly.
+    
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
+    
+    # Manually create context that covers only first window (08:00 to 08:00+1d)
+    df_context = pd.DataFrame([
+        (1, "DIABETES_DIAGNOSIS_CONTEXT", make_ts("08:00"), make_ts("08:00", day=1), "True", "context")
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+    
+    df_input = pd.concat([df_admission, df_glucose, df_context], ignore_index=True)
+    
+    df_out = pattern_tak.apply(df_input)
+    
+    # Should only have 1 instance (Window 1). Window 2 (day 1 to day 2) has no context.
+    assert len(df_out) == 1
+    assert df_out.iloc[0]["StartDateTime"] == make_ts("08:00")
