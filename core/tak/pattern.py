@@ -468,11 +468,6 @@ class LocalPattern(Pattern):
                             f"time-constraint-compliance trapezeA '{trapez_raw[0]}' "
                             f"(otherwise pattern may miss valid instances)"
                         )
-                    if parse_duration(trapez_raw[1]) > parse_duration(trapez_raw[0]) and event_spec.get("select") == "first":
-                        logger.warning(
-                            f"{name}: time-constraint-compliance trapezeB '{trapez_raw[1]}' > trapezeA '{trapez_raw[0]}' "
-                            f"may lead to unexpected scoring when event select='first'"
-                        )
                     if parse_duration(trapez_raw[2]) < parse_duration(trapez_raw[3]) and event_spec.get("select") == "last":
                         logger.warning(
                             f"{name}: time-constraint-compliance trapezeC '{trapez_raw[2]}' < trapezeD '{trapez_raw[3]}' "
@@ -1044,6 +1039,7 @@ class LocalPattern(Pattern):
             for idx in unused_anchor_idxs:
                 anchor_row = anchors.loc[idx]
                 start_dt = anchor_row["StartDateTime"]
+                end_dt = anchor_row["EndDateTime"]
                 
                 # Condition 1: Context Satisfaction
                 # "satisfied between the instance of this anchor and the next instance of an anchor or event"
@@ -1083,7 +1079,7 @@ class LocalPattern(Pattern):
                 # Add to potential falses
                 potential_falses.append({
                     "StartDateTime": start_dt,
-                    "EndDateTime": pd.NaT,
+                    "EndDateTime": end_dt,
                     "Value": "False",
                     "TimeConstraintScore": 0.0,
                     "ValueConstraintScore": 0.0

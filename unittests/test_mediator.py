@@ -255,7 +255,7 @@ def test_global_clippers_trim_logic(prod_db, prod_kb):
     df_after = mediator._apply_global_clippers(df_before, clipper_df)
     
     assert len(df_after) == 1
-    assert df_after.iloc[0]["StartDateTime"] == pd.to_datetime("2024-01-01 08:00:01")
+    assert df_after.iloc[0]["StartDateTime"] == pd.to_datetime("2024-01-01 08:00:00")
     assert df_after.iloc[0]["EndDateTime"] == pd.to_datetime("2024-01-01 10:00:00")
     
     print("\n✅ Global clipper trimming works correctly")
@@ -439,6 +439,7 @@ def test_pattern_output_split(prod_db, prod_kb, small_patient_subset):
             "Value": "True",
             "TimeConstraintScore": 1.0,
             "ValueConstraintScore": 0.8,
+            "CyclicConstraintScore": None,
             "AbstractionType": "local-pattern"
         },
         {
@@ -449,6 +450,7 @@ def test_pattern_output_split(prod_db, prod_kb, small_patient_subset):
             "Value": "Partial",
             "TimeConstraintScore": 0.6,
             "ValueConstraintScore": 1.0,
+            "CyclicConstraintScore": None,
             "AbstractionType": "local-pattern"
         },
         {
@@ -459,6 +461,7 @@ def test_pattern_output_split(prod_db, prod_kb, small_patient_subset):
             "Value": "False",
             "TimeConstraintScore": 0.0,
             "ValueConstraintScore": 0.0,
+            "CyclicConstraintScore": None,
             "AbstractionType": "local-pattern"
         }
     ])
@@ -567,6 +570,7 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb):
             "Value": "True",
             "TimeConstraintScore": 1.0,
             "ValueConstraintScore": 0.8,
+            "CyclicConstraintScore": None,
             "AbstractionType": "local-pattern"
         },
         {
@@ -577,6 +581,7 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb):
             "Value": "Partial",
             "TimeConstraintScore": 0.6,
             "ValueConstraintScore": 1.0,
+            "CyclicConstraintScore": None,
             "AbstractionType": "local-pattern"
         },
         {
@@ -587,6 +592,7 @@ def test_pattern_compliance_scores_unpivoted(prod_db, prod_kb):
             "Value": "False",
             "TimeConstraintScore": 0.0,
             "ValueConstraintScore": 0.0,
+            "CyclicConstraintScore": None,
             "AbstractionType": "local-pattern"
         }
     ])

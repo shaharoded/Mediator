@@ -11,7 +11,7 @@
     <abstraction-rules>
         <rule value="Severe Hypothermia" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="35"/>
+                <allowed-value min="25" max="35"/>
             </attribute>
         </rule>
         <rule value="Mild Hypothermia" operator="and">

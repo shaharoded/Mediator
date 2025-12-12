@@ -4,24 +4,12 @@
             "name": "ADMISSION",
             "how": "START"
         },
-        {   
-            "name": "ADMISSION_EVENT",
-            "how": "START"
-        },
         {
             "name": "RELEASE",
             "how": "END"
         },
         {
-            "name": "RELEASE_EVENT",
-            "how": "END"
-        },
-        {
             "name": "DEATH",
-            "how": "END"
-        },
-        {
-            "name": "DEATH_EVENT",
             "how": "END"
         }
     ]

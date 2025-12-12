@@ -1,7 +1,7 @@
 """
 TO-DO:
- - I might have a problem with the empty local patterns and the global clippers. heck it out.
-  """
+ - Might be able to speed calculations up in global patterns
+   """
 
 from __future__ import annotations
 from typing import Optional, List, Dict, Any, Union, Tuple
@@ -495,87 +495,54 @@ class Mediator:
     
     def _apply_global_clippers(self, df: pd.DataFrame, clipper_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         """
-        Apply global clippers to abstraction output by trimming interval boundaries.
-        - START clippers: if row.StartDateTime <= clipper_time, set StartDateTime = clipper_time + 1s
-        - END clippers: if row.EndDateTime >= clipper_time, set EndDateTime = clipper_time - 1s
-        - Drop rows where StartDateTime >= EndDateTime after clipping (invalid intervals)
-        
-        EXCEPTION: Do not clip:
-          1. TAKs listed in global_clippers.json (prevents self-clipping)
-          2. Raw concepts (foundational data should not be clipped)
-        
-        Uses vectorized operations for efficient processing.
-        
-        Args:
-            df: Abstraction output DataFrame
-            clipper_df: DataFrame with columns [ConceptName, StartDateTime] from InputPatientData
-        
-        Returns:
-            Clipped DataFrame (with adjusted boundaries)
+        Apply global clippers to abstraction output.
+        Clips events to be strictly within the start and end clippers.
+        Preserving events that start exactly at the start clippers and events that end exactly on the end clippers, and are 1s long.
         """
         if df.empty or clipper_df is None or clipper_df.empty:
             return df
         
-        # Exclude clipper TAKs AND raw concepts from being clipped
-        clipper_names = set(self.global_clippers.keys())
+        # Working on a copy
+        df = df.copy()
         
-        # Split into clippable vs non-clippable
-        # Non-clippable: clippers + all raw concepts
-        is_raw_concept = df["AbstractionType"] == "raw-concept"
-        is_clipper = df["ConceptName"].isin(clipper_names)
-        df_non_clippable = df[is_raw_concept | is_clipper]
-        df_clippable = df[~(is_raw_concept | is_clipper)]
-        
-        # If nothing to clip, return as-is
-        if df_clippable.empty:
-            return df
-        
-        # Only clip non-clipper, non-raw-concept TAKs
-        df = df_clippable.copy()
-        
-        # OPTIMIZATION 2: Extract clipper times as numpy arrays (vectorized comparisons)
+        # 1. Get Wall Times
         start_clippers = clipper_df[clipper_df["ConceptName"].isin(
             [name for name, how in self.global_clippers.items() if how == "START"]
         )]
-        
         end_clippers = clipper_df[clipper_df["ConceptName"].isin(
             [name for name, how in self.global_clippers.items() if how == "END"]
         )]
         
-        # OPTIMIZATION 3: Compute boundaries ONCE (not per row)
+        # 2. Apply Start Clipping
         if not start_clippers.empty:
-            min_start_time = start_clippers["StartDateTime"].min()
-            # Adjust all rows where StartDateTime <= min_start_time
-            mask = df["StartDateTime"] <= min_start_time
+            min_start = start_clippers["StartDateTime"].min()
+            
+            # Clip Start: strictly >= Admission
+            # If Event starts at min_start (T), T < T is False -> No Clip.
+            mask = df["StartDateTime"] < min_start
             if mask.any():
-                df.loc[mask, "StartDateTime"] = min_start_time + pd.Timedelta(seconds=1)
-        
+                df.loc[mask, "StartDateTime"] = min_start
+
+        # 3. Apply End Clipping
         if not end_clippers.empty:
-            max_end_time = end_clippers["StartDateTime"].max()
-            # Vectorized: adjust all rows where EndDateTime >= max_end_time
-            mask = df["EndDateTime"] >= max_end_time
+            max_end = end_clippers["StartDateTime"].max()
+            
+            # Clip End: strictly <= Release
+            # If Event ends at max_end (T), T > T is False -> No Clip.
+            mask = df["EndDateTime"] > max_end
             if mask.any():
-                df.loc[mask, "EndDateTime"] = max_end_time - pd.Timedelta(seconds=1)
-        
-        # OPTIMIZATION 4: Drop invalid intervals (StartDateTime >= EndDateTime) in one pass
+                df.loc[mask, "EndDateTime"] = max_end
+
+        # 4. Drop Invalid Intervals (Duration <= 0)
+        # Events that were fully outside will now have Start >= End and be dropped.
+        # Events that were [T, T+1] and Wall=T will remain [T, T+1] and be kept.
         valid_mask = df["StartDateTime"] < df["EndDateTime"]
+        
         dropped_count = (~valid_mask).sum()
         if dropped_count > 0:
-            # Log which concepts were affected
-            invalid_rows = df[~valid_mask]
-            affected_concepts = invalid_rows["ConceptName"].value_counts().to_dict()
-            concepts_str = ", ".join(f"{concept}: {count}" for concept, count in affected_concepts.items())
-            logger.info(
-                f"[Global Clippers] Dropped {dropped_count} invalid intervals "
-                f"(StartDateTime >= EndDateTime after clipping) | Affected concepts: {concepts_str}"
-            )
-        
-        # Concatenate non-clippable rows back
-        if not df_non_clippable.empty:
-            df_clipped = df[valid_mask]
-            return pd.concat([df_non_clippable, df_clipped], ignore_index=True).sort_values("StartDateTime").reset_index(drop=True)
-        
-        return df[valid_mask]
+            df = df[valid_mask].copy()
+
+        return df.sort_values("StartDateTime").reset_index(drop=True)
     
     def _split_pattern_output(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
@@ -597,11 +564,9 @@ class Mediator:
                 pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore"])
             )
         
-        # Main output: Exclude "False" patterns
-        # We filter by Value != 'False' to remove:
-        # 1. Generic "no pattern found" rows (Start=NaT, End=NaT)
-        # 2. Specific "missed opportunity" rows (Start=Valid, End=NaT)
-        df_main = df[df["Value"] != "False"][["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"]].copy()
+        # We filter Generic "no pattern found" rows (Start=NaT, End=NaT)
+        # 2. Specific "missed opportunity" rows (Start=Valid, End=Valid) remain
+        df_main = df[df["StartDateTime"].notna() & (df["EndDateTime"].notna())][["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"]].copy()
         
         # QA scores: all rows (including "False" with NaT)
         # Extract compliance score columns

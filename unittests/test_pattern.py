@@ -478,9 +478,9 @@ def repo_actual_kb(tmp_path: Path) -> TAKRepository:
     
     context_diabetes_xml = Path("core/knowledge-base/contexts/DIABETES_DIAGNOSIS.xml").read_text()
     
-    pattern_glucose_xml = Path("core/knowledge-base/patterns/GLUCOSE_MEASURE_ON_ADMISSION.xml").read_text()
-    pattern_bmi_xml = Path("core/knowledge-base/patterns/BMI_MEASURE_ON_ADMISSION.xml").read_text()
-    pattern_insulin_xml = Path("core/knowledge-base/patterns/INSULIN_ON_ADMISSION.xml").read_text()
+    pattern_glucose_xml = Path("core/knowledge-base/local patterns/GLUCOSE_MEASURE_ON_ADMISSION.xml").read_text()
+    pattern_bmi_xml = Path("core/knowledge-base/local patterns/BMI_MEASURE_ON_ADMISSION.xml").read_text()
+    pattern_insulin_xml = Path("core/knowledge-base/local patterns/INSULIN_ON_ADMISSION.xml").read_text()
     
     # Write to tmp_path
     write_xml(tmp_path, "ADMISSION_RAW.xml", raw_admission_xml)
@@ -894,9 +894,8 @@ def test_pattern_not_found_no_event(repo_simple_pattern):
     row = df_out.iloc[0]
     assert row["Value"] == "False"
     # NEW: We expect the specific anchor time, not NaT
-    assert row["StartDateTime"] == make_ts("08:00") 
-    assert pd.isna(row["EndDateTime"])
-
+    assert row["StartDateTime"] == make_ts("08:00")
+    assert row["EndDateTime"] == make_ts("08:00")
 
 def test_pattern_not_found_event_too_late(repo_simple_pattern):
     """Pattern not found: glucose at 14h. Expect specific missed opportunity."""
@@ -995,8 +994,7 @@ def test_missed_opportunity_mixed_results(repo_simple_pattern):
     # Second row: Specific False (Missed Opportunity)
     assert df_out.iloc[1]["Value"] == "False"
     assert df_out.iloc[1]["StartDateTime"] == make_ts("12:00")
-    assert pd.isna(df_out.iloc[1]["EndDateTime"])
-
+    assert df_out.iloc[1]["EndDateTime"] == make_ts("12:00")
 
 def test_missed_opportunity_filtered_by_context(repo_with_context):
     """
