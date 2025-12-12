@@ -79,7 +79,7 @@ class TAKRepository:
     def _extract_dependencies(self, tak: TAK) -> Set[str]:
         """Extract all TAK names that this TAK depends on (deduplicated)."""
         # Import here to avoid circular imports
-        from .raw_concept import RawConcept
+        from .raw_concept import RawConcept, ParameterizedRawConcept
         from .event import Event
         from .state import State
         from .trend import Trend
@@ -89,7 +89,14 @@ class TAKRepository:
         deps = set()
 
         # Raw Concept: no dependencies (data source)
-        if isinstance(tak, RawConcept):
+        if isinstance(tak, RawConcept) and not isinstance(tak, ParameterizedRawConcept):
+            return deps
+        
+        # ParameterizedRawConcept: depends on derived-from + parameters (check BEFORE RawConcept!)
+        if isinstance(tak, ParameterizedRawConcept):
+            deps.add(tak.derived_from)
+            for param in tak.parameters:
+                deps.add(param["name"])
             return deps
 
         # Event: depends on derived-from raw-concepts
@@ -165,27 +172,40 @@ class TAKRepository:
         """
         Compute topological sort order using Kahn's algorithm.
         Returns list of TAK names in execution order (dependencies first).
+        
+        graph: {tak_name: set_of_dependencies_it_needs}
+        We need to reverse this to get {tak_name: set_of_dependents_that_need_it}
         """
-        in_degree = {name: 0 for name in self.taks}
+        # 1. Build reverse graph: {dependency: set_of_taks_that_need_it}
+        reverse_graph: Dict[str, Set[str]] = {name: set() for name in self.taks}
         for tak_name, deps in graph.items():
-            in_degree[tak_name] = len(deps)
-
+            for dep in deps:
+                reverse_graph[dep].add(tak_name)
+        
+        # 2. Calculate in-degree (number of dependencies each TAK has)
+        in_degree = {name: len(deps) for name, deps in graph.items()}
+        
+        # 3. Initialize queue with TAKs that have no dependencies
         queue = [name for name, degree in in_degree.items() if degree == 0]
         order = []
-
+        
         while queue:
             # Sort queue by TAK family for predictable ordering
             queue.sort(key=lambda name: (self._family_priority(self.taks[name].family), name))
             node = queue.pop(0)
             order.append(node)
-
-            # Find all TAKs that depend on this node
-            for tak_name, deps in graph.items():
-                if node in deps:
-                    in_degree[tak_name] -= 1
-                    if in_degree[tak_name] == 0:
-                        queue.append(tak_name)
-
+            
+            # For each TAK that depends on this node, decrement its in-degree
+            for dependent in reverse_graph[node]:
+                in_degree[dependent] -= 1
+                if in_degree[dependent] == 0:
+                    queue.append(dependent)
+        
+        if len(order) != len(self.taks):
+            # Should never happen if circular reference detection works
+            missing = set(self.taks.keys()) - set(order)
+            raise RuntimeError(f"Topological sort failed. Missing TAKs: {missing}")
+        
         return order
 
     @staticmethod

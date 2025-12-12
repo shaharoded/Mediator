@@ -1,7 +1,7 @@
 """
 TO-DO:
- - Might be able to speed calculations up in global patterns
-   """
+ - creatinine is having execution order issues
+"""
 
 from __future__ import annotations
 from typing import Optional, List, Dict, Any, Union, Tuple
@@ -491,7 +491,8 @@ class Mediator:
         # Return DataFrame with ConceptName and StartDateTime (clippers are point events)
         df = pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
         df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
-        return df[["ConceptName", "StartDateTime"]]
+        df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
+        return df[["ConceptName", "StartDateTime", "EndDateTime"]]
     
     def _apply_global_clippers(self, df: pd.DataFrame, clipper_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         """
@@ -525,7 +526,7 @@ class Mediator:
 
         # 3. Apply End Clipping
         if not end_clippers.empty:
-            max_end = end_clippers["StartDateTime"].max()
+            max_end = end_clippers["EndDateTime"].max()
             
             # Clip End: strictly <= Release
             # If Event ends at max_end (T), T > T is False -> No Clip.
@@ -606,6 +607,7 @@ class Mediator:
             # Phase 0: Query global clipper times ONCE per patient
             clipper_df = self._get_global_clipper_times(patient_id, thread_da)
             execution_order = getattr(self.repo, 'execution_order', list(self.repo.taks.keys()))
+            print(f"[Patient {patient_id}] Execution order: {execution_order}")
 
             # Process TAKs in topological order
             for tak_name in execution_order:
