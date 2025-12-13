@@ -27,7 +27,7 @@
                 </anchor>
                 <event select='first'>
                     <attribute ref="E1">
-                        <allowed-value min="0"/>
+                        <allowed-value min="20"/>
                     </attribute>
                 </event>
             </temporal-relation>
@@ -51,7 +51,7 @@
                 </anchor>
                 <event select='first'>
                     <attribute ref="E1">
-                        <allowed-value min="0"/>
+                        <allowed-value min="20"/>
                     </attribute>
                 </event>
             </temporal-relation>

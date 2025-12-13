@@ -11,7 +11,7 @@
     <abstraction-rules>
         <rule value="Low" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="60"/>
+                <allowed-value max="60"/>
             </attribute>
         </rule>
         <rule value="Normal" operator="and">

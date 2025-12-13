@@ -5,7 +5,7 @@
     <attributes>
         <attribute name="NEUTROPHILS_MEASURE" type="numeric">
             <numeric-allowed-values>
-                <allowed-value min="0" max="200"/>
+                <allowed-value min="0.1" max="200"/>
             </numeric-allowed-values>
         </attribute>
     </attributes>

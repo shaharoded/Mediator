@@ -11,7 +11,7 @@
     <abstraction-rules>
         <rule value="Severe Leukopenia" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="2"/>
+                <allowed-value max="2"/>
             </attribute>
         </rule>
         <rule value="Mild Leukopenia" operator="and">

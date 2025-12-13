@@ -67,6 +67,8 @@ def divide(x, *args):
     """
     result = x
     for arg in args:
+        if arg == 0:
+            raise ValueError("Division by zero in 'div' function.")
         result /= arg
     return result
 

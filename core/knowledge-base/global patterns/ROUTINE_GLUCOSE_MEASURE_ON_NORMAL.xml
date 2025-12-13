@@ -14,7 +14,7 @@
             <cyclic start='0h' end='14d' time-window='24h' min-occurrences="1" max-occurrences="100">
                 <event>
                     <attribute ref="E1">
-                        <allowed-value min="0"/>
+                        <allowed-value min="20"/>
                     </attribute>
                 </event>
             </cyclic>

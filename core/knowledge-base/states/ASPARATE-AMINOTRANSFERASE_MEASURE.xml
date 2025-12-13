@@ -11,7 +11,7 @@
     <abstraction-rules>
         <rule value="Normal" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="40"/>
+                <allowed-value max="40"/>
             </attribute>
         </rule>
         <rule value="Mild Elevation" operator="and">

@@ -11,7 +11,7 @@
     <abstraction-rules>
         <rule value="Severe Thrombocytopenia" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="50"/>
+                <allowed-value max="50"/>
             </attribute>
         </rule>
         <rule value="Moderate Thrombocytopenia" operator="and">

@@ -5,7 +5,7 @@
     <attributes>
         <attribute name="GLUCOSE_MEASURE" type="numeric">
             <numeric-allowed-values>
-                <allowed-value min="69"/>
+                <allowed-value min="20" max="69"/>
             </numeric-allowed-values>
         </attribute>
     </attributes>

@@ -11,7 +11,7 @@
     <abstraction-rules>
         <rule value="Severe Hypokalemia" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="2.5"/>
+                <allowed-value max="2.5"/>
             </attribute>
         </rule>
         <rule value="Moderate Hypokalemia" operator="and">

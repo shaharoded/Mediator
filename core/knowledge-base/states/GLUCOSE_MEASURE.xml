@@ -10,7 +10,7 @@
     <abstraction-rules>
         <rule value="Severe Hypoglycemia" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="54"/>
+                <allowed-value max="54"/>
             </attribute>
         </rule>
         <rule value="Hypoglycemia" operator="and">

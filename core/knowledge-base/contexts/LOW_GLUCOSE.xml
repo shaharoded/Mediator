@@ -16,7 +16,7 @@
     <abstraction-rules>
         <rule value="True" operator="or">
             <attribute ref="A1">
-                <allowed-value min="180"/>
+                <allowed-value max="70"/>
             </attribute>
         </rule>
     </abstraction-rules>

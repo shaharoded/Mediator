@@ -10,7 +10,7 @@
     <abstraction-rules>
         <rule value="Very Low" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="0.6"/>
+                <allowed-value max="0.6"/>
             </attribute>
         </rule>
         <rule value="Very Low" operator="and">

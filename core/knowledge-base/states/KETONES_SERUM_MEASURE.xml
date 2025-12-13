@@ -11,7 +11,7 @@
     <abstraction-rules>
         <rule value="Normal" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="6.25"/>
+                <allowed-value max="6.25"/>
             </attribute>
         </rule>
         <rule value="Mild Ketonemia" operator="and">

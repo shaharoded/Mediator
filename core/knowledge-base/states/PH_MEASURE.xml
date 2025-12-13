@@ -11,7 +11,7 @@
     <abstraction-rules>
         <rule value="Severe Acidosis" operator="and">
             <attribute idx="0">
-                <allowed-value min="0" max="7.0"/>
+                <allowed-value max="7.0"/>
             </attribute>
         </rule>
         <rule value="Moderate Acidosis" operator="and">

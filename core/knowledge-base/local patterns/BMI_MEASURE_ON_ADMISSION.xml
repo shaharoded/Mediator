@@ -20,10 +20,10 @@
                 </anchor>
                 <event select='first'>
                     <attribute ref="E1">
-                        <allowed-value min="0"/>
+                        <allowed-value min="10"/>
                     </attribute>
                     <attribute ref="E2">
-                        <allowed-value min="0"/>
+                        <allowed-value min="0.5"/>
                     </attribute>
                 </event>
             </temporal-relation>

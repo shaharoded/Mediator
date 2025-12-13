@@ -5,7 +5,7 @@
     <attributes>
         <attribute name="KETONES_SERUM_MEASURE" type="numeric">
             <numeric-allowed-values>
-                <allowed-value min="0" max="300"/>
+                <allowed-value min="0.1" max="300"/>
             </numeric-allowed-values>
         </attribute>
     </attributes>
