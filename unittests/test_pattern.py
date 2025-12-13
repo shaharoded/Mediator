@@ -2647,3 +2647,4 @@ def test_global_pattern_context_filtering(repo_global_context):
     # Should only have 1 instance (Window 1). Window 2 (day 1 to day 2) has no context.
     assert len(df_out) == 1
     assert df_out.iloc[0]["StartDateTime"] == make_ts("08:00")
+

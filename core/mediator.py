@@ -1,6 +1,7 @@
 """
 TO-DO:
  - creatinine is having execution order issues
+ - topological sort should not be dependent on the type of the TAK.
 """
 
 from __future__ import annotations
@@ -607,7 +608,6 @@ class Mediator:
             # Phase 0: Query global clipper times ONCE per patient
             clipper_df = self._get_global_clipper_times(patient_id, thread_da)
             execution_order = getattr(self.repo, 'execution_order', list(self.repo.taks.keys()))
-            print(f"[Patient {patient_id}] Execution order: {execution_order}")
 
             # Process TAKs in topological order
             for tak_name in execution_order:

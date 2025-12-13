@@ -417,7 +417,7 @@ class ParameterizedRawConcept(RawConcept):
         for func_el in functions_el.findall("function"):
             value_el = func_el.find("value")
             if value_el is None or "idx" not in value_el.attrib:
-                raise ValueError(f"{name}: each <function> must have a <value idx='...'> child")
+                raise ValueError(f"{tak_name}: each <function> must have a <value idx='...'> child")
             func = {
                 "name": func_el.attrib["name"],
                 "value_idx": int(value_el.attrib["idx"]),

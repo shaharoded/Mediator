@@ -1023,8 +1023,6 @@ class LocalPattern(Pattern):
             # Prepare for Context Check (Condition 1)
             sorted_candidate_times = None
             if rule.context_spec:
-                # Combine anchor and event start times to find "next instance"
-                # We need all candidates for this rule to define the timeline
                 all_starts = []
                 if not anchors.empty:
                     all_starts.append(anchors["StartDateTime"])
@@ -1032,7 +1030,8 @@ class LocalPattern(Pattern):
                     all_starts.append(events["StartDateTime"])
                 
                 if all_starts:
-                    sorted_candidate_times = pd.concat(all_starts).sort_values().unique()
+                    combined = pd.concat(all_starts, ignore_index=True).dropna()
+                    sorted_candidate_times = pd.Series(combined.sort_values().unique())
                 else:
                     sorted_candidate_times = pd.Series([], dtype='datetime64[ns]')
 
@@ -1129,7 +1128,7 @@ class LocalPattern(Pattern):
         min_delta = rule.min_delta
         
         # Vectorized temporal check (before="event.start must be after anchor.end")
-        if how == "before":
+        if how == "before":            
             # For each anchor, find events that start after anchor.end (within max_delta)
             for anchor_idx in anchor_order:
                 anchor_end = anchors.loc[anchor_idx, "EndDateTime"]
