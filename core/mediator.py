@@ -1,9 +1,3 @@
-"""
-TO-DO:
- - creatinine is having execution order issues
- - topological sort should not be dependent on the type of the TAK.
-"""
-
 from __future__ import annotations
 from typing import Optional, List, Dict, Any, Union, Tuple
 from pathlib import Path
