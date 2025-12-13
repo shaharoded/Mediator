@@ -2648,3 +2648,709 @@ def test_global_pattern_context_filtering(repo_global_context):
     assert len(df_out) == 1
     assert df_out.iloc[0]["StartDateTime"] == make_ts("08:00")
 
+ # -----------------------------
+# Tests: Edge Cases & Robustness (No Crashes)
+# -----------------------------
+
+def test_pattern_with_context_no_events_no_crash(tmp_path: Path):
+    """
+    Regression test: Pattern with context constraint but NO events.
+    Should return False (missed opportunity) without crashing.
+    
+    This reproduces the bug: '<' not supported between instances of 'int' and 'Timestamp'
+    which occurred when sorted_candidate_times was built with contaminated indices.
+    """
+    raw_admission_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ADMISSION" concept-type="raw-boolean">
+  <categories>Admin</categories>
+  <description>Admission raw</description>
+  <attributes>
+    <attribute name="ADMISSION" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+    
+    event_admission_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="ADMISSION_EVENT">
+    <categories>Admin</categories>
+    <description>Admission event</description>
+    <derived-from>
+        <attribute name="ADMISSION" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</event>
+"""
+    
+    raw_creatinine_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="CREATININE_MEASURE" concept-type="raw-numeric">
+  <categories>Measurements</categories>
+  <description>Creatinine measure</description>
+  <attributes>
+    <attribute name="CREATININE_MEASURE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="20"/>
+      </numeric-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+    
+    raw_diabetes_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="DIABETES_DIAGNOSIS" concept-type="raw-boolean">
+  <categories>Diagnoses</categories>
+  <description>Diabetes diagnosis</description>
+  <attributes>
+    <attribute name="DIABETES_DIAGNOSIS" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+    
+    context_diabetes_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="DIABETES_DIAGNOSIS_CONTEXT">
+    <categories>Diagnoses</categories>
+    <description>Diabetes diagnosis context</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+    <context-windows>
+        <persistence good-before="0h" good-after="720h"/>
+    </context-windows>
+</context>
+"""
+    
+    # Pattern WITH context constraint - this is the key scenario
+    pattern_creatinine_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="CREATININE_MEASURE_ON_ADMISSION" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Creatinine measured within 72h of admission</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
+        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
+        <attribute name="CREATININE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <context>
+                <attribute ref="C1">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
+            <temporal-relation how='before' max-distance='72h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                    </function>
+                </time-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+    
+    # Write XMLs
+    write_xml(tmp_path, "ADMISSION_RAW.xml", raw_admission_xml)
+    write_xml(tmp_path, "ADMISSION_EVENT.xml", event_admission_xml)
+    write_xml(tmp_path, "CREATININE_MEASURE.xml", raw_creatinine_xml)
+    write_xml(tmp_path, "DIABETES_DIAGNOSIS.xml", raw_diabetes_xml)
+    write_xml(tmp_path, "DIABETES_CONTEXT.xml", context_diabetes_xml)
+    write_xml(tmp_path, "PATTERN_CREATININE.xml", pattern_creatinine_xml)
+    
+    # Build repository
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(tmp_path / "ADMISSION_RAW.xml"))
+    repo.register(RawConcept.parse(tmp_path / "CREATININE_MEASURE.xml"))
+    repo.register(RawConcept.parse(tmp_path / "DIABETES_DIAGNOSIS.xml"))
+    
+    set_tak_repository(repo)
+    
+    from core.tak.event import Event
+    repo.register(Event.parse(tmp_path / "ADMISSION_EVENT.xml"))
+    repo.register(Context.parse(tmp_path / "DIABETES_CONTEXT.xml"))
+    repo.register(LocalPattern.parse(tmp_path / "PATTERN_CREATININE.xml"))
+    
+    # Get TAKs
+    admission_raw = repo.get("ADMISSION")
+    admission_event = repo.get("ADMISSION_EVENT")
+    diabetes_raw = repo.get("DIABETES_DIAGNOSIS")
+    diabetes_context = repo.get("DIABETES_DIAGNOSIS_CONTEXT")
+    pattern = repo.get("CREATININE_MEASURE_ON_ADMISSION")
+    
+    # ============================================================
+    # SCENARIO 1: Anchor + Context exist, but NO event
+    # Expected: Pattern returns False (missed opportunity) - NO CRASH
+    # ============================================================
+    df_raw = pd.DataFrame([
+        (1000, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1000, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
+        # NO CREATININE_MEASURE - this is the key!
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+    
+    df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_admission_event = admission_event.apply(df_admission_raw)
+    df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
+    df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
+    
+    df_pattern_input = pd.concat([df_admission_event, df_diabetes_context], ignore_index=True)
+    
+    # THIS SHOULD NOT CRASH
+    df_out = pattern.apply(df_pattern_input)
+    
+    # Verify output
+    assert len(df_out) == 1, "Should return 1 row (missed opportunity)"
+    assert df_out.iloc[0]["Value"] == "False", "Pattern not found = False"
+    assert df_out.iloc[0]["ConceptName"] == "CREATININE_MEASURE_ON_ADMISSION"
+
+
+def test_pattern_with_context_events_present_no_crash(tmp_path: Path):
+    """
+    Regression test: Pattern with context constraint WITH events.
+    Should return True without crashing.
+    
+    Companion test to ensure fix doesn't break normal case.
+    """
+    raw_admission_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ADMISSION" concept-type="raw-boolean">
+  <categories>Admin</categories>
+  <description>Admission raw</description>
+  <attributes>
+    <attribute name="ADMISSION" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+    
+    event_admission_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="ADMISSION_EVENT">
+    <categories>Admin</categories>
+    <description>Admission event</description>
+    <derived-from>
+        <attribute name="ADMISSION" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</event>
+"""
+    
+    raw_creatinine_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="CREATININE_MEASURE" concept-type="raw-numeric">
+  <categories>Measurements</categories>
+  <description>Creatinine measure</description>
+  <attributes>
+    <attribute name="CREATININE_MEASURE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="20"/>
+      </numeric-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+    
+    raw_diabetes_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="DIABETES_DIAGNOSIS" concept-type="raw-boolean">
+  <categories>Diagnoses</categories>
+  <description>Diabetes diagnosis</description>
+  <attributes>
+    <attribute name="DIABETES_DIAGNOSIS" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+    
+    context_diabetes_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="DIABETES_DIAGNOSIS_CONTEXT">
+    <categories>Diagnoses</categories>
+    <description>Diabetes diagnosis context</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+    <context-windows>
+        <persistence good-before="0h" good-after="720h"/>
+    </context-windows>
+</context>
+"""
+    
+    pattern_creatinine_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="CREATININE_MEASURE_ON_ADMISSION" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Creatinine measured within 72h of admission</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
+        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
+        <attribute name="CREATININE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <context>
+                <attribute ref="C1">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
+            <temporal-relation how='before' max-distance='72h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                    </function>
+                </time-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+    
+    # Write XMLs
+    write_xml(tmp_path, "ADMISSION_RAW.xml", raw_admission_xml)
+    write_xml(tmp_path, "ADMISSION_EVENT.xml", event_admission_xml)
+    write_xml(tmp_path, "CREATININE_MEASURE.xml", raw_creatinine_xml)
+    write_xml(tmp_path, "DIABETES_DIAGNOSIS.xml", raw_diabetes_xml)
+    write_xml(tmp_path, "DIABETES_CONTEXT.xml", context_diabetes_xml)
+    write_xml(tmp_path, "PATTERN_CREATININE.xml", pattern_creatinine_xml)
+    
+    # Build repository
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(tmp_path / "ADMISSION_RAW.xml"))
+    repo.register(RawConcept.parse(tmp_path / "CREATININE_MEASURE.xml"))
+    repo.register(RawConcept.parse(tmp_path / "DIABETES_DIAGNOSIS.xml"))
+    
+    set_tak_repository(repo)
+    
+    from core.tak.event import Event
+    repo.register(Event.parse(tmp_path / "ADMISSION_EVENT.xml"))
+    repo.register(Context.parse(tmp_path / "DIABETES_CONTEXT.xml"))
+    repo.register(LocalPattern.parse(tmp_path / "PATTERN_CREATININE.xml"))
+    
+    # Get TAKs
+    admission_raw = repo.get("ADMISSION")
+    admission_event = repo.get("ADMISSION_EVENT")
+    creatinine_raw = repo.get("CREATININE_MEASURE")
+    diabetes_raw = repo.get("DIABETES_DIAGNOSIS")
+    diabetes_context = repo.get("DIABETES_DIAGNOSIS_CONTEXT")
+    pattern = repo.get("CREATININE_MEASURE_ON_ADMISSION")
+    
+    # ============================================================
+    # SCENARIO 2: Anchor + Context + Event all exist
+    # Expected: Pattern returns True - NO CRASH
+    # ============================================================
+    df_raw = pd.DataFrame([
+        (1000, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1000, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
+        (1000, "CREATININE_MEASURE", make_ts("10:00"), make_ts("10:00"), "1.2"),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+    
+    df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_admission_event = admission_event.apply(df_admission_raw)
+    df_creatinine = creatinine_raw.apply(df_raw[df_raw["ConceptName"] == "CREATININE_MEASURE"])
+    df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
+    df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
+    
+    df_pattern_input = pd.concat([df_admission_event, df_creatinine, df_diabetes_context], ignore_index=True)
+    
+    # THIS SHOULD NOT CRASH
+    df_out = pattern.apply(df_pattern_input)
+    
+    # Verify output
+    assert len(df_out) == 1, "Should return 1 row (pattern found)"
+    assert df_out.iloc[0]["Value"] == "True", "Pattern found = True"
+    assert df_out.iloc[0]["TimeConstraintScore"] == 1.0, "2h is in plateau [0h, 48h]"
+
+
+def test_pattern_with_context_only_anchor_in_input_no_crash(tmp_path: Path):
+    """
+    Regression test: Pattern with context BUT only anchor in input (no context, no event).
+    Should return False without crashing.
+    
+    Edge case: sorted_candidate_times built from anchor only.
+    """
+    raw_admission_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ADMISSION" concept-type="raw-boolean">
+  <categories>Admin</categories>
+  <description>Admission raw</description>
+  <attributes>
+    <attribute name="ADMISSION" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+    
+    event_admission_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="ADMISSION_EVENT">
+    <categories>Admin</categories>
+    <description>Admission event</description>
+    <derived-from>
+        <attribute name="ADMISSION" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</event>
+"""
+    
+    raw_creatinine_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="CREATININE_MEASURE" concept-type="raw-numeric">
+  <categories>Measurements</categories>
+  <description>Creatinine measure</description>
+  <attributes>
+    <attribute name="CREATININE_MEASURE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="20"/>
+      </numeric-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+    
+    raw_diabetes_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="DIABETES_DIAGNOSIS" concept-type="raw-boolean">
+  <categories>Diagnoses</categories>
+  <description>Diabetes diagnosis</description>
+  <attributes>
+    <attribute name="DIABETES_DIAGNOSIS" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+    
+    context_diabetes_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="DIABETES_DIAGNOSIS_CONTEXT">
+    <categories>Diagnoses</categories>
+    <description>Diabetes diagnosis context</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+    <context-windows>
+        <persistence good-before="0h" good-after="720h"/>
+    </context-windows>
+</context>
+"""
+    
+    pattern_creatinine_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="CREATININE_MEASURE_ON_ADMISSION" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Creatinine measured within 72h of admission</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
+        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
+        <attribute name="CREATININE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <context>
+                <attribute ref="C1">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
+            <temporal-relation how='before' max-distance='72h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+    
+    # Write XMLs
+    write_xml(tmp_path, "ADMISSION_RAW.xml", raw_admission_xml)
+    write_xml(tmp_path, "ADMISSION_EVENT.xml", event_admission_xml)
+    write_xml(tmp_path, "CREATININE_MEASURE.xml", raw_creatinine_xml)
+    write_xml(tmp_path, "DIABETES_DIAGNOSIS.xml", raw_diabetes_xml)
+    write_xml(tmp_path, "DIABETES_CONTEXT.xml", context_diabetes_xml)
+    write_xml(tmp_path, "PATTERN_CREATININE.xml", pattern_creatinine_xml)
+    
+    # Build repository
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(tmp_path / "ADMISSION_RAW.xml"))
+    repo.register(RawConcept.parse(tmp_path / "CREATININE_MEASURE.xml"))
+    repo.register(RawConcept.parse(tmp_path / "DIABETES_DIAGNOSIS.xml"))
+    
+    set_tak_repository(repo)
+    
+    from core.tak.event import Event
+    repo.register(Event.parse(tmp_path / "ADMISSION_EVENT.xml"))
+    repo.register(Context.parse(tmp_path / "DIABETES_CONTEXT.xml"))
+    repo.register(LocalPattern.parse(tmp_path / "PATTERN_CREATININE.xml"))
+    
+    # Get TAKs
+    admission_raw = repo.get("ADMISSION")
+    admission_event = repo.get("ADMISSION_EVENT")
+    pattern = repo.get("CREATININE_MEASURE_ON_ADMISSION")
+    
+    # ============================================================
+    # SCENARIO 3: ONLY anchor exists (no context, no event)
+    # Expected: Pattern returns False (generic) - NO CRASH
+    # ============================================================
+    df_raw = pd.DataFrame([
+        (1000, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        # NO DIABETES_DIAGNOSIS - no context
+        # NO CREATININE_MEASURE - no event
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+    
+    df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_admission_event = admission_event.apply(df_admission_raw)
+    
+    # Only anchor in input
+    df_pattern_input = df_admission_event.copy()
+    
+    # THIS SHOULD NOT CRASH
+    df_out = pattern.apply(df_pattern_input)
+    
+    # Verify output
+    assert len(df_out) == 1, "Should return 1 row (generic false)"
+    assert df_out.iloc[0]["Value"] == "False", "Pattern not found = False"
+
+
+def test_pattern_multiple_anchors_mixed_context_no_crash(tmp_path: Path):
+    """
+    Regression test: Multiple anchors, some with context, some without.
+    Tests the sorted_candidate_times logic with multiple entries.
+    """
+    raw_admission_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ADMISSION" concept-type="raw-boolean">
+  <categories>Admin</categories>
+  <description>Admission raw</description>
+  <attributes>
+    <attribute name="ADMISSION" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+    
+    event_admission_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="ADMISSION_EVENT">
+    <categories>Admin</categories>
+    <description>Admission event</description>
+    <derived-from>
+        <attribute name="ADMISSION" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</event>
+"""
+    
+    raw_glucose_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="GLUCOSE_MEASURE" concept-type="raw-numeric">
+  <categories>Measurements</categories>
+  <description>Glucose measure</description>
+  <attributes>
+    <attribute name="GLUCOSE_MEASURE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="600"/>
+      </numeric-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+    
+    raw_diabetes_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="DIABETES_DIAGNOSIS" concept-type="raw-boolean">
+  <categories>Diagnoses</categories>
+  <description>Diabetes diagnosis</description>
+  <attributes>
+    <attribute name="DIABETES_DIAGNOSIS" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+    
+    context_diabetes_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="DIABETES_DIAGNOSIS_CONTEXT">
+    <categories>Diagnoses</categories>
+    <description>Diabetes diagnosis context</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+    <context-windows>
+        <persistence good-before="0h" good-after="24h"/>
+    </context-windows>
+</context>
+"""
+    
+    pattern_glucose_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="GLUCOSE_ON_ADMISSION_CONTEXT" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Glucose measured within 12h of admission (diabetes patients)</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
+        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <context>
+                <attribute ref="C1">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
+            <temporal-relation how='before' max-distance='12h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+    
+    # Write XMLs
+    write_xml(tmp_path, "ADMISSION_RAW.xml", raw_admission_xml)
+    write_xml(tmp_path, "ADMISSION_EVENT.xml", event_admission_xml)
+    write_xml(tmp_path, "GLUCOSE_MEASURE.xml", raw_glucose_xml)
+    write_xml(tmp_path, "DIABETES_DIAGNOSIS.xml", raw_diabetes_xml)
+    write_xml(tmp_path, "DIABETES_CONTEXT.xml", context_diabetes_xml)
+    write_xml(tmp_path, "PATTERN_GLUCOSE_CONTEXT.xml", pattern_glucose_xml)
+    
+    # Build repository
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(tmp_path / "ADMISSION_RAW.xml"))
+    repo.register(RawConcept.parse(tmp_path / "GLUCOSE_MEASURE.xml"))
+    repo.register(RawConcept.parse(tmp_path / "DIABETES_DIAGNOSIS.xml"))
+    
+    set_tak_repository(repo)
+    
+    from core.tak.event import Event
+    repo.register(Event.parse(tmp_path / "ADMISSION_EVENT.xml"))
+    repo.register(Context.parse(tmp_path / "DIABETES_CONTEXT.xml"))
+    repo.register(LocalPattern.parse(tmp_path / "PATTERN_GLUCOSE_CONTEXT.xml"))
+    
+    # Get TAKs
+    admission_raw = repo.get("ADMISSION")
+    admission_event = repo.get("ADMISSION_EVENT")
+    glucose_raw = repo.get("GLUCOSE_MEASURE")
+    diabetes_raw = repo.get("DIABETES_DIAGNOSIS")
+    diabetes_context = repo.get("DIABETES_DIAGNOSIS_CONTEXT")
+    pattern = repo.get("GLUCOSE_ON_ADMISSION_CONTEXT")
+    
+    # ============================================================
+    # SCENARIO 4: Multiple anchors + multiple events + context
+    # Tests sorted_candidate_times with many entries
+    # ============================================================
+    df_raw = pd.DataFrame([
+        # First admission with context and event
+        (1000, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1000, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), "120"),
+        (1000, "DIABETES_DIAGNOSIS", make_ts("07:00"), make_ts("07:00"), "True"),
+        # Second admission (day 2) - context expired, no event
+        (1000, "ADMISSION", make_ts("08:00", day=2), make_ts("08:00", day=2), "True"),
+        # Third admission (day 3) with event but no context
+        (1000, "ADMISSION", make_ts("08:00", day=3), make_ts("08:00", day=3), "True"),
+        (1000, "GLUCOSE_MEASURE", make_ts("09:00", day=3), make_ts("09:00", day=3), "130"),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+    
+    df_admission_raw = admission_raw.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_admission_event = admission_event.apply(df_admission_raw)
+    df_glucose = glucose_raw.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_MEASURE"])
+    df_diabetes_raw = diabetes_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"])
+    df_diabetes_context = diabetes_context.apply(df_diabetes_raw)
+    
+    df_pattern_input = pd.concat([df_admission_event, df_glucose, df_diabetes_context], ignore_index=True)
+    
+    # THIS SHOULD NOT CRASH
+    df_out = pattern.apply(df_pattern_input)
+    
+    # Verify output - at least one True (first admission matches)
+    assert len(df_out) >= 1, "Should return at least 1 row"
+    assert any(df_out["Value"] == "True"), "First admission should match (has context + event)"   
+
