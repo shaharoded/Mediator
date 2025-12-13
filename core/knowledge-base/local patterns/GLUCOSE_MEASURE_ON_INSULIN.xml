@@ -22,7 +22,7 @@
                         <allowed-value min="1"/>
                     </attribute>
                     <attribute ref="A3">
-                        <allowed-value min="1"/>
+                        <allowed-value min="0.01"/>
                     </attribute>
                 </anchor>
                 <event select='first'>

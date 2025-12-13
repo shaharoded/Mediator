@@ -5,7 +5,7 @@
     <attributes>
         <attribute name="INSULIN_DOSAGE" type="numeric">
             <numeric-allowed-values>
-                <allowed-value min="1" max="100"/>
+                <allowed-value min="0.01" max="100"/>
             </numeric-allowed-values>
         </attribute>
     </attributes>

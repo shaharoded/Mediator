@@ -11,7 +11,7 @@
     <abstraction-rules>
         <rule value="IV" operator="or">
             <attribute ref="A3">
-                <allowed-value min="1"/>
+                <allowed-value min="0.01"/>
             </attribute>
         </rule>
         <rule value="Short" operator="or">
