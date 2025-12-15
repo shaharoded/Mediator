@@ -2,6 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Set, List, Optional, TYPE_CHECKING
 import logging
+import pickle
+import gzip
 logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from .tak import TAK
@@ -222,3 +224,15 @@ class TAKRepository:
             "global-pattern": 6,
         }
         return priority_map.get(family, 99)
+    
+    def save(self, file_path: str, compress: bool = True) -> None:
+        """
+        Serialize the TAKRepository to a pickle file.
+        If compress=True, use gzip compression.
+        """
+        if compress:
+            with gzip.open(file_path, 'wb') as f:
+                pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+        else:
+            with open(file_path, 'wb') as f:
+                pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
