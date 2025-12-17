@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import traceback
+import os
 import sys
 import argparse
 
@@ -682,7 +683,7 @@ class Mediator:
     
     async def process_all_patients_async(
         self,
-        max_concurrent: int = 4,
+        max_concurrent: int = 0,
         patient_subset: Optional[List[int]] = None
     ) -> Dict[int, Dict[str, Any]]:
         """
@@ -695,6 +696,9 @@ class Mediator:
         Returns:
             Dict mapping patient_id → {tak_name: rows_written}
         """
+        # Use all available cores if max_concurrent is <= 0
+        if max_concurrent <= 0:
+            max_concurrent = os.cpu_count() or 1
         patient_ids = self.get_patient_ids(patient_subset=patient_subset)
         
         if not patient_ids:

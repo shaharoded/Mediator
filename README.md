@@ -253,7 +253,7 @@ cd Mediator
   core backend run_mediator.ipynb setup.py MANIFEST.in requirements-py37.txt README.md LICENSE `
   "-xr!backend\data\*"
 ```
-
+>> If you have an old deploy file - Delete it!. This compression method merge the 2 files.
 >> I used 7z for it's exclusion patterns. Other ways to do this will work as well.
 
 ---
