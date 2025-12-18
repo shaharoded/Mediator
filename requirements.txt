@@ -1,6 +1,7 @@
 numpy
 pandas
 dask
+dask[dataframe]
 python-dateutil
 tqdm
 lxml>=4.9.0
