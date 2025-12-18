@@ -44,6 +44,10 @@ class DataAccess:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
+        
+        # Enable WAL mode for better multi-process concurrency
+        self.conn.execute("PRAGMA journal_mode=WAL;")
+        self.conn.commit()
 
         if auto_create:
             if not db_missing and self.__check_tables_exist():

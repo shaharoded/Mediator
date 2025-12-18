@@ -1,16 +1,15 @@
 from __future__ import annotations
 from typing import Optional, List, Dict, Any, Union, Tuple
 from pathlib import Path
-import asyncio
 import json
 import logging
 import traceback
 import os
 import sys
 import argparse
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import pandas as pd
-from tqdm.asyncio import tqdm as async_tqdm
 from tqdm import tqdm
 
 from .tak.tak import TAK
@@ -71,12 +70,63 @@ def setup_logging(log_file: Optional[Path] = None, console_level: int = logging.
         root_logger.addHandler(file_handler)
 
 
+def _process_patient_worker(
+    patient_id: int,
+    kb_path_str: str,
+    db_path_str: str,
+    global_clippers: Dict[str, str]
+) -> Dict[str, Union[int, str]]:
+    """
+    Standalone worker function for processing a single patient in a separate process.
+    Must be at module level for pickling by ProcessPoolExecutor.
+    
+    Args:
+        patient_id: Patient ID to process
+        kb_path_str: Path to knowledge base (as string for pickling)
+        db_path_str: Path to database (as string for pickling)
+        global_clippers: Global clipper configuration
+    
+    Returns:
+        Dict with stats: {tak_name: rows_written} or {"error": error_message}
+    """
+    try:
+        # Suppress prints in worker processes (only main process should print)
+        import io
+        import contextlib
+        
+        # Reconstruct Mediator in this process
+        from pathlib import Path
+        from backend.dataaccess import DataAccess
+        
+        kb_path = Path(kb_path_str)
+        db_path = Path(db_path_str)
+        
+        # Suppress stdout during DataAccess init (WAL mode message)
+        with contextlib.redirect_stdout(io.StringIO()):
+            da = DataAccess(db_path=str(db_path))
+            mediator = Mediator(knowledge_base_path=kb_path, data_access=da)
+            
+            # Override global_clippers (avoid re-loading from file)
+            mediator.global_clippers = global_clippers
+            
+            # Build repository silently in this process (each process needs its own TAK instances)
+            mediator.build_repository(silent=True)
+        
+        # Process patient (logging still works, just no stdout prints)
+        result = mediator._process_patient_sync(patient_id, return_cache=False)
+        
+        return result
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+
 class Mediator:
     """
     Orchestrates the KBTA pipeline:
     1. Load & validate TAK repository (raw-concepts → events → states → trends → contexts → patterns)
     2. For each patient, for each TAK: extract filtered input → apply TAK → write output to DB
-    3. Supports async parallelism for patient-level processing
+    3. Supports process parallelism for patient-level concurrency.
     
     Design: Full caching — all TAK outputs cached in memory during patient processing (~500KB per patient).
     """
@@ -141,17 +191,21 @@ class Mediator:
             logger.error(f"Failed to load global clippers: {e}")
             return {}
     
-    def build_repository(self) -> TAKRepository:
+    def build_repository(self, silent: bool = False) -> TAKRepository:
         """
         Load and validate all TAKs from knowledge base in dependency order.
         Raises on parsing/validation errors.
         
+        Args:
+            silent: If True, suppress all output (for worker processes)
+        
         Returns:
             TAKRepository instance (also stored in self.repo and set as global)
         """
-        print("\n" + "="*80)
-        print("PHASE 1: Building TAK Repository")
-        print("="*80)
+        if not silent:
+            print("\n" + "="*80)
+            print("PHASE 1: Building TAK Repository")
+            print("="*80)
         
         repo = TAKRepository()
         
@@ -174,7 +228,9 @@ class Mediator:
         
         total_files = sum(len(list(path.glob("*.xml"))) for _, path, _, _ in phases if path.exists())
         
-        with tqdm(total=total_files, desc="Loading TAKs", unit="file") as pbar:
+        # Use tqdm only if not silent
+        pbar = tqdm(total=total_files, desc="Loading TAKs", unit="file", disable=silent)
+        with pbar:
             for phase_name, phase_path, tak_class, storage_list in phases:
                 if not phase_path.exists():
                     logger.warning(f"[{phase_name}] Folder not found: {phase_path}")
@@ -198,32 +254,34 @@ class Mediator:
                         raise RuntimeError(f"Failed to parse {xml_path.name}: {e}") from e
         
         # Run business-logic validation on all TAKs
-        print("\n[Validation] Running business-logic checks on TAK repository...")
+        if not silent:
+            print("\n[Validation] Running business-logic checks on TAK repository...")
         try:
             repo.finalize_repository()
         except Exception as e:
             raise RuntimeError(f"TAK repository finalization failed: {e}") from e
         
-        # Summary
-        # Count unique TAKs from repository (avopids dupolicates on re-run)
-        raw_concepts_count = sum(1 for t in repo.taks.values() if isinstance(t, RawConcept))
-        events_count = sum(1 for t in repo.taks.values() if isinstance(t, Event))
-        states_count = sum(1 for t in repo.taks.values() if isinstance(t, State))
-        trends_count = sum(1 for t in repo.taks.values() if isinstance(t, Trend))
-        contexts_count = sum(1 for t in repo.taks.values() if isinstance(t, Context))
-        patterns_count = sum(1 for t in repo.taks.values() if isinstance(t, Pattern))
-        
-        print("\n" + "="*80)
-        print("✅ TAK Repository Built Successfully")
-        print("="*80)
-        print(f"  Raw Concepts: {raw_concepts_count}")
-        print(f"  Events:       {events_count}")
-        print(f"  States:       {states_count}")
-        print(f"  Trends:       {trends_count}")
-        print(f"  Contexts:     {contexts_count}")
-        print(f"  Patterns:     {patterns_count}")
-        print(f"  TOTAL TAKs:   {len(repo.taks)}")
-        print("="*80 + "\n")
+        # Summary (only if not silent)
+        if not silent:
+            # Count unique TAKs from repository (avoids duplicates on re-run)
+            raw_concepts_count = sum(1 for t in repo.taks.values() if isinstance(t, RawConcept))
+            events_count = sum(1 for t in repo.taks.values() if isinstance(t, Event))
+            states_count = sum(1 for t in repo.taks.values() if isinstance(t, State))
+            trends_count = sum(1 for t in repo.taks.values() if isinstance(t, Trend))
+            contexts_count = sum(1 for t in repo.taks.values() if isinstance(t, Context))
+            patterns_count = sum(1 for t in repo.taks.values() if isinstance(t, Pattern))
+            
+            print("\n" + "="*80)
+            print("✅ TAK Repository Built Successfully")
+            print("="*80)
+            print(f"  Raw Concepts: {raw_concepts_count}")
+            print(f"  Events:       {events_count}")
+            print(f"  States:       {states_count}")
+            print(f"  Trends:       {trends_count}")
+            print(f"  Contexts:     {contexts_count}")
+            print(f"  Patterns:     {patterns_count}")
+            print(f"  TOTAL TAKs:   {len(repo.taks)}")
+            print("="*80 + "\n")
         
         self.repo = repo
         return repo
@@ -665,32 +723,16 @@ class Mediator:
             # Close thread-local connection
             thread_da.conn.close()
 
-    async def process_patient_async(self, patient_id: int, semaphore: asyncio.Semaphore) -> Dict[str, int]:
-        """
-        Process a single patient through the entire TAK pipeline (async).
-        
-        Args:
-            patient_id: Patient ID
-            semaphore: Asyncio semaphore for concurrency control
-        
-        Returns:
-            Dict with stats: {tak_name: rows_written}
-        """
-        async with semaphore:
-            # Run synchronous TAK processing in executor (blocking operations)
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._process_patient_sync, patient_id)
-    
-    async def process_all_patients_async(
+    def process_all_patients_parallel(
         self,
         max_concurrent: int = 0,
         patient_subset: Optional[List[int]] = None
     ) -> Dict[int, Dict[str, Any]]:
         """
-        Process all patients through TAK pipeline with async parallelism.
+        Process all patients through TAK pipeline with multiprocessing.
         
         Args:
-            max_concurrent: Maximum number of concurrent patient processes
+            max_concurrent: Maximum number of concurrent patient processes (0 = all cores)
             patient_subset: Optional list of patient IDs to process. If None, processes all patients.
         
         Returns:
@@ -698,7 +740,8 @@ class Mediator:
         """
         # Use all available cores if max_concurrent is <= 0
         if max_concurrent <= 0:
-            max_concurrent = os.cpu_count() or 1
+            max_concurrent = os.cpu_count() or 4
+        
         patient_ids = self.get_patient_ids(patient_subset=patient_subset)
         
         if not patient_ids:
@@ -706,28 +749,33 @@ class Mediator:
             return {}
         
         print("\n" + "="*80)
-        print(f"PHASE 2: Processing {len(patient_ids)} Patients (max_concurrent={max_concurrent})")
+        print(f"PHASE 2: Processing {len(patient_ids)} Patients (max_workers={max_concurrent})")
         if patient_subset:
             print(f"         Patient Subset: {patient_ids}")
         print("="*80 + "\n")
         
-        semaphore = asyncio.Semaphore(max_concurrent)
-        
-        tasks = [
-            self.process_patient_async(pid, semaphore)
+        # Prepare worker arguments (picklable)
+        worker_args = [
+            (pid, str(self.kb_path), str(self.db_path), self.global_clippers)
             for pid in patient_ids
         ]
         
         # Process with progress bar
         results = []
-        for coro in async_tqdm.as_completed(tasks, total=len(tasks), desc="Processing patients", unit="patient"):
-            result = await coro
-            results.append(result)
+        with ProcessPoolExecutor(max_workers=max_concurrent) as executor:
+            futures = [executor.submit(_process_patient_worker, *args) for args in worker_args]
+            
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Processing patients", unit="patient"):
+                result = future.result()
+                results.append(result)
         
-        # Map results back to patient IDs
-        patient_stats = dict(zip(patient_ids, results))
+        # Map results back to patient IDs (order may differ from submission)
+        patient_stats = {}
+        for args, result in zip(worker_args, results):
+            patient_id = args[0]
+            patient_stats[patient_id] = result
         
-        # Summary (filter out error values properly)
+        # Summary
         total_rows = sum(
             sum(v for v in stats.values() if isinstance(v, int))
             for stats in results 
@@ -754,42 +802,14 @@ class Mediator:
         Main entry point: Build repository → Process patients → Write outputs.
         
         Args:
-            max_concurrent: Maximum number of concurrent patient processes
+            max_concurrent: Maximum number of concurrent patient processes (0 = all cores)
             patient_subset: Optional list of patient IDs to process
         """
         # Phase 1: Build TAK repository
         self.build_repository()
         
-        # Phase 2: Process patients (async)
-        patient_stats = asyncio.run(
-            self.process_all_patients_async(
-                max_concurrent=max_concurrent,
-                patient_subset=patient_subset
-            )
-        )
-        
-        return patient_stats
-    
-    async def run_async(
-        self,
-        max_concurrent: int = 4,
-        patient_subset: Optional[List[int]] = None
-    ) -> Dict[int, Dict[str, Any]]:
-        """
-        Jupyter-friendly version: Build repository → Process patients (already in event loop).
-        
-        Usage in Jupyter:
-            patient_stats = await mediator.run_async(patient_subset=[1000, 1001])
-        
-        Args:
-            max_concurrent: Maximum number of concurrent patient processes
-            patient_subset: Optional list of patient IDs to process
-        """
-        # Phase 1: Build TAK repository (sync)
-        self.build_repository()
-        
-        # Phase 2: Process patients (async, reuses existing event loop)
-        patient_stats = await self.process_all_patients_async(
+        # Phase 2: Process patients (multiprocessing)
+        patient_stats = self.process_all_patients_parallel(
             max_concurrent=max_concurrent,
             patient_subset=patient_subset
         )

@@ -11,7 +11,7 @@ The **Mediator** is a Python-based implementation of Knowledge-Based Temporal Ab
 **Key Features:**
 - ✅ **Hierarchical abstractions** — Raw Concepts → Events → States → Trends → Contexts → Patterns
 - ✅ **XSD schema validation** — Structural validation for all TAK definitions
-- ✅ **Production-ready** — SQLite backend, async processing, comprehensive tests
+- ✅ **Production-ready** — SQLite backend, ProcessPool processing, comprehensive tests
 - ✅ **Extensible** — XML-based TAK definitions (no code changes needed)
 
 **Theoretical Foundation:**

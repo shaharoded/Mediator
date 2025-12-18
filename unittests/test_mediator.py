@@ -17,7 +17,6 @@ They process a small subset of patients (default: first 10) to keep tests fast.
 
 from pathlib import Path
 import pytest
-import asyncio
 import time
 import pandas as pd
 
@@ -290,8 +289,8 @@ def test_process_patient_single(prod_db, prod_kb, small_patient_subset):
     prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (patient_id,))
 
 
-def test_process_multiple_patients_async(prod_db, prod_kb, small_patient_subset):
-    """Test async multi-patient processing (small subset)."""
+def test_process_multiple_patients_parallel(prod_db, prod_kb, small_patient_subset):
+    """Test parallel multi-patient processing (small subset)."""
     mediator = Mediator(prod_kb, prod_db)
     mediator.build_repository()
     
@@ -300,11 +299,9 @@ def test_process_multiple_patients_async(prod_db, prod_kb, small_patient_subset)
     for pid in test_patients:
         prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (pid,))
     
-    patient_stats = asyncio.run(
-        mediator.process_all_patients_async(
-            max_concurrent=4,
-            patient_subset=test_patients
-        )
+    patient_stats = mediator.process_all_patients_parallel(
+        max_concurrent=4,
+        patient_subset=test_patients
     )
     
     assert len(patient_stats) == len(test_patients)
@@ -365,11 +362,9 @@ def test_empty_subset_returns_empty(prod_db, prod_kb):
     mediator = Mediator(prod_kb, prod_db)
     mediator.build_repository()
     
-    patient_stats = asyncio.run(
-        mediator.process_all_patients_async(
-            max_concurrent=4,
-            patient_subset=[]
-        )
+    patient_stats = mediator.process_all_patients_parallel(
+        max_concurrent=4,
+        patient_subset=[]
     )
     
     assert len(patient_stats) == 0
@@ -391,11 +386,9 @@ def test_benchmark_10_patients(prod_db, prod_kb, small_patient_subset):
         prod_db.execute_query("DELETE FROM OutputPatientData WHERE PatientId = ?", (pid,))
     
     start = time.time()
-    patient_stats = asyncio.run(
-        mediator.process_all_patients_async(
-            max_concurrent=4,
-            patient_subset=test_patients
-        )
+    patient_stats = mediator.process_all_patients_parallel(
+        max_concurrent=4,
+        patient_subset=test_patients
     )
     elapsed = time.time() - start
     
