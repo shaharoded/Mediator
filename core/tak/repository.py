@@ -1,6 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Set, List, Optional, TYPE_CHECKING
+import pandas as pd
+import json
+import openpyxl
 import logging
 import pickle
 import gzip
@@ -236,3 +239,169 @@ class TAKRepository:
         else:
             with open(file_path, 'wb') as f:
                 pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    def export_metadata(self) -> "pd.DataFrame":
+        """
+        Export TAK metadata to a pandas DataFrame for documentation/analysis.
+        
+        Returns a DataFrame with columns:
+        - TAK_Name: TAK identifier
+        - Family: TAK family (raw-concept, event, state, trend, context, pattern, etc.)
+        - Categories: List of category tags
+        - Description: Human-readable description
+        - Attributes: For raw-concepts (formatted as readable string)
+        - Derived_From: Dependencies (formatted as readable string)
+        - Parameters: For parameterized TAKs (formatted as readable string)
+        - Clippers: For contexts (formatted as readable string)
+        - Compliance_Function: For patterns (function name and trapezoid values)
+        """
+        
+        def _duration_to_hours(val: str) -> float:
+            """Parse compact duration string (e.g., '72h', '2d', '15m') into hours (float).
+            Falls back to float(val) if already numeric; returns 0.0 on failure.
+            """
+            try:
+                from .utils import parse_duration  # local import to avoid cycles
+                return parse_duration(val).total_seconds() / 3600.0
+            except Exception:
+                try:
+                    return float(val)
+                except Exception:
+                    return 0.0
+
+        def _json_default(o):
+            """Best-effort serializer for non-JSON-native objects (timedelta → hours, sets, numpy/pandas, etc.)."""
+            # Timedelta → hours (float)
+            try:
+                import pandas as _pd
+                if isinstance(o, _pd.Timedelta):
+                    return o.total_seconds() / 3600.0
+            except Exception:
+                pass
+            try:
+                from datetime import timedelta as _td
+                if isinstance(o, _td):
+                    return o.total_seconds() / 3600.0
+            except Exception:
+                pass
+            # Sets → lists
+            try:
+                from collections.abc import Set as _Set
+                if isinstance(o, _Set):
+                    return list(o)
+            except Exception:
+                pass
+            # Numpy → Python types
+            try:
+                import numpy as np  # type: ignore
+                if isinstance(o, (np.integer, np.floating)):
+                    return o.item()
+                if isinstance(o, np.ndarray):
+                    return o.tolist()
+            except Exception:
+                pass
+            # Pandas timestamps → isoformat
+            try:
+                if isinstance(o, pd.Timestamp):
+                    return o.isoformat()
+            except Exception:
+                pass
+            # Datetime-like (has isoformat) → isoformat; else str fallback
+            if hasattr(o, 'isoformat'):
+                try:
+                    return o.isoformat()
+                except Exception:
+                    pass
+            return str(o)
+        
+        rows = []
+        
+        for tak_name in sorted(self.taks.keys()):
+            tak = self.taks[tak_name]
+            
+            # Extract basic fields
+            row = {
+                'TAK_Name': tak.name,
+                'Family': tak.family,
+                'Categories': ', '.join(tak.categories) if hasattr(tak, 'categories') and tak.categories else '',
+                'Description': tak.description if hasattr(tak, 'description') else '',
+            }
+            
+            # Attributes (raw-concepts)
+            if hasattr(tak, 'attributes') and tak.attributes:
+                # Format as readable JSON
+                row['Attributes'] = json.dumps(tak.attributes, indent=2, ensure_ascii=False, default=_json_default)
+            else:
+                row['Attributes'] = ''
+            
+            # Derived_From (events, states, trends, contexts, patterns)
+            if hasattr(tak, 'derived_from'):
+                if isinstance(tak.derived_from, list):
+                    # Event/Context/Pattern: list of dicts
+                    row['Derived_From'] = json.dumps(tak.derived_from, indent=2, ensure_ascii=False, default=_json_default)
+                else:
+                    # State/Trend: single string
+                    row['Derived_From'] = tak.derived_from
+            else:
+                row['Derived_From'] = ''
+            
+            # Parameters (parameterized-raw-concepts, patterns)
+            if hasattr(tak, 'parameters') and tak.parameters:
+                row['Parameters'] = json.dumps(tak.parameters, indent=2, ensure_ascii=False, default=_json_default)
+            else:
+                row['Parameters'] = ''
+            
+            # Clippers (contexts)
+            if hasattr(tak, 'clippers') and tak.clippers:
+                row['Clippers'] = json.dumps(tak.clippers, indent=2, ensure_ascii=False, default=_json_default)
+            else:
+                row['Clippers'] = ''
+            
+            # Compliance function (patterns): aggregate per-rule details including trapezoid
+            compliance_str = ''
+            try:
+                from .pattern import Pattern  # local import to avoid cycles at module import
+                is_pattern = isinstance(tak, Pattern)
+            except Exception:
+                is_pattern = False
+            if is_pattern and hasattr(tak, 'abstraction_rules') and tak.abstraction_rules:
+                entries = []
+                for rule in tak.abstraction_rules:
+                    tcc = getattr(rule, 'time_constraint_compliance', None)
+                    if tcc:
+                        trapez_raw = tcc.get('trapeze')
+                        trapeze = None
+                        if trapez_raw is not None:
+                            try:
+                                # Convert compact duration strings to hours (floats)
+                                trapeze = [
+                                    _duration_to_hours(trapez_raw[0]),
+                                    _duration_to_hours(trapez_raw[1]),
+                                    _duration_to_hours(trapez_raw[2]),
+                                    _duration_to_hours(trapez_raw[3]),
+                                ]
+                            except Exception:
+                                trapeze = trapez_raw  # fallback to raw
+                        entries.append({
+                            'type': 'time-constraint',
+                            'func_name': tcc.get('func_name'),
+                            'trapeze': trapeze,
+                            'parameters': tcc.get('parameters', []),
+                        })
+                    vcc = getattr(rule, 'value_constraint_compliance', None)
+                    if vcc:
+                        entries.append({
+                            'type': 'value-constraint',
+                            'func_name': vcc.get('func_name'),
+                            'trapeze': vcc.get('trapeze'),
+                            'targets': vcc.get('targets', []),
+                            'parameters': vcc.get('parameters', []),
+                        })
+                if entries:
+                    compliance_str = json.dumps(entries, indent=2, ensure_ascii=False, default=_json_default)
+            row['Compliance_Function'] = compliance_str
+            
+            rows.append(row)
+        
+        df = pd.DataFrame(rows)
+        return df

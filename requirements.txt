@@ -6,6 +6,7 @@ python-dateutil
 tqdm
 lxml>=4.9.0
 setuptools
+openpyxl>=3.0.0
 
 # For testing
 pytest
