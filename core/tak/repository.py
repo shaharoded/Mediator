@@ -252,8 +252,12 @@ class TAKRepository:
         - Attributes: For raw-concepts (formatted as readable string)
         - Derived_From: Dependencies (formatted as readable string)
         - Parameters: For parameterized TAKs (formatted as readable string)
+        - Persistence: For states/trends (good_after_hours, interpolate, max_skip)
+        - Trend_Params: For trends (attribute_idx, significant_variation, time_steady_hours)
+        - Context_Windows: For contexts (value-specific before/after hours)
         - Clippers: For contexts (formatted as readable string)
         - Compliance_Function: For patterns (function name and trapezoid values)
+        - Abstraction_Rules: For states/events/contexts/patterns (rules with constraints/relation)
         """
         
         def _duration_to_hours(val: str) -> float:
@@ -351,21 +355,115 @@ class TAKRepository:
             else:
                 row['Parameters'] = ''
             
-            # Clippers (contexts)
-            if hasattr(tak, 'clippers') and tak.clippers:
-                row['Clippers'] = json.dumps(tak.clippers, indent=2, ensure_ascii=False, default=_json_default)
-            else:
-                row['Clippers'] = ''
-            
-            # Compliance function (patterns): aggregate per-rule details including trapezoid
+            # Initialize family-specific columns
+            row['Persistence'] = ''
+            row['Trend_Params'] = ''
+            row['Context_Windows'] = ''
+            row['Clippers'] = ''
             compliance_str = ''
-            try:
-                from .pattern import Pattern  # local import to avoid cycles at module import
-                is_pattern = isinstance(tak, Pattern)
-            except Exception:
-                is_pattern = False
-            if is_pattern and hasattr(tak, 'abstraction_rules') and tak.abstraction_rules:
+            rules_str = ''
+            
+            # Branch by TAK family (avoid runtime imports/cycles)
+            fam = getattr(tak, 'family', '')
+
+            # ===== STATE TAKs =====
+            if fam == 'state':
+                # Persistence parameters
+                persistence_info = {
+                    'good_after_hours': tak.good_after.total_seconds() / 3600.0,
+                    'interpolate': tak.interpolate,
+                    'max_skip': tak.max_skip
+                }
+                row['Persistence'] = json.dumps(persistence_info, indent=2)
+                
+                # Abstraction rules (discretization logic)
+                if hasattr(tak, 'abstraction_rules') and tak.abstraction_rules:
+                    state_rules = []
+                    for rule in tak.abstraction_rules:
+                        # Serialize constraints dict: {attr_idx: {type, rules:[...]}}
+                        constraints_serialized = {}
+                        try:
+                            for idx, spec in (getattr(rule, 'constraints', {}) or {}).items():
+                                constraints_serialized[int(idx)] = {
+                                    'type': spec.get('type'),
+                                    'rules': spec.get('rules', [])
+                                }
+                        except Exception:
+                            constraints_serialized = getattr(rule, 'constraints', {}) or {}
+                        rule_entry = {
+                            'value': getattr(rule, 'value', None),
+                            'operator': getattr(rule, 'operator', 'and'),
+                            'constraints': constraints_serialized
+                        }
+                        state_rules.append(rule_entry)
+                    rules_str = json.dumps(state_rules, indent=2, ensure_ascii=False, default=_json_default)
+            
+            # ===== TREND TAKs =====
+            elif fam == 'trend':
+                # Trend-specific parameters
+                trend_params = {
+                    'attribute_idx': tak.attribute_idx,
+                    'significant_variation': tak.significant_variation,
+                    'time_steady_hours': tak.time_steady.total_seconds() / 3600.0
+                }
+                row['Trend_Params'] = json.dumps(trend_params, indent=2)
+                
+                # Persistence
+                persistence_info = {
+                    'good_after_hours': tak.good_after.total_seconds() / 3600.0
+                }
+                row['Persistence'] = json.dumps(persistence_info, indent=2)
+            
+            # ===== EVENT TAKs =====
+            elif fam == 'event':
+                # Abstraction rules (value mapping with ref-based constraints)
+                if hasattr(tak, 'abstraction_rules') and tak.abstraction_rules:
+                    event_rules = []
+                    for rule in tak.abstraction_rules:
+                        rule_entry = {
+                            'value': rule.value,
+                            'operator': rule.operator,
+                            'constraints': {}
+                        }
+                        for ref, constraint_list in rule.constraints.items():
+                            rule_entry['constraints'][ref] = constraint_list
+                        event_rules.append(rule_entry)
+                    rules_str = json.dumps(event_rules, indent=2, ensure_ascii=False, default=_json_default)
+            
+            # ===== CONTEXT TAKs =====
+            elif fam == 'context':
+                # Clippers
+                if hasattr(tak, 'clippers') and tak.clippers:
+                    row['Clippers'] = json.dumps(tak.clippers, indent=2, ensure_ascii=False, default=_json_default)
+                
+                # Context windows (convert timedeltas to hours)
+                if hasattr(tak, 'context_windows') and tak.context_windows:
+                    windows_export = {}
+                    for value, window in tak.context_windows.items():
+                        windows_export[str(value) if value is not None else 'default'] = {
+                            'before_hours': window['before'].total_seconds() / 3600.0,
+                            'after_hours': window['after'].total_seconds() / 3600.0
+                        }
+                    row['Context_Windows'] = json.dumps(windows_export, indent=2)
+                
+                # Abstraction rules (value mapping with ref-based constraints)
+                if hasattr(tak, 'abstraction_rules') and tak.abstraction_rules:
+                    context_rules = []
+                    for rule in tak.abstraction_rules:
+                        rule_entry = {
+                            'value': rule.value,
+                            'operator': rule.operator,
+                            'constraints': {}
+                        }
+                        for ref, constraint_list in rule.constraints.items():
+                            rule_entry['constraints'][ref] = constraint_list
+                        context_rules.append(rule_entry)
+                    rules_str = json.dumps(context_rules, indent=2, ensure_ascii=False, default=_json_default)
+            
+            # ===== PATTERN TAKs =====
+            elif fam in ('pattern', 'local-pattern', 'global-pattern') and hasattr(tak, 'abstraction_rules') and tak.abstraction_rules:
                 entries = []
+                rules_entries = []
                 for rule in tak.abstraction_rules:
                     tcc = getattr(rule, 'time_constraint_compliance', None)
                     if tcc:
@@ -397,9 +495,45 @@ class TAKRepository:
                             'targets': vcc.get('targets', []),
                             'parameters': vcc.get('parameters', []),
                         })
+
+                    # Summarize the rule's temporal relation and constraints
+                    rel = getattr(rule, 'relation_spec', {}) or {}
+                    relation_summary = {
+                        'how': rel.get('how'),
+                        'max_distance_hours': _duration_to_hours(rel.get('max_distance')) if rel.get('max_distance') else None,
+                        'min_distance_hours': _duration_to_hours(rel.get('min_distance')) if rel.get('min_distance') else None,
+                    }
+                    def _summarize_part(part: dict):
+                        if not part:
+                            return None
+                        attrs = part.get('attributes', {}) or {}
+                        return {
+                            'select': part.get('select'),
+                            'attributes': {
+                                name: {
+                                    'idx': spec.get('idx'),
+                                    'allowed_values': list(spec.get('allowed_values', [])) if spec.get('allowed_values') else [],
+                                    'min': spec.get('min'),
+                                    'max': spec.get('max'),
+                                }
+                                for name, spec in attrs.items()
+                            }
+                        }
+                    anchor_summary = _summarize_part(rel.get('anchor') or {})
+                    event_summary = _summarize_part(rel.get('event') or {})
+                    context_summary = _summarize_part(getattr(rule, 'context_spec', {}) or {})
+                    rules_entries.append({
+                        'relation': relation_summary,
+                        'anchor': anchor_summary,
+                        'event': event_summary,
+                        'context': context_summary,
+                    })
                 if entries:
                     compliance_str = json.dumps(entries, indent=2, ensure_ascii=False, default=_json_default)
+                if rules_entries:
+                    rules_str = json.dumps(rules_entries, indent=2, ensure_ascii=False, default=_json_default)
             row['Compliance_Function'] = compliance_str
+            row['Abstraction_Rules'] = rules_str
             
             rows.append(row)
         
