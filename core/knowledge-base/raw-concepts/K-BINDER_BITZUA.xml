@@ -4,5 +4,6 @@
     <description>Raw concept to mark potassium binder administration event (oral/ rectal route)</description>
     <attributes>
         <attribute name="K-BINDER_BITZUA" type="boolean"/>
+        <attribute name="K_BINDER_BITZUA" type="boolean"/>
     </attributes>
 </raw-concept>

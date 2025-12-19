@@ -4,5 +4,6 @@
     <description>Raw concept to mark a cardio-vascular disorder event, inputed from 'Observation'</description>
     <attributes>
         <attribute name="CARDIO-VASCULAR_DISORDER" type="boolean"/>
+        <attribute name="CARDIOVASCULAR_DISORDER" type="boolean"/>
     </attributes>
 </raw-concept>

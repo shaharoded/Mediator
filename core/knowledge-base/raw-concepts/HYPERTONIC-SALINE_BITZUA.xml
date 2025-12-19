@@ -4,5 +4,6 @@
     <description>Raw concept to mark hypertonic saline administration event (IV only)</description>
     <attributes>
         <attribute name="HYPERTONIC-SALINE_BITZUA" type="boolean"/>
+        <attribute name="HYPERTONIC_SALINE_BITZUA" type="boolean"/>
     </attributes>
 </raw-concept>

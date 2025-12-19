@@ -8,5 +8,10 @@
                 <allowed-value min="1.5" max="7"/>
             </numeric-allowed-values>
         </attribute>
+        <attribute name="ALBUMIN_SERUM_MEASURE" type="numeric">
+            <numeric-allowed-values>
+                <allowed-value min="1.5" max="7"/>
+            </numeric-allowed-values>
+        </attribute>
     </attributes>
 </raw-concept>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <parameterized-raw-concept name="CREATININE_REL_SERUM_MEASURE">
-    <categories>DrugAdministration</categories>
-    <description>Raw concept to manage the BASAL ratio (long term) compared to the last administered dose</description>
+    <categories>Measurements</categories>
+    <description>Raw concept to monitor the creatinine trend within admission, if 2 or more exist</description>
     <derived-from name="CREATININE_SERUM_MEASURE" tak="raw-concept"/>
     
     <!-- Will use the closest instance to the beginning of the pattern -->
