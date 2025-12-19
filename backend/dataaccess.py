@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import time
 import pandas as pd
 import logging
 from contextlib import contextmanager
@@ -47,6 +48,8 @@ class DataAccess:
         
         # Enable WAL mode for better multi-process concurrency
         self.conn.execute("PRAGMA journal_mode=WAL;")
+        # Add a generous busy timeout (e.g., 30 seconds) to wait on locks
+        self.conn.execute("PRAGMA busy_timeout=30000;")
         self.conn.commit()
 
         if auto_create:
@@ -167,20 +170,33 @@ class DataAccess:
             raise FileNotFoundError(f"Query file not found: {query_path}")
         with open(query_path, 'r') as f:
             query = f.read()
+        
+        def _run_batch_with_retry(cursor, query_sql, batch, retries=5, base_delay=0.1):
+            for attempt in range(retries):
+                try:
+                    before = cursor.connection.total_changes
+                    cursor.executemany(query_sql, batch)
+                    return cursor.connection.total_changes - before
+                except sqlite3.OperationalError as e:
+                    msg = str(e).lower()
+                    if ("locked" in msg) or ("busy" in msg):
+                        if attempt == retries - 1:
+                            print(e)
+                            raise 
+                        time.sleep(base_delay * (2 ** attempt))  # 0.1, 0.2, 0.4, 0.8, 1.6
+                    else:
+                        raise
 
         batch = []
         total_inserted = 0
         for r in rows:
             batch.append(r)
             if len(batch) >= batch_size:
-                before = self.conn.total_changes
-                self.cursor.executemany(query, batch)
-                total_inserted += (self.conn.total_changes - before)
+                total_inserted += _run_batch_with_retry(self.cursor, query, batch)
                 batch = []
         if batch:
-            before = self.conn.total_changes
-            self.cursor.executemany(query, batch)
-            total_inserted += (self.conn.total_changes - before)
+            total_inserted += _run_batch_with_retry(self.cursor, query, batch)
+
         return total_inserted
 
     def fetch_records(self, query_or_path, params=()):
