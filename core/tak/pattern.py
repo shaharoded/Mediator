@@ -925,10 +925,9 @@ class LocalPattern(Pattern):
         
         # PRE-RESOLVE PARAMETERS ONCE (not per-rule)
         # For patterns with compliance functions, compute parameters upfront
-        has_compliance = any(
-            r.time_constraint_compliance or r.value_constraint_compliance 
-            for r in self.abstraction_rules
-        )
+        has_time_compliance = any(r.time_constraint_compliance for r in self.abstraction_rules)
+        has_value_compliance = any(r.value_constraint_compliance for r in self.abstraction_rules)
+        has_compliance = any([has_time_compliance, has_value_compliance])
         parameter_values = {}
         if has_compliance and self.parameters:
             # Use earliest anchor time as reference (will refine per-instance later if needed)
@@ -1080,8 +1079,8 @@ class LocalPattern(Pattern):
                     "StartDateTime": start_dt,
                     "EndDateTime": end_dt,
                     "Value": "False",
-                    "TimeConstraintScore": 0.0,
-                    "ValueConstraintScore": 0.0
+                    "TimeConstraintScore": 0.0 if has_time_compliance else None,
+                    "ValueConstraintScore": 0.0 if has_value_compliance else None
                 })
 
         # --- Condition 2: Filter Potential Falses based on Successful Intervals ---
