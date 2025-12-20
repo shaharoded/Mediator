@@ -1,6 +1,7 @@
 """
 TO-DO:
  - Currently all patterns have the False rows insersion, but some patterns function like events (infection) and don't need it. Let's have a block for that.
+ - Batches should probably be collected on a patient level, not TAK level, to reduce the number of writes.
 """
 
 from __future__ import annotations
@@ -42,6 +43,8 @@ from backend.config import (
 )
 
 logger = logging.getLogger(__name__)
+_WORKER_MEDIATOR = None
+_WORKER_DA = None
 
 def setup_logging(log_file: Optional[Path] = None, console_level: int = logging.WARNING):
     """
@@ -77,55 +80,45 @@ def setup_logging(log_file: Optional[Path] = None, console_level: int = logging.
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
 
-def _process_patient_worker(
-    patient_id: int,
-    kb_path_str: str,
-    db_path_str: str,
-    global_clippers: Dict[str, str],
-    write_queue
-) -> Dict[str, Union[int, str]]:
+def _init_worker(kb_path_str: str, db_path_str: str, global_clippers: Dict[str, str]):
+    """
+    Runs once per ProcessPool worker process.
+    Builds Mediator + TAK repository once and reuses for all patients handled by this process.
+    """
+    global _WORKER_MEDIATOR, _WORKER_DA
+
+    kb_path = Path(kb_path_str)
+    db_path = Path(db_path_str)
+
+    # One DB connection per process for READS only
+    _WORKER_DA = DataAccess(db_path=str(db_path))
+    _WORKER_MEDIATOR = Mediator(knowledge_base_path=kb_path, data_access=_WORKER_DA)
+
+    # avoid re-reading file
+    _WORKER_MEDIATOR.global_clippers = global_clippers
+
+    # Build TAK repository once per process
+    _WORKER_MEDIATOR.build_repository(silent=True)
+
+def _process_patient_worker(patient_id: int, write_queue) -> Dict[str, Union[int, str]]:
     """
     Standalone worker function for processing a single patient in a separate process.
     Must be at module level for pickling by ProcessPoolExecutor.
     
     Args:
         patient_id: Patient ID to process
-        kb_path_str: Path to knowledge base (as string for pickling)
-        db_path_str: Path to database (as string for pickling)
-        global_clippers: Global clipper configuration
         write_queue: Queue to handle concurrent writes.
     
     Returns:
         Dict with stats: {tak_name: rows_written} or {"error": error_message}
     """
+    global _WORKER_MEDIATOR
     try:
-        # Suppress prints in worker processes (only main process should print)
-        import io
-        import contextlib
-        
-        # Reconstruct Mediator in this process
-        from pathlib import Path
-        from backend.dataaccess import DataAccess
-        
-        kb_path = Path(kb_path_str)
-        db_path = Path(db_path_str)
-        
-        # Suppress stdout during DataAccess init (WAL mode message)
-        with contextlib.redirect_stdout(io.StringIO()):
-            da = DataAccess(db_path=str(db_path))
-            mediator = Mediator(knowledge_base_path=kb_path, data_access=da)
-            
-            # Override global_clippers (avoid re-loading from file)
-            mediator.global_clippers = global_clippers
-            
-            # Build repository silently in this process (each process needs its own TAK instances)
-            mediator.build_repository(silent=True)
-        
-        # Process patient (logging still works, just no stdout prints)
-        result = mediator._process_patient_sync(patient_id, return_cache=False, write_queue=write_queue)
-        
-        return result
-        
+        return _WORKER_MEDIATOR._process_patient_sync(
+            patient_id,
+            return_cache=False,
+            write_queue=write_queue
+        )
     except Exception as e:
         return {"error": str(e)}
 
@@ -174,8 +167,8 @@ def _writer_worker(db_path: str, write_queue):
         q_qa = f.read()
 
     last_commit = time.time()
-    commit_every_seconds = 1.0
-    commit_every_batches = 50
+    commit_every_seconds = 2.0
+    commit_every_batches = 200
     batch_counter = 0
 
     pending_output = []
@@ -812,7 +805,7 @@ class Mediator:
         if write_queue is None:
             raise RuntimeError("write_queue must be provided. Direct DB writes are disabled in this pipeline to allow parallelism.")
         # Create new DB connection for this thread (SQLite thread safety)
-        thread_da = DataAccess(db_path=self.db_path)  # always per-process/per-thread read connection
+        thread_da = self.da  # always per-process/per-thread read connection
         
         logger.info(f"[Patient {patient_id}] Processing start")
         stats = {}
@@ -881,8 +874,10 @@ class Mediator:
             logger.error(f"[Patient {patient_id}] Critical error: {e}", exc_info=True)
             return ({"error": str(e)}, tak_outputs) if return_cache else {"error": str(e)}
         finally:
-            # Close thread-local connection
-            thread_da.conn.close()
+            # Do NOT close self.da here.
+            # In the multiprocessing worker model, self.da is a per-process connection
+            # created once in _init_worker and reused across many patients.
+            pass 
 
     def process_all_patients_parallel(
         self,
@@ -933,17 +928,12 @@ class Mediator:
         errors = 0
         failed_patient_ids: List[int] = []
         total_rows = 0
-        with ProcessPoolExecutor(max_workers=max_concurrent, mp_context=ctx) as executor:
+        with ProcessPoolExecutor(max_workers=max_concurrent, mp_context=ctx, initializer=_init_worker,
+                                    initargs=(str(self.kb_path), str(self.db_path), self.global_clippers),
+                                    ) as executor:
             future_to_pid = {}
             for pid in patient_ids:
-                fut = executor.submit(
-                    _process_patient_worker,
-                    pid,
-                    str(self.kb_path),
-                    str(self.db_path),
-                    self.global_clippers,
-                    write_queue,   # IMPORTANT
-                )
+                fut = executor.submit(_process_patient_worker, pid, write_queue)
                 future_to_pid[fut] = pid
 
             for fut in tqdm(as_completed(future_to_pid), total=len(future_to_pid), desc="Processing patients", unit="patient"):
@@ -1011,7 +1001,7 @@ class Mediator:
             max_concurrent: Maximum number of concurrent patient processes (0 = all cores)
             patient_subset: Optional list of patient IDs to process
         """
-        # Phase 1: Build TAK repository
+        # Phase 1: Build TAK repository. This is redundant for multiprocessing, but is a good reflection for logs, and will prompt errors early.
         self.build_repository()
         
         # Phase 2: Process patients (multiprocessing)
