@@ -45,10 +45,8 @@ class DataAccess:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
-        
-        # Enable WAL mode for better multi-process concurrency
         self.conn.execute("PRAGMA journal_mode=WAL;")
-        # Add a generous busy timeout (e.g., 30 seconds) to wait on locks
+        self.conn.execute("PRAGMA synchronous=NORMAL;")
         self.conn.execute("PRAGMA busy_timeout=30000;")
         self.conn.commit()
 
@@ -82,7 +80,6 @@ class DataAccess:
     @contextmanager
     def fast_load(self):
         self.drop_input_indexes()
-        self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.execute("PRAGMA synchronous=OFF;")
         self.conn.execute("PRAGMA temp_store=MEMORY;")
         self.conn.execute("PRAGMA cache_size=-100000;")
@@ -93,6 +90,16 @@ class DataAccess:
             self.create_input_indexes()
             self.conn.execute("PRAGMA foreign_keys=ON;")
             self.conn.execute("PRAGMA synchronous=NORMAL;")
+    
+    @contextmanager
+    def transaction(self):
+        try:
+            self.conn.execute("BEGIN")
+            yield
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def check_record(self, query_or_path, params):
         """
@@ -150,7 +157,7 @@ class DataAccess:
         self.conn.commit()
 
     # Helper for batch inserts using a query file path and list of tuples
-    def insert_many(self, query_path, rows, batch_size=1000):
+    def insert_many(self, query_path, rows, batch_size=1000, use_retry=True):
         """
         Bulk-insert rows using `executemany` in large batches.
 
@@ -159,9 +166,10 @@ class DataAccess:
         • Returns a precise count of newly inserted rows using `total_changes` (works with INSERT OR IGNORE).
 
         Args:
-        query_path (str): Path to a .sql INSERT template with ? placeholders.
-        rows (Iterable[Tuple]): Row tuples matching the INSERT template.
-        batch_size (int): Rows per executemany call.
+            query_path (str): Path to a .sql INSERT template with ? placeholders.
+            rows (Iterable[Tuple]): Row tuples matching the INSERT template.
+            batch_size (int): Rows per executemany call.
+            use_retry (bool): Allows for retries, but single writer mechanism should avoid the need for those in practice aside from edge cases.
 
         Returns:
         int: Number of rows inserted (excluding ignored duplicates).
@@ -171,7 +179,12 @@ class DataAccess:
         with open(query_path, 'r') as f:
             query = f.read()
         
-        def _run_batch_with_retry(cursor, query_sql, batch, retries=5, base_delay=0.1):
+        def _run_batch(cursor, query_sql, batch, retries=5, base_delay=0.1):
+            if not use_retry:
+                before = cursor.connection.total_changes
+                cursor.executemany(query_sql, batch)
+                return cursor.connection.total_changes - before
+
             for attempt in range(retries):
                 try:
                     before = cursor.connection.total_changes
@@ -181,9 +194,8 @@ class DataAccess:
                     msg = str(e).lower()
                     if ("locked" in msg) or ("busy" in msg):
                         if attempt == retries - 1:
-                            print(e)
-                            raise 
-                        time.sleep(base_delay * (2 ** attempt))  # 0.1, 0.2, 0.4, 0.8, 1.6
+                            raise
+                        time.sleep(base_delay * (2 ** attempt))
                     else:
                         raise
 
@@ -192,10 +204,10 @@ class DataAccess:
         for r in rows:
             batch.append(r)
             if len(batch) >= batch_size:
-                total_inserted += _run_batch_with_retry(self.cursor, query, batch)
+                total_inserted += _run_batch(self.cursor, query, batch)
                 batch = []
         if batch:
-            total_inserted += _run_batch_with_retry(self.cursor, query, batch)
+            total_inserted += _run_batch(self.cursor, query, batch)
 
         return total_inserted
 

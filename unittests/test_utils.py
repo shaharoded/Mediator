@@ -8,8 +8,7 @@ Provides common functions for:
 """
 from pathlib import Path
 from datetime import datetime, timedelta
-import pandas as pd
-
+from core.mediator import FlushRequest  
 
 def write_xml(tmp_path: Path, name: str, xml: str) -> Path:
     """Write XML string to disk and return path."""
@@ -36,3 +35,11 @@ def make_ts(hhmm: str, day: int = 0) -> datetime:
     base = datetime(2024, 1, 1) + timedelta(days=day)
     hh, mm = map(int, hhmm.split(":"))
     return base.replace(hour=hh, minute=mm, second=0, microsecond=0)
+
+def flush_writer(write_queue, manager, timeout=10):
+    """
+    Deterministically force the single-writer to commit buffered rows.
+    """
+    ack = manager.Queue(maxsize=1)
+    write_queue.put(FlushRequest(reply_queue=ack))
+    assert ack.get(timeout=timeout) is True, "Writer did not ack flush in time"

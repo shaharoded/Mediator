@@ -1,12 +1,20 @@
+"""
+TO-DO:
+ - Currently all patterns have the False rows insersion, but some patterns function like events (infection) and don't need it. Let's have a block for that.
+"""
+
 from __future__ import annotations
 from typing import Optional, List, Dict, Any, Union, Tuple
 from pathlib import Path
 import json
+from dataclasses import dataclass
 import logging
 import traceback
 import os
 import sys
+import time
 import argparse
+import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import pandas as pd
@@ -69,12 +77,12 @@ def setup_logging(log_file: Optional[Path] = None, console_level: int = logging.
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
 
-
 def _process_patient_worker(
     patient_id: int,
     kb_path_str: str,
     db_path_str: str,
-    global_clippers: Dict[str, str]
+    global_clippers: Dict[str, str],
+    write_queue
 ) -> Dict[str, Union[int, str]]:
     """
     Standalone worker function for processing a single patient in a separate process.
@@ -85,6 +93,7 @@ def _process_patient_worker(
         kb_path_str: Path to knowledge base (as string for pickling)
         db_path_str: Path to database (as string for pickling)
         global_clippers: Global clipper configuration
+        write_queue: Queue to handle concurrent writes.
     
     Returns:
         Dict with stats: {tak_name: rows_written} or {"error": error_message}
@@ -113,12 +122,121 @@ def _process_patient_worker(
             mediator.build_repository(silent=True)
         
         # Process patient (logging still works, just no stdout prints)
-        result = mediator._process_patient_sync(patient_id, return_cache=False)
+        result = mediator._process_patient_sync(patient_id, return_cache=False, write_queue=write_queue)
         
         return result
         
     except Exception as e:
         return {"error": str(e)}
+
+@dataclass
+class WriteBatch:
+    table: str  # "output" or "qa"
+    rows: List[Tuple]
+
+@dataclass
+class FlushRequest:
+    """
+    Control message for the single-writer process.
+    When received, the writer flushes pending buffers and acks via reply_queue.
+    """
+    reply_queue: Optional[Any] = None
+
+def _writer_worker(db_path: str, write_queue):
+    """
+    Single-writer process for SQLite.
+
+    Purpose:
+    - Enforce "exactly one writer" to SQLite to avoid 'database is locked' errors
+      when multiple patient workers run in parallel.
+
+    How it works:
+    - Patient worker processes NEVER write to the DB directly.
+      They push WriteBatch objects into `write_queue`.
+    - This worker pulls batches from the queue, buffers them in memory, and periodically
+      commits them to the database in large executemany() calls.
+
+    Shutdown:
+    - Stops when it receives a sentinel (None) from the queue
+      and the queue is empty.
+    - Performs a final flush before exit.
+    """
+    da = DataAccess(db_path=db_path)
+    conn = da.conn
+    cursor = da.cursor
+
+    # Optional: increase WAL autocheckpoint to avoid huge WAL files
+    conn.execute("PRAGMA wal_autocheckpoint=2000;")
+
+    with open(INSERT_ABSTRACTED_MEASUREMENT_QUERY, "r") as f:
+        q_output = f.read()
+    with open(INSERT_QA_SCORE_QUERY, "r") as f:
+        q_qa = f.read()
+
+    last_commit = time.time()
+    commit_every_seconds = 1.0
+    commit_every_batches = 50
+    batch_counter = 0
+
+    pending_output = []
+    pending_qa = []
+
+    def flush():
+        """
+        Flush buffered rows to SQLite.
+
+        pending_output and pending_qa accumulate rows from multiple queue batches.
+        flush() writes the accumulated rows using executemany() and commits once.
+
+        Called:
+        - When enough batches were accumulated (commit_every_batches)
+        - Or enough time passed (commit_every_seconds)
+        - And once at shutdown for a final commit.
+        """
+        nonlocal pending_output, pending_qa, batch_counter, last_commit
+        if pending_output:
+            cursor.executemany(q_output, pending_output)
+            pending_output = []
+        if pending_qa:
+            cursor.executemany(q_qa, pending_qa)
+            pending_qa = []
+        conn.commit()
+        batch_counter = 0
+        last_commit = time.time()
+
+    while True:
+        item = write_queue.get()
+        if item is None:
+            break
+
+        # Explicit flush command (used by tests, can also be used by callers)
+        if isinstance(item, FlushRequest):
+            flush()
+            if item.reply_queue is not None:
+                item.reply_queue.put(True)
+            continue
+
+        batch: WriteBatch = item
+        if not batch.rows:
+            continue
+
+        if batch.table == "output":
+            pending_output.extend(batch.rows)
+        elif batch.table == "qa":
+            pending_qa.extend(batch.rows)
+        else:
+            raise ValueError(f"Unknown table: {batch.table}")
+
+        batch_counter += 1
+
+        # Flush on thresholds
+        now = time.time()
+        if batch_counter >= commit_every_batches or (now - last_commit) >= commit_every_seconds:
+            flush()
+
+    # Final flush
+    flush()
+    conn.close()
 
 
 class Mediator:
@@ -439,14 +557,92 @@ class Mediator:
         # Fallback (should never reach here)
         raise RuntimeError(f"Unknown TAK type: {tak.family}")
     
-    def write_output(self, df: pd.DataFrame, da: Optional[DataAccess] = None) -> int:
+    def _output_df_to_rows(self, df: pd.DataFrame) -> List[Tuple]:
+        """
+        DB writer helper:
+        DataFrame -> rows for insersion to OutputPatientData table
+
+        Args:
+            df: The output df from apply method
+        """
+        if df.empty:
+            return []
+        return [
+            (
+                int(row["PatientId"]),
+                str(row["ConceptName"]),
+                str(row["StartDateTime"]),
+                str(row["EndDateTime"]),
+                str(row["Value"]),
+                str(row["AbstractionType"]),
+            )
+            for _, row in df.iterrows()
+        ]
+
+    def _qa_df_to_rows(self, df_scores: pd.DataFrame) -> List[Tuple]:
+        """
+        DB writer helper:
+        DataFrame -> rows for insersion to PatientQAScores table
+
+        Args:
+           df_scores: The output df from melting the QA scores from Pattern's apply 
+        """
+        if df_scores.empty:
+            return []
+
+        df_melted = df_scores.melt(
+            id_vars=["PatientId", "ConceptName", "StartDateTime", "EndDateTime"],
+            value_vars=["TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore"],
+            var_name="ComplianceType",
+            value_name="ComplianceScore",
+        ).dropna(subset=["ComplianceScore"])
+
+        if df_melted.empty:
+            return []
+
+        df_melted["ComplianceType"] = df_melted["ComplianceType"].map({
+            "TimeConstraintScore": "TimeConstraint",
+            "ValueConstraintScore": "ValueConstraint",
+            "CyclicConstraintScore": "CyclicConstraint",
+        })
+
+        return [
+            (
+                int(row["PatientId"]),
+                str(row["ConceptName"]),
+                str(row["StartDateTime"]) if pd.notna(row["StartDateTime"]) else None,
+                str(row["EndDateTime"]) if pd.notna(row["EndDateTime"]) else None,
+                str(row["ComplianceType"]),
+                float(row["ComplianceScore"]),
+            )
+            for _, row in df_melted.iterrows()
+        ]
+    
+    def _write_rows(self, table: str, rows: List[Tuple], write_queue) -> int:
+        """
+        Queue-only writer.
+
+        Args:
+            table: Table name, which table to write to
+            rows: Output from _output_df_to_rows/ _qa_df_to_rows
+            write_queue: The batch queue
+        """
+        if not rows:
+            return 0
+        if write_queue is None:
+            raise RuntimeError("write_queue must be provided (closed system: queue-only writes).")
+
+        write_queue.put(WriteBatch(table=table, rows=rows))
+        return len(rows)
+    
+    def write_output(self, df: pd.DataFrame, write_queue=None) -> int:
         """
         Write TAK output to OutputPatientData.
         Thread-safe: uses provided DataAccess instance if given.
         
         Args:
             df: DataFrame with columns: PatientId, ConceptName, StartDateTime, EndDateTime, Value, AbstractionType
-            da: Optional DataAccess instance (for thread safety)
+            write_queue: Queue to manage writing operations
         
         Returns:
             Number of rows actually inserted (excluding duplicates)
@@ -454,26 +650,11 @@ class Mediator:
         if df.empty:
             return 0
         
-        # Use provided connection or default
-        db = da if da is not None else self.da
-        
         # Convert to tuples for executemany
-        rows = [
-            (
-                int(row["PatientId"]),
-                str(row["ConceptName"]),
-                str(row["StartDateTime"]),
-                str(row["EndDateTime"]),
-                str(row["Value"]),
-                str(row["AbstractionType"])
-            )
-            for _, row in df.iterrows()
-        ]
-        
-        # Use INSERT OR IGNORE to skip duplicates
-        return db.insert_many(INSERT_ABSTRACTED_MEASUREMENT_QUERY, rows, batch_size=1000)
+        rows = self._output_df_to_rows(df)
+        return self._write_rows("output", rows, write_queue)
     
-    def write_qa_scores(self, df_scores: pd.DataFrame, da: Optional[DataAccess] = None) -> int:
+    def write_qa_scores(self, df_scores: pd.DataFrame, write_queue=None) -> int:
         """
         Write Pattern compliance scores to PatientQAScores table.
         Thread-safe: uses provided DataAccess instance if given.
@@ -481,41 +662,9 @@ class Mediator:
         if df_scores.empty:
             return 0
         
-        # Use provided connection or default
-        db = da if da is not None else self.da
-        
-        # OPTIMIZED: Vectorized unpivot using pd.melt
-        df_melted = df_scores.melt(
-            id_vars=["PatientId", "ConceptName", "StartDateTime", "EndDateTime"],
-            value_vars=["TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore"],
-            var_name="ComplianceType",
-            value_name="ComplianceScore"
-        )
-        
-        df_melted = df_melted.dropna(subset=["ComplianceScore"])
-        
-        if df_melted.empty:
-            return 0
-        
-        df_melted["ComplianceType"] = df_melted["ComplianceType"].map({
-            "TimeConstraintScore": "TimeConstraint",
-            "ValueConstraintScore": "ValueConstraint",
-            "CyclicConstraintScore": "CyclicConstraint"
-        })
-        
-        rows = [
-            (
-                int(row["PatientId"]),
-                str(row["ConceptName"]),
-                str(row["StartDateTime"]) if pd.notna(row["StartDateTime"]) else None,
-                str(row["EndDateTime"]) if pd.notna(row["EndDateTime"]) else None,
-                str(row["ComplianceType"]),
-                float(row["ComplianceScore"])
-            )
-            for _, row in df_melted.iterrows()
-        ]
-        
-        return db.insert_many(INSERT_QA_SCORE_QUERY, rows, batch_size=1000)
+        # Convert to tuples for executemany
+        rows = self._qa_df_to_rows(df_scores)
+        return self._write_rows("qa", rows, write_queue)
 
     def _get_global_clipper_times(self, patient_id: int, da: DataAccess) -> Optional[pd.DataFrame]:
         """
@@ -634,10 +783,19 @@ class Mediator:
         df_scores.loc[:, 'EndDateTime'] = df_scores['EndDateTime'].fillna(sentinel_date)
         
         return df_main, df_scores
+    
+    def _save_failed_patients_json(self, failed_patient_ids: List[int], out_path: Path, meta: Optional[dict] = None) -> None:
+        payload = {
+            "failed_patient_ids": sorted(set(int(x) for x in failed_patient_ids)),
+            "meta": meta or {},
+        }
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def _process_patient_sync(self, 
                               patient_id: int,
-                              return_cache: bool = False
+                              return_cache: bool = False,
+                              write_queue=None
                               ) -> Union[Dict[str, Union[int, str]], Tuple[Dict[str, Union[int, str]], Dict[str, pd.DataFrame]]]:
         """
         Process single patient synchronously with full TAK dependency chain.
@@ -645,13 +803,16 @@ class Mediator:
         Args:
             patient_id: Patient ID to process
             return_cache: If True, return (stats, tak_outputs_cache) for debugging
+            write_queue: Control concurrent writing
         
         Returns:
             If return_cache=False: Dict of TAK name -> output row count
             If return_cache=True: Tuple of (stats, tak_outputs_cache)
         """
+        if write_queue is None:
+            raise RuntimeError("write_queue must be provided. Direct DB writes are disabled in this pipeline to allow parallelism.")
         # Create new DB connection for this thread (SQLite thread safety)
-        thread_da = DataAccess(db_path=self.db_path)
+        thread_da = DataAccess(db_path=self.db_path)  # always per-process/per-thread read connection
         
         logger.info(f"[Patient {patient_id}] Processing start")
         stats = {}
@@ -685,8 +846,8 @@ class Mediator:
                         tak_outputs[tak_name] = df_output_main
                         
                         rows_written = len(df_output_main)
-                        self.write_output(df_output_main, thread_da)
-                        self.write_qa_scores(df_output_scores, thread_da)
+                        self.write_output(df_output_main, write_queue)
+                        self.write_qa_scores(df_output_scores, write_queue)
                         
                         # Add to stats the number of temporal rows written
                         stats[tak_name] = rows_written
@@ -700,7 +861,7 @@ class Mediator:
                         
                         # All other TAKs: write to OutputPatientData (skip RawConcepts)
                         if not isinstance(tak, RawConcept):
-                            self.write_output(df_output, thread_da)
+                            self.write_output(df_output, write_queue)
                         
                         stats[tak_name] = rows_written
                     
@@ -753,44 +914,89 @@ class Mediator:
         if patient_subset:
             print(f"         Patient Subset: {patient_ids}")
         print("="*80 + "\n")
+
+        # Use a consistent MP context (important on Windows, and generally safer)
+        ctx = mp.get_context("spawn")
         
-        # Prepare worker arguments (picklable)
-        worker_args = [
-            (pid, str(self.kb_path), str(self.db_path), self.global_clippers)
-            for pid in patient_ids
-        ]
-        
-        # Process with progress bar
-        results = []
-        with ProcessPoolExecutor(max_workers=max_concurrent) as executor:
-            futures = [executor.submit(_process_patient_worker, *args) for args in worker_args]
-            
-            for future in tqdm(as_completed(futures), total=len(futures), desc="Processing patients", unit="patient"):
-                result = future.result()
-                results.append(result)
-        
-        # Map results back to patient IDs (order may differ from submission)
-        patient_stats = {}
-        for args, result in zip(worker_args, results):
-            patient_id = args[0]
-            patient_stats[patient_id] = result
-        
-        # Summary
-        total_rows = sum(
-            sum(v for v in stats.values() if isinstance(v, int))
-            for stats in results 
-            if isinstance(stats, dict) and "error" not in stats
+        # Add start writer arg
+        manager = ctx.Manager()
+        write_queue = manager.Queue(maxsize=200)  # picklable proxy queue (Windows spawn safe) with backpressure limit
+        writer_proc = ctx.Process(
+            target=_writer_worker, 
+            args=(str(self.db_path), write_queue),
+            daemon=False
         )
-        errors = sum(1 for stats in results if isinstance(stats, dict) and "error" in stats)
+        writer_proc.start()
         
+        # Submit workers with write_queue included
+        patient_stats = {}
+        errors = 0
+        failed_patient_ids: List[int] = []
+        total_rows = 0
+        with ProcessPoolExecutor(max_workers=max_concurrent, mp_context=ctx) as executor:
+            future_to_pid = {}
+            for pid in patient_ids:
+                fut = executor.submit(
+                    _process_patient_worker,
+                    pid,
+                    str(self.kb_path),
+                    str(self.db_path),
+                    self.global_clippers,
+                    write_queue,   # IMPORTANT
+                )
+                future_to_pid[fut] = pid
+
+            for fut in tqdm(as_completed(future_to_pid), total=len(future_to_pid), desc="Processing patients", unit="patient"):
+                pid = future_to_pid[fut]
+                result = fut.result()
+                patient_stats[pid] = result
+
+                # total rows: count only ints (rows written per TAK)
+                if isinstance(result, dict) and "error" not in result:
+                    total_rows += sum(v for v in result.values() if isinstance(v, int))
+
+        # Stop writer cleanly
+        write_queue.put(None)   # sentinel
+        writer_proc.join()
+        manager.shutdown()
+
+        # Determine failed patients (either fatal error or any TAK-level ERROR)
+        for pid, stats in patient_stats.items():
+            if not isinstance(stats, dict):
+                failed_patient_ids.append(pid)
+                continue
+
+            if "error" in stats:
+                failed_patient_ids.append(pid)
+                continue
+
+            if any(isinstance(v, str) and v.startswith("ERROR") for v in stats.values()):
+                failed_patient_ids.append(pid)
+
+        errors = len(set(failed_patient_ids))
+
+        failed_json_path = Path(self.db_path).parent / "failed_patients.json"
+        self._save_failed_patients_json(
+            failed_patient_ids,
+            failed_json_path,
+            meta={
+                "db_path": str(self.db_path),
+                "kb_path": str(self.kb_path),
+                "n_patients_requested": len(patient_ids),
+                "n_patients_failed": len(set(failed_patient_ids)),
+            }
+        )
+
         print("\n" + "="*80)
         print("✅ Patient Processing Complete")
         print("="*80)
         print(f"  Patients processed: {len(patient_ids)}")
         print(f"  Total rows written: {total_rows}")
         print(f"  Errors:             {errors}")
+        if failed_patient_ids:
+            print(f"[Info] Failed patients saved to: {failed_json_path}")
         print("="*80 + "\n")
-        
+
         return patient_stats
     
     def run(
@@ -822,168 +1028,108 @@ def _cli_main(argv):
     parser = argparse.ArgumentParser(
         prog="mediator",
         description="Run Mediator KBTA pipeline on patient data",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Process all patients (default KB and DB paths)
-  python -m core.mediator
-
-  # Process specific patients
-  python -m core.mediator --patients 1,2,3,4,5
-
-  # Custom concurrency
-  python -m core.mediator --max-concurrent 8
-
-  # Custom KB and DB paths
-  python -m core.mediator --kb core/knowledge-base --db data/mediator.db
-
-  # Debug logging + patient subset
-  python -m core.mediator --patients 101,102,103 --log-level DEBUG
-        """
     )
-    
+
     parser.add_argument(
         "--kb",
         type=Path,
         default=TAK_FOLDER,
         help=f"Path to knowledge base folder (default: {TAK_FOLDER})"
     )
-    
+
     parser.add_argument(
         "--db",
         type=Path,
-        default=DB_PATH,numeric_level = getattr(logging, args.log_level.upper(), logging.INFO),
+        default=DB_PATH,
         help=f"Path to database file (default: {DB_PATH})"
     )
-    
+
     parser.add_argument(
         "--patients",
         type=str,
         help="Comma-separated patient IDs (e.g., '1,2,3'). If omitted, processes all patients."
     )
-    
+
     parser.add_argument(
         "--max-concurrent",
         type=int,
         default=4,
-        help="Maximum concurrent patient processes (default: 4)"
+        help="Maximum concurrent patient processes (0 = all cores). Default: 4"
     )
-    
+
     parser.add_argument(
         "--log-level",
         type=str,
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Logging level (default: INFO)"
+        help="Logging level for file logs (default: INFO)"
     )
-    
+
     args = parser.parse_args(argv)
-    
-    # Setup dual logging (console shows ERRORS only, file shows all)
-    log_file = Path(args.db).parent / "mediator_run.log"  # backend/data/mediator_run.log
-    
-    # Remove existing log file (restart fresh each run)
+
+    # Setup log file
+    log_file = Path(args.db).parent / "mediator_run.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
     if log_file.exists():
         log_file.unlink()
-    
-    # Setup logging
+
     numeric_level = getattr(logging, args.log_level.upper(), logging.INFO)
-    
-    # Create formatters
-    console_formatter = logging.Formatter('[%(levelname)s] %(message)s')  # Minimal for console
-    file_formatter = logging.Formatter(
-        '%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    # Console handler: ERROR and above only (no warnings/info in terminal)
+
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.ERROR)  # CORRECTED: Only show errors in console
-    console_handler.setFormatter(console_formatter)
-    
-    # File handler: ALL levels (verbose logs)
-    file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
-    file_handler.setLevel(numeric_level)  # Respect --log-level flag
-    file_handler.setFormatter(file_formatter)
-    
-    # Configure root logger
-    logging.basicConfig(
-        level=logging.DEBUG,  # Capture everything
-        handlers=[console_handler, file_handler]
-    )
-    
-    logger.info("="*80)
-    logger.info(f"Mediator Run Started | Log Level: {args.log_level}")
-    logger.info(f"Knowledge Base: {args.kb}")
-    logger.info(f"Database: {args.db}")
-    logger.info(f"Log File: {log_file}")
-    logger.info("="*80)
-    
+    console_handler.setLevel(logging.ERROR)
+    console_handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+
+    file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
+    file_handler.setLevel(numeric_level)
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    root.handlers.clear()
+    root.addHandler(console_handler)
+    root.addHandler(file_handler)
+
     # Validate inputs
     if not args.kb.exists():
         print(f"[Error] Knowledge base folder not found: {args.kb}")
         sys.exit(1)
-    
+
     if not args.db.exists():
         print(f"[Error] Database file not found: {args.db}")
         print("Run: python -m backend.dataaccess --create_db --load_csv <file>")
         sys.exit(1)
-    
-    # Parse patient subset
+
     patient_subset = None
     if args.patients:
         try:
-            patient_subset = [int(p.strip()) for p in args.patients.split(',')]
-            logger.info(f"Processing patient subset: {patient_subset}")
+            patient_subset = [int(p.strip()) for p in args.patients.split(",") if p.strip()]
         except ValueError as e:
             print(f"[Error] Invalid patient ID format: {e}")
             sys.exit(1)
-    
-    # Initialize Mediator
-    try:
-        da = DataAccess(db_path=str(args.db))
-        mediator = Mediator(knowledge_base_path=args.kb, data_access=da)
-    except Exception as e:
-        print(f"[Error] Failed to initialize Mediator: {e}")
-        sys.exit(1)
-    
-    # Run pipeline
-    try:
-        patient_stats = mediator.run(
-            max_concurrent=args.max_concurrent,
-            patient_subset=patient_subset
-        )
-        
-        # Final summary
-        errors = sum(1 for stats in patient_stats.values() if "error" in stats)
-        total_rows = sum(
-            sum(v for k, v in stats.items() if k != "error" and isinstance(v, int))
-            for stats in patient_stats.values()
-            if "error" not in stats
-        )
-        
-        print("\n" + "="*80)
-        print("Pipeline Complete")
-        print("="*80)
-        print(f"Patients processed: {len(patient_stats)}")
-        print(f"Total rows written: {total_rows}")
-        if errors > 0:
-            print(f"Errors: {errors} patients failed")
-        print("="*80)
-        
-        logger.info("="*80)
-        logger.info("Pipeline Complete Successfully")
-        logger.info("="*80)
-        
-        sys.exit(0 if errors == 0 else 1)
-        
-    except KeyboardInterrupt:
-        print("\n[Warning] Pipeline interrupted by user (Ctrl+C)")
-        sys.exit(130)
-    except Exception as e:
-        print(f"[Error] Pipeline failed: {e}")
-        logging.exception(e)
-        sys.exit(1)
+
+    # Initialize and run
+    da = DataAccess(db_path=str(args.db))
+    mediator = Mediator(knowledge_base_path=args.kb, data_access=da)
+
+    patient_stats = mediator.run(
+        max_concurrent=args.max_concurrent,
+        patient_subset=patient_subset
+    )
+
+    errors = sum(1 for s in patient_stats.values() if isinstance(s, dict) and "error" in s)
+
+    print("\n" + "=" * 80)
+    print("Pipeline Complete")
+    print("=" * 80)
+    print(f"Patients processed: {len(patient_stats)}")
+    print(f"Errors:             {errors}")
+    print(f"Log file:           {log_file}")
+    print("=" * 80)
+
+    sys.exit(0 if errors == 0 else 1)
 
 
 if __name__ == "__main__":
