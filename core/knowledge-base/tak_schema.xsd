@@ -622,6 +622,7 @@
                     </xs:restriction>
                 </xs:simpleType>
             </xs:attribute>
+            <xs:attribute name="ignore-unfulfilled-anchors" type="xs:boolean" use="optional" default="false"/>
         </xs:complexType>
     </xs:element>
     

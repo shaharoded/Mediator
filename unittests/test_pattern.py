@@ -2414,6 +2414,28 @@ GLOBAL_PATTERN_CONTEXT_XML = """\
 </pattern>
 """
 
+GLOBAL_PATTERN_IGNORE_UNFULFILLED_ANCHORS_XML = """\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <pattern name="GLOBAL_TEST" concept-type="global-pattern" ignore-unfulfilled-anchors="true">
+        <categories>Test</categories>
+        <description>Should fail</description>
+        <derived-from>
+            <attribute name="SOME_EVENT" tak="raw-concept" idx="0" ref="E1"/>
+        </derived-from>
+        <abstraction-rules>
+            <rule>
+                <cyclic-relation min-count="1" max-count="10" window="24h">
+                    <event>
+                        <attribute ref="E1">
+                            <allowed-value min="0"/>
+                        </attribute>
+                    </event>
+                </cyclic-relation>
+            </rule>
+        </abstraction-rules>
+    </pattern>
+    """
+
 # -----------------------------
 # Global Pattern Fixtures
 # -----------------------------
@@ -2481,6 +2503,13 @@ def repo_global_context(tmp_path: Path) -> TAKRepository:
 # -----------------------------
 # Global Pattern Tests
 # -----------------------------
+
+def test_global_pattern_rejects_ignore_unfulfilled_anchors(tmp_path: Path):
+    xml_path = write_xml(tmp_path, "GLOBAL_TEST.xml", GLOBAL_PATTERN_IGNORE_UNFULFILLED_ANCHORS_XML)
+    from core.tak.pattern import GlobalPattern
+    import pytest
+    with pytest.raises(ValueError):
+        GlobalPattern.parse(xml_path)
 
 def test_global_pattern_basic_windows(repo_global_simple):
     """
@@ -3354,3 +3383,139 @@ def test_pattern_multiple_anchors_mixed_context_no_crash(tmp_path: Path):
     assert len(df_out) >= 1, "Should return at least 1 row"
     assert any(df_out["Value"] == "True"), "First admission should match (has context + event)"   
 
+def test_local_pattern_ignore_unfulfilled_anchors_true(tmp_path: Path):
+    # Minimal raw concept for body temperature
+    RAW_BODY_TEMP_XML = """<?xml version="1.0" encoding="UTF-8"?>
+    <raw-concept name="BODY_TEMPERATURE_MEASURE" concept-type="raw-numeric">
+        <categories>Measurements</categories>
+        <description>Body temp</description>
+        <attributes>
+            <attribute name="BODY_TEMPERATURE_MEASURE" type="numeric">
+                <numeric-allowed-values>
+                    <allowed-value min="25" max="45"/>
+                </numeric-allowed-values>
+            </attribute>
+        </attributes>
+    </raw-concept>
+    """
+
+    # Local pattern with ignore-unfulfilled-anchors="true"
+    INFECTION_PATTERN_XML = """<?xml version="1.0" encoding="UTF-8"?>
+    <pattern name="INFECTION_PATTERN" concept-type="local-pattern" ignore-unfulfilled-anchors="true">
+        <categories>Complications</categories>
+        <description>Test ignore-unfulfilled-anchors</description>
+        <derived-from>
+            <attribute name="BODY_TEMPERATURE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
+        </derived-from>
+        <abstraction-rules>
+            <rule>
+                <temporal-relation how='before' max-distance='24h'>
+                    <anchor>
+                        <attribute ref="A1">
+                            <allowed-value min="37.8"/>
+                        </attribute>
+                    </anchor>
+                    <event select='first'>
+                        <attribute ref="A1">
+                            <allowed-value min="37.8"/>
+                        </attribute>
+                    </event>
+                </temporal-relation>
+            </rule>
+        </abstraction-rules>
+    </pattern>
+    """
+
+    # Write XMLs
+    raw_path = tmp_path / "BODY_TEMPERATURE_MEASURE.xml"
+    pattern_path = tmp_path / "INFECTION_PATTERN.xml"
+    raw_path.write_text(RAW_BODY_TEMP_XML, encoding="utf-8")
+    pattern_path.write_text(INFECTION_PATTERN_XML, encoding="utf-8")
+
+    from core.tak.raw_concept import RawConcept
+    from core.tak.pattern import LocalPattern
+    from core.tak.repository import TAKRepository, set_tak_repository
+    import pandas as pd
+
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(raw_path))
+    set_tak_repository(repo)
+    pattern = LocalPattern.parse(pattern_path)
+    repo.register(pattern)
+
+    # Data: anchor present, but no event (should NOT emit "False" row)
+    df = pd.DataFrame([
+        {"PatientId": 1, "ConceptName": "BODY_TEMPERATURE_MEASURE", "StartDateTime": pd.Timestamp("2024-01-01 08:00"), "EndDateTime": pd.Timestamp("2024-01-01 08:00"), "Value": 38.0},
+    ])
+    result = pattern.apply(df)
+    # Should not contain any Value == "False" rows
+    assert not (result["Value"] == "False").any()
+
+
+def test_local_pattern_emits_unfulfilled_anchors_by_default(tmp_path: Path):
+    # Minimal raw concept for body temperature
+    RAW_BODY_TEMP_XML = """<?xml version="1.0" encoding="UTF-8"?>
+    <raw-concept name="BODY_TEMPERATURE_MEASURE" concept-type="raw-numeric">
+        <categories>Measurements</categories>
+        <description>Body temp</description>
+        <attributes>
+            <attribute name="BODY_TEMPERATURE_MEASURE" type="numeric">
+                <numeric-allowed-values>
+                    <allowed-value min="25" max="45"/>
+                </numeric-allowed-values>
+            </attribute>
+        </attributes>
+    </raw-concept>
+    """
+
+    # Local pattern WITHOUT ignore-unfulfilled-anchors
+    INFECTION_PATTERN_XML = """<?xml version="1.0" encoding="UTF-8"?>
+    <pattern name="INFECTION_PATTERN" concept-type="local-pattern">
+        <categories>Complications</categories>
+        <description>Test default unfulfilled anchors</description>
+        <derived-from>
+            <attribute name="BODY_TEMPERATURE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
+        </derived-from>
+        <abstraction-rules>
+            <rule>
+                <temporal-relation how='before' max-distance='24h'>
+                    <anchor>
+                        <attribute ref="A1">
+                            <allowed-value min="37.8"/>
+                        </attribute>
+                    </anchor>
+                    <event select='first'>
+                        <attribute ref="A1">
+                            <allowed-value min="37.8"/>
+                        </attribute>
+                    </event>
+                </temporal-relation>
+            </rule>
+        </abstraction-rules>
+    </pattern>
+    """
+
+    # Write XMLs
+    raw_path = tmp_path / "BODY_TEMPERATURE_MEASURE.xml"
+    pattern_path = tmp_path / "INFECTION_PATTERN.xml"
+    raw_path.write_text(RAW_BODY_TEMP_XML, encoding="utf-8")
+    pattern_path.write_text(INFECTION_PATTERN_XML, encoding="utf-8")
+
+    from core.tak.raw_concept import RawConcept
+    from core.tak.pattern import LocalPattern
+    from core.tak.repository import TAKRepository, set_tak_repository
+    import pandas as pd
+
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(raw_path))
+    set_tak_repository(repo)
+    pattern = LocalPattern.parse(pattern_path)
+    repo.register(pattern)
+
+    # Data: anchor present, but no event (should emit "False" row)
+    df = pd.DataFrame([
+        {"PatientId": 1, "ConceptName": "BODY_TEMPERATURE_MEASURE", "StartDateTime": pd.Timestamp("2024-01-01 08:00"), "EndDateTime": pd.Timestamp("2024-01-01 08:00"), "Value": 38.0},
+    ])
+    result = pattern.apply(df)
+    # Should contain a Value == "False" row
+    assert (result["Value"] == "False").any()

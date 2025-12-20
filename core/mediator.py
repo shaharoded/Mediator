@@ -1,9 +1,3 @@
-"""
-TO-DO:
- - Currently all patterns have the False rows insersion, but some patterns function like events (infection) and don't need it. Let's have a block for that.
- - Batches should probably be collected on a patient level, not TAK level, to reduce the number of writes.
-"""
-
 from __future__ import annotations
 from typing import Optional, List, Dict, Any, Union, Tuple
 from pathlib import Path

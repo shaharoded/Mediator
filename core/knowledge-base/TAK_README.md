@@ -464,6 +464,12 @@ Patterns use **ref-based indexing** to reference attributes/parameters (similar 
    - **Pattern found:** One or more intervals with `Value="True"/"Partial"/"False"`, compliance scores in separate columns
    - **Pattern NOT found:** Single row with `Value="False"`, `StartDateTime/EndDateTime=NaT`,
    compliance scores in seperate columns will be 0, if compliance function is defined for the Pattern.
+   Some patterns might be irrelevant for `Value="False"` rows, so you can add a ignore_unfulfilled_anchors flag in `<pattern>` to ignore them, like:
+   
+   ```bash
+   <pattern name="..." concept-type="local-pattern" ignore-unfulfilled-anchors="true">
+   ```
+    >> Note, this will raise if applied for global-pattern taks
 
 #### Compliance Functions
 

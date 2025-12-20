@@ -170,7 +170,8 @@ class LocalPattern(Pattern):
         description: str,
         derived_from: List[Dict[str, Any]],
         parameters: List[Dict[str, Any]],
-        abstraction_rules: List[TemporalRelationRule]
+        abstraction_rules: List[TemporalRelationRule],
+        ignore_unfulfilled_anchors: bool = False
     ):
         super().__init__(
             name=name,
@@ -181,7 +182,8 @@ class LocalPattern(Pattern):
         )
         self.parameters = parameters
         self.abstraction_rules = abstraction_rules  # List of TemporalRelationRule objects
-        
+        self.ignore_unfulfilled_anchors = ignore_unfulfilled_anchors
+
         # Build ref lookup maps for quick access during apply()
         self.derived_from_map: Dict[str, Dict[str, Any]] = {
             df["ref"]: df for df in derived_from
@@ -201,6 +203,9 @@ class LocalPattern(Pattern):
         name = root.attrib["name"]
         cats = tuple(s.strip() for s in (root.findtext("categories") or "").split(",") if s.strip())
         desc = root.findtext("description") or ""
+
+        # --- parse ignore-unfulfilled-anchors attribute ---
+        ignore_unfulfilled_anchors = root.attrib.get("ignore-unfulfilled-anchors", "false").lower() == "true"
 
         # --- derived-from (required, one or more) ---
         df_el = root.find("derived-from")
@@ -567,7 +572,8 @@ class LocalPattern(Pattern):
             description=desc,
             derived_from=derived_from,
             parameters=parameters,
-            abstraction_rules=abstraction_rules
+            abstraction_rules=abstraction_rules,
+            ignore_unfulfilled_anchors=ignore_unfulfilled_anchors
         )
         pattern.validate()
         return pattern
@@ -865,6 +871,12 @@ class LocalPattern(Pattern):
         instances = self._find_pattern_instances(df)
         
         if not instances:
+            if self.ignore_unfulfilled_anchors:
+                logger.info("[%s] apply() end | no pattern found, ignore_unfulfilled_anchors=True", self.name)
+                return pd.DataFrame(columns=[
+                    "PatientId", "ConceptName", "StartDateTime", "EndDateTime", 
+                    "Value", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore", "AbstractionType"
+                ])
             # No pattern found: return False with NaT times
             # If compliance functions exist, emit 0.0
             has_time_compliance = any(r.time_constraint_compliance for r in self.abstraction_rules)
@@ -1074,14 +1086,15 @@ class LocalPattern(Pattern):
                         # We skip adding it as False.
                         continue
 
-                # Add to potential falses
-                potential_falses.append({
-                    "StartDateTime": start_dt,
-                    "EndDateTime": end_dt,
-                    "Value": "False",
-                    "TimeConstraintScore": 0.0 if has_time_compliance else None,
-                    "ValueConstraintScore": 0.0 if has_value_compliance else None
-                })
+                # Only add to potential falses if not ignoring unfulfilled anchors
+                if not self.ignore_unfulfilled_anchors:
+                    potential_falses.append({
+                        "StartDateTime": start_dt,
+                        "EndDateTime": end_dt,
+                        "Value": "False",
+                        "TimeConstraintScore": 0.0 if has_time_compliance else None,
+                        "ValueConstraintScore": 0.0 if has_value_compliance else None
+                    })
 
         # --- Condition 2: Filter Potential Falses based on Successful Intervals ---
         # "another anchor that came before the anchor at time T, is not satisfied by an event that came after time T, 
@@ -1317,6 +1330,11 @@ class GlobalPattern(Pattern):
         xml_path = Path(xml_path)
         root = ET.parse(xml_path).getroot()
         
+        # --- validation: ignore-unfulfilled-anchors must not be true for global-pattern ---
+        ignore_unfulfilled_anchors = root.attrib.get("ignore-unfulfilled-anchors", "false").lower() == "true"
+        if ignore_unfulfilled_anchors:
+            raise ValueError(f"GlobalPattern '{root.attrib.get('name')}' cannot set ignore-unfulfilled-anchors='true'.")
+
         name = root.attrib["name"]
         cats = tuple(s.strip() for s in (root.findtext("categories") or "").split(",") if s.strip())
         desc = root.findtext("description") or ""
@@ -1347,8 +1365,6 @@ class GlobalPattern(Pattern):
                     "tak": param_el.attrib["tak"], "idx": int(param_el.attrib.get("idx", 0)),
                     "default": param_el.attrib.get("default")
                 })
-
-        derived_map = {d["name"]: d for d in derived_from}
 
         # Parse abstraction-rules (CyclicRule)
         abs_el = root.find("abstraction-rules")
@@ -1469,7 +1485,7 @@ class GlobalPattern(Pattern):
                     # raw-numeric, raw-nominal, raw-boolean: only idx=0 valid
                     if df["idx"] != 0:
                         raise ValueError(f"{self.name}: ref '{df['ref']}' idx={df['idx']} invalid for '{df['name']}' of type '{tak.concept_type}'; only idx=0 allowed")
-
+        
         # 2) Validate all used refs are declared
         for rule in self.abstraction_rules:
             # Check context refs
@@ -1483,8 +1499,13 @@ class GlobalPattern(Pattern):
                     if ref not in all_declared_refs:
                         raise ValueError(f"{self.name}: context uses undeclared ref '{ref}'")
             
+            tr = rule.relation_spec
+            # Check anchor refs
+            if tr.get("anchor"):
+               raise ValueError(f"{self.name}: GlobalPattern rules cannot have anchor specifications; only event and context are allowed.") 
+            
             # Check event refs
-            for attr_name in rule.event_spec.get("attributes", {}):
+            for attr_name in tr.get("event", {}).get("attributes", {}):
                 df_entry = next((d for d in self.derived_from if d["name"] == attr_name), None)
                 if df_entry is None:
                     raise ValueError(f"{self.name}: event references unknown attribute '{attr_name}'")
@@ -1507,11 +1528,12 @@ class GlobalPattern(Pattern):
                 for param_ref in rule.value_constraint_compliance.get("parameters", []):
                     if param_ref not in all_declared_refs:
                         raise ValueError(f"{self.name}: value-constraint-compliance uses undeclared parameter ref '{param_ref}'")
-
+        
         # Validate value-constraint-compliance targets
         for rule in self.abstraction_rules:
             if rule.value_constraint_compliance:
                 for target_ref in rule.value_constraint_compliance.get("targets", []):
+                    # Ensure target is from event (not context or parameter)
                     df_entry = derived_from_by_ref.get(target_ref)
                     if df_entry is None:
                         raise ValueError(f"{self.name}: value-constraint target ref '{target_ref}' not found in derived-from")
@@ -1525,22 +1547,24 @@ class GlobalPattern(Pattern):
                             f"{self.name}: value-constraint target ref '{target_ref}' ('{target_attr_name}') "
                             f"must reference an attribute used in event"
                         )
-
+        
         # 3) Validate numeric range constraints match TAK's attribute types
         def _get_parent_attribute(tak, idx):
+            """Extract the parent attribute spec from a TAK at the given idx."""
             if isinstance(tak, RawConcept):
                 if tak.concept_type == "raw":
                     attr_name = tak.tuple_order[idx]
                     return next((a for a in tak.attributes if a["name"] == attr_name), None)
                 else:
+                    # raw-numeric, raw-nominal, raw-boolean: single attribute at idx=0
                     return tak.attributes[0] if tak.attributes else None
             return None
-
+        
         for rule in self.abstraction_rules:
             # Validate event attributes
             for attr_name, attr_spec in rule.event_spec.get("attributes", {}).items():
                 df = next((d for d in self.derived_from if d["name"] == attr_name), None)
-                if df is None: 
+                if df is None:
                     continue
                 
                 ref = df["ref"]
@@ -1576,12 +1600,23 @@ class GlobalPattern(Pattern):
                         raise ValueError(f"{self.name}: event attribute '{attr_name}' (ref='{ref}') min={rule_min} exceeds TAK max={tak_max}")
                     if rule_max is not None and tak_min is not None and rule_max < tak_min:
                         raise ValueError(f"{self.name}: event attribute '{attr_name}' (ref='{ref}') max={rule_max} below TAK min={tak_min}")
-
-            # Validate context attributes (nominal only)
+                    
+                    if rule_min is not None and tak_min is not None and rule_min < tak_min:
+                        logger.info(
+                            f"{self.name}: event attribute '{attr_name}' (ref='{ref}') has min={rule_min}, "
+                            f"but parent TAK min={tak_min}. Effective range will be [{tak_min}, ...)"
+                        )
+                    if rule_max is not None and tak_max is not None and rule_max > tak_max:
+                        logger.info(
+                            f"{self.name}: event attribute '{attr_name}' (ref='{ref}') has max={rule_max}, "
+                            f"but parent TAK max={tak_max}. Effective range will be [..., {tak_max}]"
+                        )
+            
+            # Validate context attributes (nominal only, so reject min/max)
             if rule.context_spec:
                 for attr_name, attr_spec in rule.context_spec.get("attributes", {}).items():
                     df = next((d for d in self.derived_from if d["name"] == attr_name), None)
-                    if df is None: 
+                    if df is None:
                         continue
                     
                     ref = df["ref"]
@@ -1596,6 +1631,7 @@ class GlobalPattern(Pattern):
                     if parent_attr is None:
                         continue
                     
+                    # Context only supports nominal (no min/max)
                     if attr_spec.get("min") is not None or attr_spec.get("max") is not None:
                         raise ValueError(
                             f"{self.name}: context attribute '{attr_name}' (ref='{ref}') has min/max constraints. Context attributes are nominal only; "
@@ -1618,20 +1654,20 @@ class GlobalPattern(Pattern):
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Apply GlobalPattern to find and rate pattern instances.
-        
-        ASSUMPTION: Input df contains ONLY records relevant to this pattern (potential anchors/events/contexts/parameters).
+
+        ASSUMPTION: Input df contains ONLY records relevant to this pattern (potential events/contexts/parameters).
         All records belong to SINGLE patient.
-        
+
         Output columns:
           - PatientId
           - ConceptName (pattern name)
-          - StartDateTime (anchor start)
-          - EndDateTime (event end)
+          - StartDateTime (window start)
+          - EndDateTime (window end)
           - Value ("True" | "Partial" | "False")
           - TimeConstraintScore (None, place holder. Only used in LocalPattern)
           - ValueConstraintScore (0-1, if value-constraint compliance exists, else None)
           - CyclicConstraintScore (0-1, if cyclic-constraint compliance exists, else None)
-          - AbstractionType ("local-pattern")
+          - AbstractionType ("global-pattern")
         """
         logger.info("[%s] apply() start | input_rows=%d", self.name, len(df))
         
@@ -1657,7 +1693,7 @@ class GlobalPattern(Pattern):
         )
         parameter_values = {}
         if has_compliance and self.parameters:
-            # Use earliest anchor time as reference (will refine per-instance later if needed)
+            # Use earliest event time as reference (will refine per-instance later if needed)
             # For now, just use patient_df's first timestamp as proxy
             if not df.empty:
                 parameter_values = self._resolve_parameters(df["StartDateTime"].min(), df)
@@ -1837,7 +1873,7 @@ class GlobalPattern(Pattern):
         except Exception as e:
             logger.error(f"[{self.name}] Value-constraint compliance error: {e}")
             return 0.0
-    
 
-    
+
+
 

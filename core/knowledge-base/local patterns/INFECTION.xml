@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<pattern name="INFECTION_PATTERN" concept-type="local-pattern">
+<pattern name="INFECTION_PATTERN" concept-type="local-pattern" ignore-unfulfilled-anchors="true">
     <categories>Complications</categories>
     <description>Captures suspected infection events using measurements and observations</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->

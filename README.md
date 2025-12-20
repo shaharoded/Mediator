@@ -569,6 +569,9 @@ The following are not important for my use case but might be nice for other appl
 
 2. Currently parameters in pattern compliance resolve once per patient. Maybe we want to resolve them per each pattern instance (like in parameterized-raw-concept)? For things like BMI as parameter it's not important, but if parameter is "last insulin dose" and we want to check each pattern instance against different value, then it's useful (but also solveable and clearer by using parameterized-raw-concept as anchor/event).
 
+3. Currently, batches are written to queue (and then DB) after every TAK.apply(). A better method will probably write them once for every patient, to reduce the number of write operations. For my needs that was irrelevant, and the current method is a relic from "before parallelism" versions.
+
+
 ---
 
 **Maintained by:** Shahar Oded
