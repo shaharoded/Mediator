@@ -521,3 +521,32 @@ def test_apply_parameterized_raw_concept_with_how_flag(tmp_path: Path):
     # Even though 09:00 (80) exists and is before 10:00, it is ignored because dynamic=false.
     # Result: 200/50 = 4.0. (If dynamic=true, it would be 200/80 = 2.5)
     assert out.iloc[1]["Value"][0] == 4.0
+
+
+def test_apply_creatinine_rel_serum_measure(tmp_path: Path):
+    """Test CREATININE_REL_SERUM_MEASURE parameterized-raw-concept with multiple creatinine values."""
+    # Write the raw and parameterized concept XMLs
+    creatinine_raw_path = write_xml(tmp_path, "CREATININE_SERUM_MEASURE.xml", '''<?xml version="1.0" encoding="UTF-8"?>\n<raw-concept name="CREATININE_SERUM_MEASURE" concept-type="raw-numeric">\n    <categories>Measurements</categories>\n    <description>Raw concept to manage the measurement of CREATININE by Serum using mg/dL units</description>\n    <attributes>\n        <attribute name="CREATININE_SERUM_MEASURE" type="numeric">\n            <numeric-allowed-values>\n                <allowed-value min="0.1" max="20"/>\n            </numeric-allowed-values>\n        </attribute>\n    </attributes>\n</raw-concept>''')
+    creatinine_rel_path = write_xml(tmp_path, "CREATININE_REL_SERUM_MEASURE.xml", '''<?xml version="1.0" encoding="UTF-8"?>\n<parameterized-raw-concept name="CREATININE_REL_SERUM_MEASURE">\n    <categories>Measurements</categories>\n    <description>Raw concept to monitor the creatinine trend within admission, if 2 or more exist</description>\n    <derived-from name="CREATININE_SERUM_MEASURE" tak="raw-concept"/>\n    <parameters>\n        <parameter name="CREATININE_SERUM_MEASURE" tak="raw-concept" idx="0" how='before' dynamic="false" ref="P1"/>\n    </parameters>\n    <functions>\n        <function name="subtract">\n            <value idx="0"/>\n            <parameter ref="P1"/>\n        </function>\n    </functions>\n</parameterized-raw-concept>''')
+    # Register in repo
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(creatinine_raw_path))
+    tak = ParameterizedRawConcept.parse(creatinine_rel_path)
+    repo.register(tak)
+    # Simulate input: multiple creatinine measures for a patient
+    def make_ts(dtstr):
+        return pd.Timestamp(dtstr)
+    df = pd.DataFrame([
+        (1, "CREATININE_SERUM_MEASURE", make_ts("2022-01-01 08:00"), make_ts("2022-01-01 08:00"), (0.8,), "raw-concept"),
+        (1, "CREATININE_SERUM_MEASURE", make_ts("2022-01-02 09:00"), make_ts("2022-01-02 09:00"), (1.0,), "raw-concept"),
+        (1, "CREATININE_SERUM_MEASURE", make_ts("2022-01-03 10:00"), make_ts("2022-01-03 10:00"), (0.7,), "raw-concept"),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
+    out = tak.apply(df)
+    # Should produce one row for each value after the first (so 2 rows)
+    assert len(out) == 2, f"Expected 2 output rows, got {len(out)}. Output: {out}"
+    # Check values: (1.0-0.8)=0.2, (0.7-0.8)=-0.1
+    assert abs(out.iloc[0]["Value"][0] - 0.2) < 1e-6, f"First diff wrong: {out.iloc[0]['Value'][0]}"
+    assert abs(out.iloc[1]["Value"][0] + 0.1) < 1e-6, f"Second diff wrong: {out.iloc[1]['Value'][0]}"
+    assert all(out["ConceptName"] == "CREATININE_REL_SERUM_MEASURE")
+    print("\n✅ CREATININE_REL_SERUM_MEASURE produces output as expected")

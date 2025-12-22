@@ -6,7 +6,8 @@
         <attribute name="KIDNEY_COMPLICATION" tak="raw-concept" idx="0" ref="A1"/>
         <attribute name="CREATININE_SERUM_MEASURE" tak="raw-concept" idx="0" ref="A2"/>
         <attribute name="E-GFR_MEASURE" tak="raw-concept" idx="0" ref="A3"/>
-        <attribute name="CREATININE_REL_SERUM_MEASURE" tak="parameterized-raw-concept" idx="0" ref="A4"/>
+        <attribute name="CREATININE_RISE_SERUM_MEASURE" tak="parameterized-raw-concept" idx="0" ref="A4"/>
+        <attribute name="CREATININE_REL_SERUM_MEASURE" tak="parameterized-raw-concept" idx="0" ref="A5"/>
     </derived-from>
     
     <!-- 
@@ -29,6 +30,9 @@
             </attribute>
             <attribute ref="A4">
                 <allowed-value min="0.3"/>  <!-- >= 0.3 increase from baseline CREATININE -->
+            </attribute>
+            <attribute ref="A5">
+                <allowed-value min="1.5"/>  <!-- >= 1.5 times from baseline CREATININE --> 
             </attribute>
         </rule>
     </abstraction-rules>

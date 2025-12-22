@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="CREATININE_RISE_SERUM_MEASURE">
+    <categories>Measurements</categories>
+    <description>Raw concept to monitor the creatinine numerical increase within admission, if 2 or more exist</description>
+    <derived-from name="CREATININE_SERUM_MEASURE" tak="raw-concept"/>
+    
+    <!-- Will use the closest instance to the beginning of the pattern -->
+    <parameters>
+        <parameter name="CREATININE_SERUM_MEASURE" tak="raw-concept" idx="0" how='before' dynamic="true" ref="P1"/>
+    </parameters>
+
+    <functions>
+        <function name="subtract">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+        </function>
+    </functions>
+
+</parameterized-raw-concept>

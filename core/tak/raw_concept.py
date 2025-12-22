@@ -544,18 +544,36 @@ class ParameterizedRawConcept(RawConcept):
         # Reference time for static params is the StartDateTime of the FIRST parent row
         # (Baseline logic: what was the state at the beginning of this concept's timeline?)
         static_values = {}
+        # Special-case: baseline mode (static, before, param==derived_from)
+        baseline_value = None
         if static_params:
-            baseline_time = parent_rows.iloc[0]["StartDateTime"]
             for param in static_params:
-                val = self._resolve_parameter_value(param, baseline_time, df)
-                if val is None:
-                    # If a static parameter cannot be resolved (and no default), 
-                    # we might fail the whole concept or just skip rows. 
-                    # Current logic: if any param is None, we skip the row.
-                    # So we mark it as None here.
-                    static_values[param["ref"]] = None
+                # Static params handle a special case - same row can be a baseline for multiple rows
+                is_baseline = (
+                    not param.get("dynamic", True)
+                    and param.get("how", "all") == "before"
+                    and param["name"] == self.derived_from
+                )
+                if is_baseline:
+                    # Sort parent_rows by time
+                    parent_rows = parent_rows.sort_values("StartDateTime").reset_index(drop=True)
+                    if len(parent_rows) > 1:
+                        # Use first row as baseline, remove from parent_rows
+                        baseline_row = parent_rows.iloc[0]
+                        baseline_value = baseline_row["Value"][param.get("idx", 0)] if isinstance(baseline_row["Value"], tuple) else baseline_row["Value"]
+                        parent_rows = parent_rows.iloc[1:].reset_index(drop=True)
+                        static_values[param["ref"]] = baseline_value
+                    else:
+                        # Not enough rows to compute baseline
+                        static_values[param["ref"]] = None
                 else:
-                    static_values[param["ref"]] = val
+                    baseline_time = parent_rows.iloc[0]["StartDateTime"]
+                    val = self._resolve_parameter_value(param, baseline_time, df)
+                    if val is None:
+                        # Unresolved static param -> skip all
+                        static_values[param["ref"]] = None
+                    else:
+                        static_values[param["ref"]] = val
 
         out_rows = []
         for _, row in parent_rows.iterrows():

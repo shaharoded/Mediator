@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <pattern name="INSULIN_ON_ADMISSION_PATTERN" concept-type="local-pattern">
     <categories>Admission</categories>
-    <description>Captures if INSULIN (BASAL/BOLUS) was performed within reasonable time of admission</description>
+    <description>Captures if INSULIN (BASAL/BOLUS) was performed within reasonable time of admission. Uses weight as a parameter for dosage calculation, default to 81KG - Cohort avg.</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
     <derived-from>
         <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
@@ -12,7 +12,7 @@
 
     <!-- Will use the closest instance to the beginning of the pattern -->
     <parameters>
-        <parameter name="WEIGHT_MEASURE" tak="raw-concept" idx="0" ref="P1" default="72"/>
+        <parameter name="WEIGHT_MEASURE" tak="raw-concept" idx="0" ref="P1" default="81"/>
     </parameters>
 
     <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->

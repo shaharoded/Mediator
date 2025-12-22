@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<pattern name="INSULIN_ON_HIPOGLYCEMIA_PATTERN" concept-type="local-pattern">
-    <categories>RoutineTreatment</categories>
-    <description>Captures if long term INSULIN (BASAL) was reduced after low glucose measured</description>
+<pattern name="STOP_ANTIDIABETICS_ON_HYPOGLYCEMIA_PATTERN" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Captures if perscribed antidiabetic medications were stopped during the first 3 days of admission</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
     <derived-from>
         <attribute name="LOW_GLUCOSE_CONTEXT" tak="context" ref="A1"/>
-        <attribute name="BASAL_BITZUA_RATIO" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="ANTIDIABETIC_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
     </derived-from>
 
     <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
@@ -13,7 +13,7 @@
         <rule>
             <!-- Relation between 2 KBTA objects -->
             <!-- max-distance is not the recommended distance, but the max acceptable one -->
-            <temporal-relation how='overlap'>
+            <temporal-relation how='before' min-distance="2h" max-distance='14d'>
                 <anchor>
                     <attribute ref="A1">
                         <allowed-value equal="True"/>
@@ -21,21 +21,18 @@
                 </anchor>
                 <event select='first'>
                     <attribute ref="E1">
-                        <allowed-value min="0"/>
+                        <allowed-value equal="True"/>
                     </attribute>
                 </event>
             </temporal-relation>
 
             <!-- OPTIONAL: Compliance function to define fuzzy time window -->
             <compliance-function>
-                <value-constraint-compliance>
-                    <target>
-                        <attribute ref="E1"/>
-                    </target>
+                <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0" trapezeB="0" trapezeC="0.99" trapezeD="1"/>
+                        <trapeze trapezeA="0h" trapezeB="72h" trapezeC="14d" trapezeD="14d"/>
                     </function>
-                </value-constraint-compliance>
+                </time-constraint-compliance>
             </compliance-function>
         </rule>
     </abstraction-rules>
