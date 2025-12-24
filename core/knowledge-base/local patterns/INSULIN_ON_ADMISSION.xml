@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <pattern name="INSULIN_ON_ADMISSION_PATTERN" concept-type="local-pattern">
     <categories>Admission</categories>
-    <description>Captures if INSULIN (BASAL/BOLUS) was performed within reasonable time of admission. Uses weight as a parameter for dosage calculation, default to 81KG - Cohort avg.</description>
+    <description>Captures if INSULIN (BASAL) was performed within reasonable time of admission. Uses weight as a parameter for dosage calculation, default to 81KG - Cohort avg.</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
     <derived-from>
         <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
         <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
         <attribute name="BASAL_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
-        <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="E2"/>
     </derived-from>
 
     <!-- Will use the closest instance to the beginning of the pattern -->
@@ -37,27 +36,23 @@
                     <attribute ref="E1">
                         <allowed-value min="1"/>
                     </attribute>
-                    <attribute ref="E2">
-                        <allowed-value min="1"/>
-                    </attribute>
                 </event>
             </temporal-relation>
 
-            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <!-- OPTIONAL: Compliance function to define fuzzy window -->
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="48h" trapezD="72h"/>
                     </function>
                 </time-constraint-compliance>
                 <value-constraint-compliance>
                     <target>
                         <attribute ref="E1"/>
-                        <attribute ref="E2"/>
                     </target>
                     <function name="mul">
                         <parameter ref="P1"/>
-                        <trapeze trapezeA="0" trapezeB="0.2" trapezeC="0.6" trapezeD="1"/>
+                        <trapez trapezA="0" trapezB="0.2" trapezC="0.6" trapezD="1"/>
                     </function>
                 </value-constraint-compliance>
             </compliance-function>

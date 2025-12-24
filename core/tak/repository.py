@@ -467,23 +467,23 @@ class TAKRepository:
                 for rule in tak.abstraction_rules:
                     tcc = getattr(rule, 'time_constraint_compliance', None)
                     if tcc:
-                        trapez_raw = tcc.get('trapeze')
-                        trapeze = None
+                        trapez_raw = tcc.get('trapez')
+                        trapez = None
                         if trapez_raw is not None:
                             try:
                                 # Convert compact duration strings to hours (floats)
-                                trapeze = [
+                                trapez = [
                                     _duration_to_hours(trapez_raw[0]),
                                     _duration_to_hours(trapez_raw[1]),
                                     _duration_to_hours(trapez_raw[2]),
                                     _duration_to_hours(trapez_raw[3]),
                                 ]
                             except Exception:
-                                trapeze = trapez_raw  # fallback to raw
+                                trapez = trapez_raw  # fallback to raw
                         entries.append({
                             'type': 'time-constraint',
                             'func_name': tcc.get('func_name'),
-                            'trapeze': trapeze,
+                            'trapez': trapez,
                             'parameters': tcc.get('parameters', []),
                         })
                     vcc = getattr(rule, 'value_constraint_compliance', None)
@@ -491,7 +491,7 @@ class TAKRepository:
                         entries.append({
                             'type': 'value-constraint',
                             'func_name': vcc.get('func_name'),
-                            'trapeze': vcc.get('trapeze'),
+                            'trapez': vcc.get('trapez'),
                             'targets': vcc.get('targets', []),
                             'parameters': vcc.get('parameters', []),
                         })

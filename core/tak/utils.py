@@ -11,6 +11,10 @@ class FuzzyLogicTrapez:
     Supports both:
     - Time-based: timedelta values (A, B, C, D all as timedelta)
     - Value-based: float values (A, B, C, D all as float)
+
+    Additional Attributes:
+        is_time (bool): True if time-constraint (timedelta), False if value-constraint (float).
+        missing_score (float): Score to assign if for unmatched anchors/ 'False' rows. Default is 0.0.
     
     Order: A <= B <= C <= D (validated at parse time).
     """
@@ -18,6 +22,26 @@ class FuzzyLogicTrapez:
     B: Union[float, timedelta]
     C: Union[float, timedelta]
     D: Union[float, timedelta]
+    is_time: bool = False
+    missing_score: float = 0.0
+    
+    def __post_init__(self):
+        """Post-initialization to validate and convert types."""
+        # Convert A, B, C, D to correct type
+        if self.is_time:
+            object.__setattr__(self, 'A', parse_duration(self.A) if isinstance(self.A, str) else self.A)
+            object.__setattr__(self, 'B', parse_duration(self.B) if isinstance(self.B, str) else self.B)
+            object.__setattr__(self, 'C', parse_duration(self.C) if isinstance(self.C, str) else self.C)
+            object.__setattr__(self, 'D', parse_duration(self.D) if isinstance(self.D, str) else self.D)
+        else:
+            object.__setattr__(self, 'A', float(self.A))
+            object.__setattr__(self, 'B', float(self.B))
+            object.__setattr__(self, 'C', float(self.C))
+            object.__setattr__(self, 'D', float(self.D))
+        
+        self.validate()
+        # Compute missing_score: score for a value for missed anchors
+        object.__setattr__(self, 'missing_score', self.compliance_direction())
     
     def validate(self) -> None:
         """Ensure trapez is well-formed: A <= B <= C <= D."""
@@ -27,6 +51,32 @@ class FuzzyLogicTrapez:
                 f"Must satisfy A <= B <= C <= D."
             )
     
+    def compliance_direction(self) -> float:
+        """
+        Determine compliance direction based on trapez shape.
+        Trapez is always flat-topped between B and C.
+        
+        Returns:
+            float: 1.0 if higher values are better, 0.0 if lower values are better.
+        """
+        if self.C < self.D and self.A == self.B:
+            # Later -> deminishing returns: higher values are worse, missing score 0.0
+            return 0.0
+        elif self.A < self.B and self.C == self.D:
+            # Later -> increasing returns: higher values are better, missing score 1.0
+            # Can only happen for time-constraint where missing event can count as longer time between events
+            # For value-constraint, this shape is nonsensical, since higher values are not compareable to missing value
+            if self.is_time:
+                return 1.0
+            else:
+                return 0.0
+        elif self.A <= self.B and self.C <= self.D:
+            # Accuracy matters: anything between B and C is best (1.0), missing score 0.0
+            return 0.0
+        else:
+            # Mixed or undefined shape
+            return 0.0
+        
     def compliance_score(self, value: Union[float, timedelta]) -> float:
         """
         Compute compliance score for a given value using piecewise-linear interpolation.
@@ -47,36 +97,34 @@ class FuzzyLogicTrapez:
         # Convert timedeltas to seconds for uniform comparison
         if isinstance(value, timedelta):
             val = value.total_seconds()
+            a, b, c, d = self.A.total_seconds(), self.B.total_seconds(), self.C.total_seconds(), self.D.total_seconds()
         else:
             val = float(value)
-        
-        if isinstance(self.A, timedelta):
-            a = self.A.total_seconds()
-            b = self.B.total_seconds()
-            c = self.C.total_seconds()
-            d = self.D.total_seconds()
-        else:
-            a = float(self.A)
-            b = float(self.B)
-            c = float(self.C)
-            d = float(self.D)
+            a, b, c, d = float(self.A), float(self.B), float(self.C), float(self.D)
         
         if val < a or val > d:
-            return 0.0
+            # Outside [A, D]
+            return self.missing_score
         
         if b <= val <= c:
+            # Between [B, C] - flat-top, score is 1.0
             return 1.0
-        
-        if a <= val < b:
+
+        if a <= val <= b:
             if b == a:
-                return 0.0
+                # Value exactly at A and B are the same, meaning full compliance
+                return 1.0
+            # Linear interpolation between A and B assuming A < B
             return (val - a) / (b - a)
         
-        if c < val <= d:
+        if c <= val <= d:
             if d == c:
-                return 0.0
+                # Value exactly at C and D are the same, meaning full compliance
+                return 1.0
+            # Linear interpolation between C and D assuming C < D
             return (d - val) / (d - c)
         
+        # Fallback (should not reach here)
         return 0.0
 
         
@@ -133,6 +181,9 @@ def parse_duration(duration_str):
 def apply_external_function(func_name: str, value: Union[float, str], *args) -> Union[float, str]:
     """
     Apply an external function by name to a single value, passing any additional *args.
+    Used for 2 purposes:
+        1. For parameterized-raw-concept values (string or float), meaning depends on data -> calculated on apply()
+        2. For trapezoid values in compliance functions, meaning the nodes are static and known at parse time, but the parameter depends on the data -> calculated on apply().
 
     Args:
         func_name (str): The name of the external function to apply.
@@ -157,7 +208,7 @@ def apply_external_function(func_name: str, value: Union[float, str], *args) -> 
         raise ValueError(f"Error applying function '{func_name}' to value '{value}': {e}")
 
 
-def apply_external_function_on_trapez(func_name: str, trapez: tuple, constraint_type: str, *args) -> FuzzyLogicTrapez:
+def apply_external_function_on_trapez(func_name: str, trapez: FuzzyLogicTrapez, constraint_type: str, *args) -> FuzzyLogicTrapez:
     """
     Apply an external function by name to each value in the trapez tuple, passing any additional *args.
     For time-constraint, values are parsed as durations, converted to seconds, passed to function,
@@ -165,12 +216,13 @@ def apply_external_function_on_trapez(func_name: str, trapez: tuple, constraint_
 
     Args:
         func_name (str): The name of the external function to apply.
-        trapez (tuple): Tuple of values to apply the function to.
+        trapez (FuzzyLogicTrapez): Tuple of values to apply the function to.
         constraint_type (str): "time-constraint" or "value-constraint".
         *args: Additional arguments to pass to the function.
 
     Returns:
-        FuzzyLogicTrapez: Finalized trapezoid node (A, B, C, D values as timedelta or float)
+        FuzzyLogicTrapez: Finalized trapezoid node (A, B, C, D values as timedelta or float), after applying the external function.
+        Does not modify the input trapez, returns a new one.
 
     Raises:
         ValueError: If the function name is not recognized or wrong number of parameters.
@@ -178,7 +230,7 @@ def apply_external_function_on_trapez(func_name: str, trapez: tuple, constraint_
     # Preprocess all values based on type
     if constraint_type == "time-constraint":
         # Parse all as durations and convert to seconds
-        seconds = [parse_duration(val).total_seconds() for val in trapez]
+        seconds = [val.total_seconds() for val in [trapez.A, trapez.B, trapez.C, trapez.D]]
         results = []
         for sec in seconds:
             res = apply_external_function(func_name, sec, *args)
@@ -196,11 +248,12 @@ def apply_external_function_on_trapez(func_name: str, trapez: tuple, constraint_
             A=timedelta(seconds=results[0]),
             B=timedelta(seconds=results[1]),
             C=timedelta(seconds=results[2]),
-            D=timedelta(seconds=results[3])
+            D=timedelta(seconds=results[3]),
+            is_time=True
         )
     
     else:  # "value-constraint"
-        processed = list(trapez)
+        processed = [trapez.A, trapez.B, trapez.C, trapez.D]
         results = []
         for val in processed:
             res = apply_external_function(func_name, val, *args)
@@ -214,4 +267,4 @@ def apply_external_function_on_trapez(func_name: str, trapez: tuple, constraint_
             )
         
         # Return FuzzyLogicTrapez with float values
-        return FuzzyLogicTrapez(A=results[0], B=results[1], C=results[2], D=results[3])
+        return FuzzyLogicTrapez(A=results[0], B=results[1], C=results[2], D=results[3], is_time=False)

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ACIDOSIS" concept-type="raw-boolean">
+    <categories>Complications</categories>
+    <description>Acidosis treated with insulin IV. Calculated during ETL (PH se 7.3, BICARBONATE se 10, Insulin IV within 2h of PH)</description>
+    <attributes>
+        <attribute name="ACIDOSIS" type="boolean"/>
+    </attributes>
+</raw-concept>

@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <pattern name="STOP_ANTIDIABETICS_ON_HYPOGLYCEMIA_PATTERN" concept-type="local-pattern">
     <categories>Admission</categories>
-    <description>Captures if perscribed antidiabetic medications were stopped during the first 3 days of admission</description>
+    <description>Captures if perscribed antidiabetic medications were stopped for 72 hours after hypoglycemia event</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
     <derived-from>
-        <attribute name="LOW_GLUCOSE_CONTEXT" tak="context" ref="A1"/>
+        <attribute name="DISGLYCEMIA_EVENT" tak="event" ref="A1"/>
         <attribute name="ANTIDIABETIC_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
     </derived-from>
 
@@ -13,10 +13,10 @@
         <rule>
             <!-- Relation between 2 KBTA objects -->
             <!-- max-distance is not the recommended distance, but the max acceptable one -->
-            <temporal-relation how='before' min-distance="2h" max-distance='14d'>
+            <temporal-relation how='before' min-distance="0h" max-distance='14d'>
                 <anchor>
                     <attribute ref="A1">
-                        <allowed-value equal="True"/>
+                        <allowed-value equal="Hypoglycemia"/>
                     </attribute>
                 </anchor>
                 <event select='first'>
@@ -30,7 +30,7 @@
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="72h" trapezeC="14d" trapezeD="14d"/>
+                        <trapez trapezA="0h" trapezB="72h" trapezC="14d" trapezD="14d"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>

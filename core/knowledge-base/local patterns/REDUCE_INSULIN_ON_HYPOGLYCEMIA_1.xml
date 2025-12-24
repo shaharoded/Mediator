@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- In this case must ignore-unfulfilled-anchors="true" otherwise unfulfilled anchors emit 'False' / 0.0, which is the opposite of what we want -->
+<!-- We are effectively only outputting compliance for fulfilled anchors, meaning cases where dose was given -->
+<pattern name="REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN_1" concept-type="local-pattern" ignore-unfulfilled-anchors="true">
+    <categories>RoutineTreatment</categories>
+    <description>Captures if long term INSULIN (BASAL) was reduced after low glucose measured (if given within 24h of event)</description>
+    <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
+    <derived-from>
+        <attribute name="LOW_GLUCOSE_CONTEXT" tak="context" ref="A1"/>
+        <attribute name="BASAL_BITZUA_RATIO" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+
+    <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
+    <abstraction-rules>
+        <rule>
+            <!-- Relation between 2 KBTA objects -->
+            <!-- existence-compliance means that for unfulfilled anchors, TimeCompliance score will be 0.0 -->
+            <!-- Here, if a dose of Basal is not found within the Low Glucose context, that's a good thing -->
+            <temporal-relation how='overlap' existence-compliance='false'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <value-constraint-compliance>
+                    <target>
+                        <attribute ref="E1"/>
+                    </target>
+                    <function name="id">
+                        <!-- Any decrease in dose will is good compliance -->
+                        <trapez trapezA="0" trapezB="0" trapezC="0.99" trapezD="1"/>
+                    </function>
+                </value-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>

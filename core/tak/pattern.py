@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .tak import TAK, validate_xml_against_schema, TemporalRelationRule, CyclicRule
-from .utils import apply_external_function_on_trapez, parse_duration
+from .utils import apply_external_function_on_trapez, parse_duration, FuzzyLogicTrapez
 from .repository import get_tak_repository
 from .raw_concept import RawConcept
 from .external_functions import REPO
@@ -296,6 +296,9 @@ class LocalPattern(Pattern):
                 raise ValueError(f"{name}: temporal-relation how='{how}' must be 'before' or 'overlap'")
             max_distance = tr_el.attrib.get("max-distance")
             min_distance = tr_el.attrib.get("min-distance")
+            existence_compliance = (tr_el.attrib.get("existence-compliance") == "true") if "existence-compliance" in tr_el.attrib else None
+            if existence_compliance and ignore_unfulfilled_anchors:
+                raise ValueError(f"{name}: cannot set both existence-compliance='true' and ignore-unfulfilled-anchors=true, they conflict. One says 'give score 0.0 if event missing from anchor', the other says 'ignore unfulfilled anchors'")
 
             # Ensure max-distance and min-distance are not None
             if how == "before":
@@ -308,11 +311,18 @@ class LocalPattern(Pattern):
                         raise ValueError(f"{name}: temporal-relation max-distance must be > 0, otherwise use 'overlap' relation")
                 if not min_distance:
                     min_distance = "0s"  # Default to 0 seconds if not provided
-
+                if existence_compliance:
+                    raise ValueError(f"{name}: existence-compliance not supported for 'before' temporal relation, only for 'overlap'")
+            else:  # overlap
+                if max_distance or min_distance:
+                    raise ValueError(f"{name}: temporal-relation how='overlap' cannot have max-distance or min-distance")
+                if existence_compliance is None:
+                    raise ValueError(f"{name}: temporal-relation how='overlap' requires existence-compliance attribute")
             relation_spec = {
                 "how": how,
                 "max_distance": max_distance,
-                "min_distance": min_distance
+                "min_distance": min_distance,
+                "existence_compliance": existence_compliance
             }
             
             # Parse anchor
@@ -445,37 +455,38 @@ class LocalPattern(Pattern):
                     if func_name not in REPO:
                         raise ValueError(f"{name}: compliance function '{func_name}' not found in external functions")
                     
-                    # Parse trapeze (time-based, stored as strings)
-                    trapez_el = func_el.find("trapeze")
+                    # Parse trapez (time-based, stored as strings)
+                    trapez_el = func_el.find("trapez")
                     if trapez_el is None:
-                        raise ValueError(f"{name}: time-constraint-compliance <function> missing <trapeze>")
+                        raise ValueError(f"{name}: time-constraint-compliance <function> missing <trapez>")
                     
                     trapez_raw = (
-                        trapez_el.attrib.get("trapezeA"),
-                        trapez_el.attrib.get("trapezeB"),
-                        trapez_el.attrib.get("trapezeC"),
-                        trapez_el.attrib.get("trapezeD")
+                        trapez_el.attrib.get("trapezA"),
+                        trapez_el.attrib.get("trapezB"),
+                        trapez_el.attrib.get("trapezC"),
+                        trapez_el.attrib.get("trapezD")
                     )
                     
                     if None in trapez_raw:
-                        raise ValueError(f"{name}: time-constraint-compliance trapeze must have all 4 attributes (A, B, C, D)")
+                        raise ValueError(f"{name}: time-constraint-compliance trapez must have all 4 attributes (A, B, C, D)")
                     
-                    # Validate max_distance >= trapezD (pattern must capture all valid instances)
+                    # Validate *_distance against trapez nodes (pattern must capture all valid instances)
+                    # Still unparsed for logs clearity
                     if parse_duration(trapez_raw[3]) > parse_duration(max_distance):
                         raise ValueError(
                             f"{name}: temporal-relation max-distance '{max_distance}' must be >= "
-                            f"time-constraint-compliance trapezeD '{trapez_raw[3]}' "
+                            f"time-constraint-compliance trapezD '{trapez_raw[3]}' "
                             f"(otherwise pattern may miss valid instances)"
                         )
                     if parse_duration(trapez_raw[0]) < parse_duration(min_distance):
                         raise ValueError(
                             f"{name}: temporal-relation min-distance '{min_distance}' must be <= "
-                            f"time-constraint-compliance trapezeA '{trapez_raw[0]}' "
+                            f"time-constraint-compliance trapezA '{trapez_raw[0]}' "
                             f"(otherwise pattern may miss valid instances)"
                         )
                     if parse_duration(trapez_raw[2]) < parse_duration(trapez_raw[3]) and event_spec.get("select") == "last":
                         logger.warning(
-                            f"{name}: time-constraint-compliance trapezeC '{trapez_raw[2]}' < trapezeD '{trapez_raw[3]}' "
+                            f"{name}: time-constraint-compliance trapezC '{trapez_raw[2]}' < trapezD '{trapez_raw[3]}' "
                             f"may lead to unexpected scoring when event select='last'"
                         )
                     
@@ -491,7 +502,7 @@ class LocalPattern(Pattern):
                     
                     time_constraint_compliance = {
                         "func_name": func_name,
-                        "trapeze": trapez_raw,  # Store as strings (will be processed by apply_external_function)
+                        "trapez": FuzzyLogicTrapez(*trapez_raw, is_time=True),  # Build as time-based trapez
                         "parameters": param_refs
                     }
                 
@@ -525,20 +536,20 @@ class LocalPattern(Pattern):
                     if func_name not in REPO:
                         raise ValueError(f"{name}: compliance function '{func_name}' not found in external functions")
                     
-                    # Parse trapeze (numeric values)
-                    trapez_el = func_el.find("trapeze")
+                    # Parse trapez (numeric values)
+                    trapez_el = func_el.find("trapez")
                     if trapez_el is None:
-                        raise ValueError(f"{name}: value-constraint-compliance <function> missing <trapeze>")
+                        raise ValueError(f"{name}: value-constraint-compliance <function> missing <trapez>")
                     
                     try:
                         trapez_raw = (
-                            float(trapez_el.attrib.get("trapezeA")),
-                            float(trapez_el.attrib.get("trapezeB")),
-                            float(trapez_el.attrib.get("trapezeC")),
-                            float(trapez_el.attrib.get("trapezeD"))
+                            float(trapez_el.attrib.get("trapezA")),
+                            float(trapez_el.attrib.get("trapezB")),
+                            float(trapez_el.attrib.get("trapezC")),
+                            float(trapez_el.attrib.get("trapezD"))
                         )
                     except (TypeError, ValueError) as e:
-                        raise ValueError(f"{name}: value-constraint-compliance trapeze values must be numeric: {e}")
+                        raise ValueError(f"{name}: value-constraint-compliance trapez values must be numeric: {e}")
                     
                     # Extract parameter refs (if any)
                     param_refs = []
@@ -550,21 +561,19 @@ class LocalPattern(Pattern):
                     
                     value_constraint_compliance = {
                         "func_name": func_name,
-                        "trapeze": trapez_raw,  # Stored as floats
+                        "trapez": FuzzyLogicTrapez(*trapez_raw, is_time=False),  # Build as value-based trapez
                         "targets": target_refs,
                         "parameters": param_refs
                     }
             
-            # Create TemporalRelationRule with compliance functions
-            rule = TemporalRelationRule(
+            # Create TemporalRelationRule with compliance functions            
+            abstraction_rules.append(TemporalRelationRule(
                 derived_map=derived_map,
                 relation_spec=relation_spec,
                 context_spec=context_spec,
                 time_constraint_compliance=time_constraint_compliance,
                 value_constraint_compliance=value_constraint_compliance
-            )
-            
-            abstraction_rules.append(rule)
+            ))
 
         pattern = cls(
             name=name,
@@ -871,6 +880,7 @@ class LocalPattern(Pattern):
         instances = self._find_pattern_instances(df)
         
         if not instances:
+            # Didn't find any pattern instances, no anchors at all.
             if self.ignore_unfulfilled_anchors:
                 logger.info("[%s] apply() end | no pattern found, ignore_unfulfilled_anchors=True", self.name)
                 return pd.DataFrame(columns=[
@@ -878,9 +888,16 @@ class LocalPattern(Pattern):
                     "Value", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore", "AbstractionType"
                 ])
             # No pattern found: return False with NaT times
-            # If compliance functions exist, emit 0.0
-            has_time_compliance = any(r.time_constraint_compliance for r in self.abstraction_rules)
+            # If compliance functions exist, emit missing_score, which is usually 0.0 (unless backward trapez)
+            has_existence = any(
+                (r.relation_spec.get("how") == "overlap") and r.relation_spec.get("existence_compliance")
+                for r in self.abstraction_rules
+            ) # Pattern output score 0.0 if no anchors/events found
+            has_time_compliance = any(r.time_constraint_compliance for r in self.abstraction_rules) or has_existence
+            time_missing_score = next((r.time_constraint_compliance['trapez'].missing_score for r in self.abstraction_rules if r.time_constraint_compliance), None)
+            time_missing_score = 0.0 if has_existence else time_missing_score  # Existence compliance missing_score is 0.0
             has_value_compliance = any(r.value_constraint_compliance for r in self.abstraction_rules)
+            value_missing_score = next((r.value_constraint_compliance['trapez'].missing_score for r in self.abstraction_rules if r.value_constraint_compliance), None)
             
             logger.info("[%s] apply() end | no pattern found", self.name)
             return pd.DataFrame([{
@@ -888,9 +905,9 @@ class LocalPattern(Pattern):
                 "ConceptName": self.name,
                 "StartDateTime": pd.NaT,
                 "EndDateTime": pd.NaT,
-                "Value": "False",
-                "TimeConstraintScore": 0.0 if has_time_compliance else None,
-                "ValueConstraintScore": 0.0 if has_value_compliance else None,
+                "Value": str(bool((time_missing_score or value_missing_score))), # Both 0.0 or None → "False", else "True"
+                "TimeConstraintScore": time_missing_score if has_time_compliance else None,
+                "ValueConstraintScore": value_missing_score if has_value_compliance else None,
                 "CyclicConstraintScore": None,
                 "AbstractionType": self.family
             }])
@@ -937,8 +954,15 @@ class LocalPattern(Pattern):
         
         # PRE-RESOLVE PARAMETERS ONCE (not per-rule)
         # For patterns with compliance functions, compute parameters upfront
-        has_time_compliance = any(r.time_constraint_compliance for r in self.abstraction_rules)
+        has_existence = any(
+            (r.relation_spec.get("how") == "overlap") and r.relation_spec.get("existence_compliance")
+            for r in self.abstraction_rules
+        ) # Pattern output score 0.0 if no anchors/events found
+        has_time_compliance = any(r.time_constraint_compliance for r in self.abstraction_rules) or has_existence
+        time_missing_score = next((r.time_constraint_compliance['trapez'].missing_score for r in self.abstraction_rules if r.time_constraint_compliance), None)
+        time_missing_score = 0.0 if has_existence else time_missing_score  # Existence compliance missing_score is 0.0
         has_value_compliance = any(r.value_constraint_compliance for r in self.abstraction_rules)
+        value_missing_score = next((r.value_constraint_compliance['trapez'].missing_score for r in self.abstraction_rules if r.value_constraint_compliance), None)
         has_compliance = any([has_time_compliance, has_value_compliance])
         parameter_values = {}
         if has_compliance and self.parameters:
@@ -991,7 +1015,10 @@ class LocalPattern(Pattern):
                         pass  # Use pre-computed parameter_values
                     
                     # Compute time-constraint compliance (only if function exists)
-                    if rule.time_constraint_compliance:
+                    # Existence compliance for overlap acts as a binary time score: found=1.0
+                    if rule.relation_spec.get("how") == "overlap" and rule.relation_spec.get("existence_compliance"):
+                        time_score = 1.0
+                    elif rule.time_constraint_compliance:
                         time_score = self._compute_time_compliance(
                             anchor_row=anchor_row,
                             event_row=event_row,
@@ -1087,13 +1114,14 @@ class LocalPattern(Pattern):
                         continue
 
                 # Only add to potential falses if not ignoring unfulfilled anchors
+                # The compliance score of a missed anchor is 0.0 if compliance functions exist
                 if not self.ignore_unfulfilled_anchors:
                     potential_falses.append({
                         "StartDateTime": start_dt,
                         "EndDateTime": end_dt,
-                        "Value": "False",
-                        "TimeConstraintScore": 0.0 if has_time_compliance else None,
-                        "ValueConstraintScore": 0.0 if has_value_compliance else None
+                        "Value": str(bool((time_missing_score or value_missing_score))), # Both 0.0 or None → "False", else "True",
+                        "TimeConstraintScore": time_missing_score if has_time_compliance else None,
+                        "ValueConstraintScore": value_missing_score if has_value_compliance else None
                     })
 
         # --- Condition 2: Filter Potential Falses based on Successful Intervals ---
@@ -1207,7 +1235,7 @@ class LocalPattern(Pattern):
         try:
             trapez_node = apply_external_function_on_trapez(
                 tcc_spec["func_name"],  # positional
-                tcc_spec["trapeze"],     # positional
+                tcc_spec["trapez"],     # positional
                 "time-constraint",      # positional
                 *param_vals
             )
@@ -1274,7 +1302,7 @@ class LocalPattern(Pattern):
         try:
             trapez_node = apply_external_function_on_trapez(
                 vcc_spec["func_name"],  # positional
-                vcc_spec["trapeze"],     # positional
+                vcc_spec["trapez"],     # positional
                 "value-constraint",     # positional
                 *param_vals
             )
@@ -1327,6 +1355,30 @@ class GlobalPattern(Pattern):
 
     @classmethod
     def parse(cls, xml_path: Union[str, Path]) -> "GlobalPattern":
+        def _parse_filter_block(block_el, derived_from):
+            if block_el is None:
+                return None
+            spec = {"attributes": {}}
+            for attr_el in block_el.findall("attribute"):
+                ref = attr_el.attrib["ref"]
+                df_entry = next((d for d in derived_from if d["ref"] == ref), None)
+                attr_name = df_entry["name"]
+
+                allowed_values = set()
+                min_val = None
+                max_val = None
+                for av in attr_el.findall("allowed-value"):
+                    if "equal" in av.attrib: allowed_values.add(av.attrib["equal"])
+                    if "min" in av.attrib: min_val = float(av.attrib["min"])
+                    if "max" in av.attrib: max_val = float(av.attrib["max"])
+
+                spec["attributes"][attr_name] = {
+                    "idx": df_entry["idx"],
+                    "allowed_values": allowed_values,
+                    "min": min_val,
+                    "max": max_val
+                }
+            return spec
         xml_path = Path(xml_path)
         root = ET.parse(xml_path).getroot()
         
@@ -1371,6 +1423,15 @@ class GlobalPattern(Pattern):
         abstraction_rules = []
         
         for rule_el in abs_el.findall("rule"):
+            if rule_el.find("temporal-relation") is not None:
+                raise ValueError(f"{name}: GlobalPattern rule cannot have <temporal-relation>; only <cyclic> allowed.")
+            
+            # Look for context block in rule
+            context_spec = None
+            context_el = rule_el.find("context")
+            if context_el is not None:
+                context_spec = _parse_filter_block(context_el, derived_from)
+            
             cyclic_el = rule_el.find("cyclic")
             if cyclic_el is None:
                 raise ValueError(f"{name}: GlobalPattern rule missing <cyclic>")
@@ -1382,40 +1443,15 @@ class GlobalPattern(Pattern):
             time_window = cyclic_el.attrib["time-window"]
             min_occ = int(cyclic_el.attrib["min-occurrences"])
             max_occ = int(cyclic_el.attrib["max-occurrences"])
-            
-            # Parse event
-            event_el = cyclic_el.find("event")
-            event_spec = {"attributes": {}}
-            for attr_el in event_el.findall("attribute"):
-                ref = attr_el.attrib["ref"]
-                df_entry = next((d for d in derived_from if d["ref"] == ref), None)
-                attr_name = df_entry["name"]
-                
-                allowed_values = set()
-                min_val = None
-                max_val = None
-                for av in attr_el.findall("allowed-value"):
-                    if "equal" in av.attrib: allowed_values.add(av.attrib["equal"])
-                    if "min" in av.attrib: min_val = float(av.attrib["min"])
-                    if "max" in av.attrib: max_val = float(av.attrib["max"])
-                
-                event_spec["attributes"][attr_name] = {
-                    "idx": df_entry["idx"], "allowed_values": allowed_values, "min": min_val, "max": max_val
-                }
 
-            # Parse context
-            context_spec = None
-            context_el = rule_el.find("context")
-            if context_el is not None:
-                context_spec = {"attributes": {}}
-                for attr_el in context_el.findall("attribute"):
-                    ref = attr_el.attrib["ref"]
-                    df_entry = next((d for d in derived_from if d["ref"] == ref), None)
-                    attr_name = df_entry["name"]
-                    allowed_values = set()
-                    for av in attr_el.findall("allowed-value"):
-                        if "equal" in av.attrib: allowed_values.add(av.attrib["equal"])
-                    context_spec["attributes"][attr_name] = {"idx": df_entry["idx"], "allowed_values": allowed_values}
+            # Parse initiator/ event/ clipper / context blocks
+            initiator_spec = _parse_filter_block(cyclic_el.find("initiator"), derived_from)
+            event_spec = _parse_filter_block(cyclic_el.find("event"), derived_from)
+            clipper_spec   = _parse_filter_block(cyclic_el.find("clipper"), derived_from)
+            
+            # Check anchor refs
+            if cyclic_el.find("anchor") is not None:
+               raise ValueError(f"{name}: GlobalPattern rules cannot have anchor specifications; only initiator, event, clipper and context are allowed.") 
 
             # Parse compliance
             cyclic_compliance = None
@@ -1429,34 +1465,48 @@ class GlobalPattern(Pattern):
                 ccc_el = cf_el.find("cyclic-constraint-compliance")
                 if ccc_el is not None:
                     func_el = ccc_el.find("function")
-                    trapez_el = func_el.find("trapeze")
+                    trapez_el = func_el.find("trapez")
                     trapez_raw = (
-                        float(trapez_el.attrib["trapezeA"]), float(trapez_el.attrib["trapezeB"]),
-                        float(trapez_el.attrib["trapezeC"]), float(trapez_el.attrib["trapezeD"])
+                        float(trapez_el.attrib["trapezA"]), float(trapez_el.attrib["trapezB"]),
+                        float(trapez_el.attrib["trapezC"]), float(trapez_el.attrib["trapezD"])
                     )
                     param_refs = [p.attrib["ref"] for p in func_el.findall("parameter")]
                     cyclic_compliance = {
-                        "func_name": func_el.attrib["name"], "trapeze": trapez_raw, "parameters": param_refs
+                        "func_name": func_el.attrib["name"], 
+                        "trapez": FuzzyLogicTrapez(*trapez_raw, is_time=False), 
+                        "parameters": param_refs
                     }
                 
                 # Value compliance
                 vcc_el = cf_el.find("value-constraint-compliance")
                 if vcc_el is not None:
                     func_el = vcc_el.find("function")
-                    trapez_el = func_el.find("trapeze")
+                    trapez_el = func_el.find("trapez")
                     trapez_raw = (
-                        float(trapez_el.attrib["trapezeA"]), float(trapez_el.attrib["trapezeB"]),
-                        float(trapez_el.attrib["trapezeC"]), float(trapez_el.attrib["trapezeD"])
+                        float(trapez_el.attrib["trapezA"]), float(trapez_el.attrib["trapezB"]),
+                        float(trapez_el.attrib["trapezC"]), float(trapez_el.attrib["trapezD"])
                     )
                     target_refs = [a.attrib["ref"] for a in vcc_el.find("target").findall("attribute")]
                     param_refs = [p.attrib["ref"] for p in func_el.findall("parameter")]
                     value_compliance = {
-                        "func_name": func_el.attrib["name"], "trapeze": trapez_raw, 
-                        "targets": target_refs, "parameters": param_refs
+                        "func_name": func_el.attrib["name"], 
+                        "trapez": FuzzyLogicTrapez(*trapez_raw, is_time=False), 
+                        "targets": target_refs, 
+                        "parameters": param_refs
                     }
 
             abstraction_rules.append(CyclicRule(
-                start, end, time_window, min_occ, max_occ, event_spec, context_spec, cyclic_compliance, value_compliance
+                start=start,
+                end=end,
+                time_window=time_window,
+                min_occurrences=min_occ,
+                max_occurrences=max_occ,
+                initiator_spec=initiator_spec,
+                event_spec=event_spec,
+                clipper_spec=clipper_spec,
+                context_spec=context_spec,
+                cyclic_constraint_compliance=cyclic_compliance,
+                value_constraint_compliance=value_compliance,
             ))
 
         return cls(name, cats, desc, derived_from, parameters, abstraction_rules)
@@ -1499,19 +1549,16 @@ class GlobalPattern(Pattern):
                     if ref not in all_declared_refs:
                         raise ValueError(f"{self.name}: context uses undeclared ref '{ref}'")
             
-            tr = rule.relation_spec
-            # Check anchor refs
-            if tr.get("anchor"):
-               raise ValueError(f"{self.name}: GlobalPattern rules cannot have anchor specifications; only event and context are allowed.") 
-            
-            # Check event refs
-            for attr_name in tr.get("event", {}).get("attributes", {}):
-                df_entry = next((d for d in self.derived_from if d["name"] == attr_name), None)
-                if df_entry is None:
-                    raise ValueError(f"{self.name}: event references unknown attribute '{attr_name}'")
-                ref = df_entry["ref"]
-                if ref not in all_declared_refs:
-                    raise ValueError(f"{self.name}: event uses undeclared ref '{ref}'")
+            # Check initiator/ event /clipper / context refs
+            for spec_name, spec in [("initiator", rule.initiator_spec), ("event", rule.event_spec), ("clipper", rule.clipper_spec), ("context", rule.context_spec)]:
+                if not spec:
+                    continue
+                for attr_name in spec.get("attributes", {}):
+                    df_entry = next((d for d in self.derived_from if d["name"] == attr_name), None)
+                    if df_entry is None:
+                        raise ValueError(f"{self.name}: {spec_name} references unknown attribute '{attr_name}'")
+                    if df_entry["ref"] not in all_declared_refs:
+                        raise ValueError(f"{self.name}: {spec_name} uses undeclared ref '{df_entry['ref']}'")
             
             # Check compliance function parameter refs
             if rule.cyclic_constraint_compliance:
@@ -1682,6 +1729,11 @@ class GlobalPattern(Pattern):
                 "Value", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore", "AbstractionType"
             ])
         
+        # Patient timeline clipping to avoid punishing outside observed data
+        # The maximum relevant time for a patient is between their earliest StartDateTime and latest EndDateTime, within their *input* data
+        patient_start = df["StartDateTime"].min()
+        patient_end = df["EndDateTime"].max()
+        
         instances_map = {}
         used_event_idxs = set()
 
@@ -1699,108 +1751,136 @@ class GlobalPattern(Pattern):
                 parameter_values = self._resolve_parameters(df["StartDateTime"].min(), df)
 
         for rule in self.abstraction_rules:
-            global_start = df["StartDateTime"].min() + rule.start
-            global_end = df["StartDateTime"].min() + rule.end
-            window_duration = rule.time_window
-            
-            # Get events and contexts for this rule. consistent across windows.
-            # Handles attribute filtering internally.
+            # Extract candidates once per rule (filtered by spec)
             events = self._extract_candidates(df, rule.event_spec)
-            contexts = None
-            if rule.context_spec:
-                contexts = self._extract_candidates(df, rule.context_spec)
-            
-            current_start = global_start
-            while current_start < global_end:
-                current_end = current_start + window_duration
-                if current_end > global_end:
-                    continue  # Skip incomplete window at the end
-                
-                # Check if window is relevant (context satisfied)
-                if not rule.context_satisfied(current_start, current_end, contexts):
-                    current_start = current_end
+            contexts = self._extract_candidates(df, rule.context_spec) if rule.context_spec else None
+
+            initiators = self._extract_candidates(df, rule.initiator_spec) if getattr(rule, "initiator_spec", None) else None
+            clippers = self._extract_candidates(df, rule.clipper_spec) if getattr(rule, "clipper_spec", None) else None
+
+            window_duration = rule.time_window
+
+            # -------------------------
+            # Build episodes (episode = time range to scan for windows, between initiator/ absolute start and a clipper / cyclic end)
+            # An episode can yield multiple windows
+            # A rule can have multiple episodes (one per initiator), as long as the next initiator is after the previous clipper
+            # -------------------------
+            # Backward compatible default: single episode from patient_start if no initiator spec or no initiator rows
+            if initiators is None or initiators.empty:
+                initiator_times = [patient_start]
+            else:
+                initiator_times = sorted(pd.Series(initiators["StartDateTime"]).dropna().unique())
+
+            for init_time in initiator_times:
+                # Episode start/end relative to initiator (or patient_start)
+                episode_start = init_time + rule.start
+                episode_end = init_time + rule.end
+
+                # Clip to observed patient timeline (prevents "punishing" after discharge / end-of-data)
+                if episode_start < patient_start:
+                    episode_start = patient_start
+                if episode_end > patient_end:
+                    episode_end = patient_end
+
+                # Apply clipper: first clipper at/after initiator time (you can change to episode_start if preferred)
+                if clippers is not None and not clippers.empty:
+                    clip_candidates = clippers[clippers["StartDateTime"] >= init_time]
+                    if not clip_candidates.empty:
+                        clip_time = clip_candidates["StartDateTime"].min()
+                        if clip_time < episode_end:
+                            episode_end = clip_time
+
+                # If episode is empty or too short to fit even one window, skip
+                if not (episode_end > episode_start) or (episode_end - episode_start) < window_duration:
                     continue
-                
-                # Filter events
-                events_in_window = events[
-                    (events["StartDateTime"] >= current_start) & 
-                    (events["StartDateTime"] < current_end)
-                ].copy()
-                
-                valid_events_rows = []
-                candidate_indices = []
-                
-                if not events_in_window.empty:
-                    for idx, row in events_in_window.iterrows():
-                        if idx in used_event_idxs:
-                            continue
-                        valid_events_rows.append(row)
-                        candidate_indices.append(idx)
-                
-                count = len(valid_events_rows)
-                
-                v_score = None
-                c_score = None
-                cyclic_met = None
 
-                # Extract compliance scores per window
-                # If compliance is not defined, score remains None, 
-                # and _compute_combined_score will ignore and give 1, so label is correct.
-                # If compliance is defined but no events found, score remains 0.0.
-                # Cyclic Score is produced based on count only, so always compute if defined.
-                # Cyclic Score
-                if rule.cyclic_constraint_compliance:
-                    c_score = self._compute_cyclic_compliance(
-                        count=count, 
-                        rule=rule, 
-                        parameter_values=parameter_values
-                        )
-                else:
-                    # If there is no cyclic compliance function, check min/max bounds directly to determine the Value of the record
-                    cyclic_met = int(rule.min_occurrences <= count <= rule.max_occurrences)                    
-                
-                # Value Score
-                if rule.value_constraint_compliance:
-                    v_score = self._compute_value_compliance(
-                        valid_events_rows=valid_events_rows, 
-                        rule=rule, 
-                        parameter_values=parameter_values
-                        )
-                
-                # Combine window score
-                # Use cyclic_met if no cyclic compliance function is defined to get a label anyway based on cyclic requirement
-                w_score = self._compute_combined_score([c_score, v_score, cyclic_met])
-                
-                value_label = "True" if w_score == 1.0 else ("Partial" if w_score > 0 else "False")
-                
-                key = (current_start, current_end)
-                if key not in instances_map:
-                    instances_map[key] = {
-                        "PatientId": patient_id,
-                        "ConceptName": self.name,
-                        "StartDateTime": current_start,
-                        "EndDateTime": current_end,
-                        "Value": value_label,
-                        "TimeConstraintScore": None,
-                        "ValueConstraintScore": v_score,
-                        "CyclicConstraintScore": c_score,
-                        "AbstractionType": self.family
-                    }
+                current_start = episode_start
+                while current_start < episode_end:
+                    # Run over windows within episode
+                    current_end = current_start + window_duration
 
-                    used_event_idxs.update(candidate_indices)
-                current_start = current_end
-        
+                    # IMPORTANT: do not "continue" here or you'll infinite-loop
+                    # Skip incomplete trailing window by breaking
+                    if current_end > episode_end:
+                        break
+
+                    # Check if window is relevant (context satisfied)
+                    if not rule.context_satisfied(current_start, current_end, contexts):
+                        current_start = current_end
+                        continue
+
+                    # Filter events in window (start-inclusive, end-exclusive)
+                    events_in_window = events[
+                        (events["StartDateTime"] >= current_start) &
+                        (events["StartDateTime"] < current_end)
+                    ].copy()
+
+                    valid_events_rows = []
+                    candidate_indices = []
+
+                    if not events_in_window.empty:
+                        for idx, row in events_in_window.iterrows():
+                            if idx in used_event_idxs:
+                                continue
+                            valid_events_rows.append(row)
+                            candidate_indices.append(idx)
+
+                    count = len(valid_events_rows)
+
+                    v_score = None
+                    c_score = None
+                    cyclic_met = None
+
+                    # Cyclic score
+                    if rule.cyclic_constraint_compliance:
+                        c_score = self._compute_cyclic_compliance(
+                            count=count,
+                            rule=rule,
+                            parameter_values=parameter_values
+                        )
+                    else:
+                        cyclic_met = int(rule.min_occurrences <= count <= rule.max_occurrences)
+
+                    # Value score
+                    if rule.value_constraint_compliance:
+                        v_score = self._compute_value_compliance(
+                            valid_events_rows=valid_events_rows,
+                            rule=rule,
+                            parameter_values=parameter_values
+                        )
+
+                    # Combine (None ignored by your _compute_combined_score; 0.0 enforces failure)
+                    w_score = self._compute_combined_score([c_score, v_score, cyclic_met])
+                    value_label = "True" if w_score == 1.0 else ("Partial" if w_score > 0 else "False")
+
+                    key = (current_start, current_end)
+                    if key not in instances_map:
+                        instances_map[key] = {
+                            "PatientId": patient_id,
+                            "ConceptName": self.name,
+                            "StartDateTime": current_start,
+                            "EndDateTime": current_end,
+                            "Value": value_label,
+                            "TimeConstraintScore": None,
+                            "ValueConstraintScore": v_score,
+                            "CyclicConstraintScore": c_score,
+                            "AbstractionType": self.family
+                        }
+                        used_event_idxs.update(candidate_indices)
+
+                    current_start = current_end
+
         instances = list(instances_map.values())
         if not instances:
-             return pd.DataFrame(columns=[
-                "PatientId", "ConceptName", "StartDateTime", "EndDateTime", 
+            return pd.DataFrame(columns=[
+                "PatientId", "ConceptName", "StartDateTime", "EndDateTime",
                 "Value", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore", "AbstractionType"
             ])
 
-        return pd.DataFrame(instances).sort_values("StartDateTime")[[
-            "PatientId", "ConceptName", "StartDateTime", "EndDateTime", 
-            "Value", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore", "AbstractionType"
-        ]]
+        return pd.DataFrame(instances).sort_values("StartDateTime")[
+            ["PatientId", "ConceptName", "StartDateTime", "EndDateTime",
+            "Value", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore", "AbstractionType"]
+        ]
     
     def _compute_cyclic_compliance(
         self,
@@ -1816,7 +1896,7 @@ class GlobalPattern(Pattern):
         param_vals = [parameter_values[ref] for ref in spec["parameters"]]
         try:
             trapez_node = apply_external_function_on_trapez(
-                spec["func_name"], spec["trapeze"], "cyclic-constraint", *param_vals
+                spec["func_name"], spec["trapez"], "cyclic-constraint", *param_vals
             )
             return trapez_node.compliance_score(count)
         except Exception as e:
@@ -1841,7 +1921,7 @@ class GlobalPattern(Pattern):
         
         try:
             trapez_node = apply_external_function_on_trapez(
-                vcc_spec["func_name"], vcc_spec["trapeze"], "value-constraint", *param_vals
+                vcc_spec["func_name"], vcc_spec["trapez"], "value-constraint", *param_vals
             )
             
             vals = []

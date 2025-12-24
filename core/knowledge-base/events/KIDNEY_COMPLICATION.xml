@@ -26,7 +26,7 @@
                 <allowed-value min="20"/> <!-- >= 20, probable AKI -->
             </attribute>
             <attribute ref="A3">
-                <allowed-value max="29"/>  <!-- <= 29 CKD Stage 4 -->
+                <allowed-value max="29.99"/>  <!-- < 30 CKD Stage 4 -->
             </attribute>
             <attribute ref="A4">
                 <allowed-value min="0.3"/>  <!-- >= 0.3 increase from baseline CREATININE -->

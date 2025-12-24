@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, Union, Dict, List, Set, Any
+from typing import Optional, Tuple, Union, Dict, List, Any
 import pandas as pd
 from datetime import timedelta
 from abc import ABC, abstractmethod
@@ -284,6 +284,7 @@ class TemporalRelationRule(TAKRule):
         Respects "overlap" and "before" relationships (with <max/min_distance> restrictions).
         """
         if self.relation_spec["how"] == "overlap":
+            # Inclusive at the boundry
             return not (
                 anchor_row["EndDateTime"] < event_row["StartDateTime"]
                 or event_row["EndDateTime"] < anchor_row["StartDateTime"]
@@ -373,7 +374,9 @@ class CyclicRule(TAKRule):
         time_window: str,
         min_occurrences: int,
         max_occurrences: int,
+        initiator_spec: Dict[str, Any],
         event_spec: Dict[str, Any],
+        clipper_spec: Dict[str, Any],
         context_spec: Optional[Dict[str, Any]] = None,
         cyclic_constraint_compliance: Optional[Dict[str, Any]] = None,
         value_constraint_compliance: Optional[Dict[str, Any]] = None,
@@ -384,6 +387,8 @@ class CyclicRule(TAKRule):
         self.min_occurrences = min_occurrences
         self.max_occurrences = max_occurrences
         self.event_spec = event_spec
+        self.initiator_spec = initiator_spec
+        self.clipper_spec = clipper_spec
         self.context_spec = context_spec
         self.cyclic_constraint_compliance = cyclic_constraint_compliance
         self.value_constraint_compliance = value_constraint_compliance

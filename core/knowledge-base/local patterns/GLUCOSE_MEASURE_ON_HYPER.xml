@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<pattern name="GLUCOSE_MEASURE_ON_HYPER_PATTERN" concept-type="local-pattern">
+<pattern name="GLUCOSE_MEASURE_ON_DISGLYCEMIA_PATTERN" concept-type="local-pattern">
     <categories>RoutineTreatment</categories>
-    <description>Captures if glucose measurement was performed within a reasonable time frame after hyperglycemia</description>
+    <description>Captures if glucose measurement was performed within a reasonable time frame after Dysglycemia (hyperglycemia or hypoglycemia)</description>
     <derived-from>
+        <attribute name="DISGLYCEMIA_EVENT" tak="event" ref="A1"/>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
     </derived-from>
  
@@ -14,8 +15,9 @@
             <!-- Relation between 2 KBTA objects -->
             <temporal-relation how='before' min-distance="8m" max-distance='24h'>
                 <anchor>
-                    <attribute ref="E1">
-                        <allowed-value min="180"/>
+                    <attribute ref="A1">
+                        <allowed-value equal="Hyperglycemia"/>
+                        <allowed-value equal="Hypoglycemia"/>
                     </attribute>
                 </anchor>
                 <event select='first'>
@@ -29,7 +31,7 @@
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="8m" trapezeB="8m" trapezeC="8h" trapezeD="24h"/>
+                        <trapez trapezA="8m" trapezB="8m" trapezC="8h" trapezD="24h"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>

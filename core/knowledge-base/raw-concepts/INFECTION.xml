@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="INFECTION" concept-type="raw-boolean">
+    <categories>Complications</categories>
+    <description>Infection event. Calculated during ETL based on clinical and laboratory data indicating infection presence.</description>
+    <attributes>
+        <attribute name="INFECTION" type="boolean"/>
+    </attributes>
+</raw-concept>

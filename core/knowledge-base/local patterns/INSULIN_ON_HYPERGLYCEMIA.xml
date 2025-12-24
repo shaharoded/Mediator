@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <pattern name="INSULIN_ON_HYPERGLYCEMIA_PATTERN" concept-type="local-pattern">
     <categories>RoutineTreatment</categories>
-    <description>Captures if INSULIN (BASAL/BOLUS/IV) was performed within reasonable time after high glucose measured</description>
+    <description>Captures if INSULIN (BASAL/BOLUS/IV) was performed within the high glucose window</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
     <derived-from>
         <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="A1"/>
@@ -17,7 +17,7 @@
         <rule>
             <!-- Relation between 2 KBTA objects -->
             <!-- max-distance is not the recommended distance, but the max acceptable one -->
-            <temporal-relation how='overlap'>
+            <temporal-relation how='overlap' existence-compliance='true'>
                 <anchor>
                     <attribute ref="A1">
                         <allowed-value equal="True"/>

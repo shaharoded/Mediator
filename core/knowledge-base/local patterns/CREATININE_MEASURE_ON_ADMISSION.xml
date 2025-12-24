@@ -36,7 +36,7 @@
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="48h" trapezD="72h"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>

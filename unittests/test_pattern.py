@@ -45,6 +45,17 @@ RAW_ADMISSION_XML = """\
 </raw-concept>
 """
 
+RAW_RELEASE_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="RELEASE_EVENT" concept-type="raw-boolean">
+  <categories>Admin</categories>
+  <description>Release</description>
+  <attributes>
+    <attribute name="RELEASE_EVENT" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+
 RAW_GLUCOSE_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="GLUCOSE_MEASURE" concept-type="raw-numeric">
@@ -181,7 +192,7 @@ PATTERN_TIME_COMPLIANCE_XML = """\
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="8h" trapezeD="12h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="8h" trapezD="12h"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>
@@ -224,7 +235,7 @@ PATTERN_VALUE_COMPLIANCE_XML = """\
                     </target>
                     <function name="mul">
                         <parameter ref="P1"/>
-                        <trapeze trapezeA="0" trapezeB="0.2" trapezeC="0.6" trapezeD="1"/>
+                        <trapez trapezA="0" trapezB="0.2" trapezC="0.6" trapezD="1"/>
                     </function>
                 </value-constraint-compliance>
             </compliance-function>
@@ -295,7 +306,7 @@ PATTERN_MULTIPLE_RULES_XML = """\
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="8h" trapezeD="12h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="8h" trapezD="12h"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>
@@ -316,7 +327,7 @@ PATTERN_MULTIPLE_RULES_XML = """\
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="12h" trapezeC="24h" trapezeD="36h"/>
+                        <trapez trapezA="0h" trapezB="12h" trapezC="24h" trapezD="36h"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>
@@ -337,7 +348,7 @@ PATTERN_OVERLAP_XML = """\
     </derived-from>
     <abstraction-rules>
         <rule>
-            <temporal-relation how='overlap'>
+            <temporal-relation how='overlap' existence-compliance='true'>
                 <anchor>
                     <attribute ref="A1">
                         <allowed-value equal="True"/>
@@ -354,6 +365,75 @@ PATTERN_OVERLAP_XML = """\
 </pattern>
 """
 
+# Pattern: overlap with existence-compliance enforced (no compliance function)
+PATTERN_OVERLAP_EXISTENCE_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="INSULIN_DURING_ADMISSION_EXISTENCE" concept-type="local-pattern">
+    <categories>QA</categories>
+    <description>Overlap pattern with existence compliance (score emitted even without compliance-function)</description>
+    <derived-from>
+        <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="INSULIN_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <temporal-relation how='overlap' existence-compliance='true'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+
+# Pattern: overlap + existence compliance + value compliance (ensure value score is computed)
+PATTERN_OVERLAP_EXISTENCE_VALUE_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="INSULIN_DURING_ADMISSION_EXISTENCE_VALUE" concept-type="local-pattern">
+    <categories>QA</categories>
+    <description>Overlap + existence-compliance + value compliance on insulin dosage</description>
+    <derived-from>
+        <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="INSULIN_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule>
+            <temporal-relation how='overlap' existence-compliance='true'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+
+            <compliance-function>
+                <value-constraint-compliance>
+                    <target>
+                        <attribute ref="E1"/>
+                    </target>
+                    <function name="id">
+                        <!-- Full compliance for [0..10], ramps down to 0 by 20 -->
+                        <trapez trapezA="0" trapezB="0" trapezC="10" trapezD="20"/>
+                    </function>
+                </value-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
 
 # -----------------------------
 # Pytest Fixtures
@@ -454,6 +534,34 @@ def repo_overlap_pattern(tmp_path: Path) -> TAKRepository:
     repo.register(LocalPattern.parse(pattern_path))
     return repo
 
+@pytest.fixture
+def repo_overlap_existence_pattern(tmp_path: Path) -> TAKRepository:
+    """Setup: overlap pattern with existence-compliance=true (no compliance function)."""
+    admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
+    insulin_path = write_xml(tmp_path, "INSULIN.xml", RAW_INSULIN_XML)
+    pattern_path = write_xml(tmp_path, "PATTERN_OVERLAP_EXISTENCE.xml", PATTERN_OVERLAP_EXISTENCE_XML)
+
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(admission_path))
+    repo.register(RawConcept.parse(insulin_path))
+    set_tak_repository(repo)
+    repo.register(LocalPattern.parse(pattern_path))
+    return repo
+
+
+@pytest.fixture
+def repo_overlap_existence_value_pattern(tmp_path: Path) -> TAKRepository:
+    """Setup: overlap pattern with existence-compliance=true + value compliance."""
+    admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
+    insulin_path = write_xml(tmp_path, "INSULIN.xml", RAW_INSULIN_XML)
+    pattern_path = write_xml(tmp_path, "PATTERN_OVERLAP_EXISTENCE_VALUE.xml", PATTERN_OVERLAP_EXISTENCE_VALUE_XML)
+
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(admission_path))
+    repo.register(RawConcept.parse(insulin_path))
+    set_tak_repository(repo)
+    repo.register(LocalPattern.parse(pattern_path))
+    return repo
 
 # -----------------------------
 # End-to-End Pattern Tests (Using Actual KB Patterns)
@@ -808,8 +916,8 @@ def test_pattern_validation_requires_max_distance_for_before(tmp_path: Path):
     assert pattern is not None, "Pattern should parse successfully with default min-distance"
 
 
-def test_pattern_validation_max_distance_ge_trapezeD(tmp_path: Path):
-    """Validation fails if max-distance < trapezeD."""
+def test_pattern_validation_max_distance_ge_trapezD(tmp_path: Path):
+    """Validation fails if max-distance < trapezD."""
     bad_pattern_xml = PATTERN_TIME_COMPLIANCE_XML.replace("max-distance='12h'", "max-distance='6h'")
     admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
     glucose_path = write_xml(tmp_path, "GLUCOSE.xml", RAW_GLUCOSE_XML)
@@ -820,7 +928,7 @@ def test_pattern_validation_max_distance_ge_trapezeD(tmp_path: Path):
     repo.register(RawConcept.parse(glucose_path))
     set_tak_repository(repo)
     
-    with pytest.raises(ValueError, match="max-distance.*must be >= .*trapezeD"):
+    with pytest.raises(ValueError, match="max-distance.*must be >= .*trapezD"):
         LocalPattern.parse(pattern_path)
 
 
@@ -1084,46 +1192,81 @@ def test_time_compliance_full(repo_time_compliance):
 
 
 def test_time_compliance_partial(repo_time_compliance, tmp_path):
-    """Time compliance: glucose at 10h (in [8h, 12h] → score=0.5), with min-distance."""
-    # Modify the pattern to include min-distance
-    pattern_xml_with_min_distance = PATTERN_TIME_COMPLIANCE_XML.replace(
+    # First pattern variant
+    pattern_xml_1 = PATTERN_TIME_COMPLIANCE_XML.replace(
         "max-distance='12h'",
         "min-distance='6h' max-distance='12h'"
     ).replace(
         'name="GLUCOSE_ON_ADMISSION_TIME"',
         'name="GLUCOSE_ON_ADMISSION_TIME_MIN_DISTANCE"'
-    ).replace('<trapeze trapezeA="0h" trapezeB="0h" trapezeC="8h" trapezeD="12h"/>', 
-              '<trapeze trapezeA="6h" trapezeB="6h" trapezeC="8h" trapezeD="12h"/>')
-    pattern_path = write_xml(tmp_path, "PATTERN_TIME_MIN_DISTANCE.xml", pattern_xml_with_min_distance)
+    ).replace('<trapez trapezA="0h" trapezB="0h" trapezC="8h" trapezD="12h"/>', 
+              '<trapez trapezA="6h" trapezB="6h" trapezC="8h" trapezD="12h"/>')
+    pattern_path_1 = write_xml(tmp_path, "PATTERN_TIME_MIN_DISTANCE_1.xml", pattern_xml_1)
 
-    repo = repo_time_compliance
-    pattern_tak = LocalPattern.parse(pattern_path)
-    repo.register(pattern_tak)
+    repo1 = TAKRepository()
+    # Register required TAKs
+    for tak_name in ["ADMISSION_EVENT", "GLUCOSE_MEASURE"]:
+        repo1.register(repo_time_compliance.get(tak_name))
+    pattern_tak_1 = LocalPattern.parse(pattern_path_1)
+    repo1.register(pattern_tak_1)
 
-    admission_tak = repo.get("ADMISSION_EVENT")
-    glucose_tak = repo.get("GLUCOSE_MEASURE")
-    pattern_tak = repo.get("GLUCOSE_ON_ADMISSION_TIME_MIN_DISTANCE")
+    admission_tak = repo1.get("ADMISSION_EVENT")
+    glucose_tak = repo1.get("GLUCOSE_MEASURE")
+    pattern_tak = repo1.get("GLUCOSE_ON_ADMISSION_TIME_MIN_DISTANCE")
 
     df_raw = pd.DataFrame([
         (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
-        (1, "GLUCOSE_LAB", make_ts("13:00"), make_ts("13:00"), 120),  # 5h gap (below min-distance)
-        (1, "GLUCOSE_LAB", make_ts("18:00"), make_ts("18:00"), 150),  # 10h gap (within range)
+        (1, "GLUCOSE_LAB", make_ts("13:00"), make_ts("13:00"), 120),
+        (1, "GLUCOSE_LAB", make_ts("18:00"), make_ts("18:00"), 150),
     ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
 
     df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
     df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
     df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
-
     df_out = pattern_tak.apply(df_input)
 
     assert len(df_out) == 1
     row = df_out.iloc[0]
     assert row["Value"] == "Partial"
-    # Score = (12h - 10h) / (12h - 8h) = 2/4 = 0.5
     assert row["TimeConstraintScore"] == pytest.approx(0.5)
 
+    # Second pattern variant
+    pattern_xml_2 = PATTERN_TIME_COMPLIANCE_XML.replace(
+        "max-distance='12h'",
+        "min-distance='2h' max-distance='12h'"
+    ).replace(
+        'name="GLUCOSE_ON_ADMISSION_TIME"',
+        'name="GLUCOSE_ON_ADMISSION_TIME_MIN_DISTANCE"'
+    ).replace('<trapez trapezA="0h" trapezB="0h" trapezC="8h" trapezD="12h"/>', 
+              '<trapez trapezA="2h" trapezB="6h" trapezC="8h" trapezD="12h"/>')
+    pattern_path_2 = write_xml(tmp_path, "PATTERN_TIME_MIN_DISTANCE_2.xml", pattern_xml_2)
 
-def test_time_compliance_zero(repo_time_compliance):
+    repo2 = TAKRepository()
+    for tak_name in ["ADMISSION_EVENT", "GLUCOSE_MEASURE"]:
+        repo2.register(repo_time_compliance.get(tak_name))
+    pattern_tak_2 = LocalPattern.parse(pattern_path_2)
+    repo2.register(pattern_tak_2)
+
+    admission_tak = repo2.get("ADMISSION_EVENT")
+    glucose_tak = repo2.get("GLUCOSE_MEASURE")
+    pattern_tak = repo2.get("GLUCOSE_ON_ADMISSION_TIME_MIN_DISTANCE")
+
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("12:00"), make_ts("13:00"), 120),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
+    df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
+    df_out = pattern_tak.apply(df_input)
+
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["Value"] == "Partial"
+    assert row["TimeConstraintScore"] == pytest.approx(0.5)
+
+def test_time_compliance_zero(repo_time_compliance, tmp_path):
     """Time compliance: glucose at 13h (outside [0h, 12h] → score=0.0, but pattern still found)."""
     admission_tak = repo_time_compliance.get("ADMISSION_EVENT")
     glucose_tak = repo_time_compliance.get("GLUCOSE_MEASURE")
@@ -1143,6 +1286,61 @@ def test_time_compliance_zero(repo_time_compliance):
     # Pattern NOT found because max-distance=12h (13h gap exceeds it)
     assert len(df_out) == 1
     assert df_out.iloc[0]["Value"] == "False"
+
+    # Modify the pattern to include A -> B slope
+    pattern_xml_with_min_distance = PATTERN_TIME_COMPLIANCE_XML.replace(
+        "max-distance='12h'",
+        "min-distance='3h' max-distance='12h'"
+    ).replace(
+        'name="GLUCOSE_ON_ADMISSION_TIME"',
+        'name="GLUCOSE_ON_ADMISSION_TIME_MIN_DISTANCE_1"'
+    ).replace('<trapez trapezA="0h" trapezB="0h" trapezC="8h" trapezD="12h"/>', 
+              '<trapez trapezA="3h" trapezB="6h" trapezC="8h" trapezD="12h"/>')
+    pattern_path = write_xml(tmp_path, "PATTERN_TIME_MIN_DISTANCE_1.xml", pattern_xml_with_min_distance)
+
+    pattern_tak = LocalPattern.parse(pattern_path)
+    repo_time_compliance.register(pattern_tak)
+
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 120),  # 2h gap (just outside trapezA)
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
+    df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
+    
+    df_out = pattern_tak.apply(df_input)
+
+    # Pattern NOT found because max-distance=12h (13h gap exceeds it)
+    assert len(df_out) == 1
+    assert df_out.iloc[0]["Value"] == "False"
+
+    # Modify the pattern to have C == D, meaning out of scope should be 1.0 score
+    pattern_xml_with_min_distance = PATTERN_TIME_COMPLIANCE_XML.replace(
+        'name="GLUCOSE_ON_ADMISSION_TIME"',
+        'name="GLUCOSE_ON_ADMISSION_TIME_MIN_DISTANCE_2"'
+    ).replace('<trapez trapezA="0h" trapezB="0h" trapezC="8h" trapezD="12h"/>', 
+              '<trapez trapezA="3h" trapezB="6h" trapezC="12h" trapezD="12h"/>')
+    pattern_path = write_xml(tmp_path, "PATTERN_TIME_MIN_DISTANCE_2.xml", pattern_xml_with_min_distance)
+
+    pattern_tak = LocalPattern.parse(pattern_path)
+    repo_time_compliance.register(pattern_tak)
+
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("21:00"), make_ts("20:00"), 120),  # 13h gap (just outside trapezD)
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
+    df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
+    
+    df_out = pattern_tak.apply(df_input)
+
+    # Pattern NOT found because max-distance=12h (13h gap exceeds it), but score should be 1.0 since punishment is on too early only
+    assert len(df_out) == 1
+    assert df_out.iloc[0]["Value"] == "True"
 
 
 # -----------------------------
@@ -1409,6 +1607,120 @@ def test_overlap_pattern_not_found(repo_overlap_pattern):
     assert df_out.iloc[0]["Value"] == "False"
 
 
+def test_overlap_existence_found_emits_time_score(repo_overlap_existence_pattern):
+    admission_tak = repo_overlap_existence_pattern.get("ADMISSION_EVENT")
+    insulin_tak = repo_overlap_existence_pattern.get("INSULIN_BITZUA")
+    pattern_tak = repo_overlap_existence_pattern.get("INSULIN_DURING_ADMISSION_EXISTENCE")
+
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("12:00"), "True"),
+        (1, "INSULIN_DOSAGE", make_ts("09:00"), make_ts("09:00"), 25),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_insulin = insulin_tak.apply(df_raw[df_raw["ConceptName"] == "INSULIN_DOSAGE"])
+    df_in = pd.concat([df_admission, df_insulin], ignore_index=True)
+
+    df_out = pattern_tak.apply(df_in)
+
+    assert len(df_out) == 1
+    assert df_out.iloc[0]["Value"] == "True"
+    assert df_out.iloc[0]["TimeConstraintScore"] == 1.0 # Should have time score even without time compliance
+
+def test_overlap_existence_not_found_returns_false_row_with_zero_time_score(repo_overlap_existence_pattern):
+    admission_tak = repo_overlap_existence_pattern.get("ADMISSION_EVENT")
+    insulin_tak = repo_overlap_existence_pattern.get("INSULIN_BITZUA")
+    pattern_tak = repo_overlap_existence_pattern.get("INSULIN_DURING_ADMISSION_EXISTENCE")
+
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("12:00"), "True"),
+        (1, "INSULIN_DOSAGE", make_ts("14:00"), make_ts("14:00"), 25),  # no overlap
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_insulin = insulin_tak.apply(df_raw[df_raw["ConceptName"] == "INSULIN_DOSAGE"])
+    df_in = pd.concat([df_admission, df_insulin], ignore_index=True)
+
+    df_out = pattern_tak.apply(df_in)
+
+    assert len(df_out) == 1
+    assert df_out.iloc[0]["Value"] == "False"
+    # Existence compliance forced under TimeConstraintScore:
+    assert df_out.iloc[0]["TimeConstraintScore"] == 0.0
+
+def test_overlap_existence_value_compliance_computed_when_found(repo_overlap_existence_value_pattern):
+    admission_tak = repo_overlap_existence_value_pattern.get("ADMISSION_EVENT")
+    insulin_tak = repo_overlap_existence_value_pattern.get("INSULIN_BITZUA")
+    pattern_tak = repo_overlap_existence_value_pattern.get("INSULIN_DURING_ADMISSION_EXISTENCE_VALUE")
+
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("12:00"), "True"),
+        (1, "INSULIN_DOSAGE", make_ts("09:00"), make_ts("09:00"), 5),  # should be full compliance (<=10)
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_insulin = insulin_tak.apply(df_raw[df_raw["ConceptName"] == "INSULIN_DOSAGE"])
+    df_in = pd.concat([df_admission, df_insulin], ignore_index=True)
+
+    df_out = pattern_tak.apply(df_in)
+
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["Value"] == "True"
+    assert row["TimeConstraintScore"] == 1.0
+    assert row["ValueConstraintScore"] is not None
+    assert row["ValueConstraintScore"] == 1.0
+
+def test_overlap_existence_value_compliance_partial_when_value_in_rampdown(repo_overlap_existence_value_pattern):
+    admission_tak = repo_overlap_existence_value_pattern.get("ADMISSION_EVENT")
+    insulin_tak = repo_overlap_existence_value_pattern.get("INSULIN_BITZUA")
+    pattern_tak = repo_overlap_existence_value_pattern.get("INSULIN_DURING_ADMISSION_EXISTENCE_VALUE")
+
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("12:00"), "True"),
+        (1, "INSULIN_DOSAGE", make_ts("09:00"), make_ts("09:00"), 15),  # ramp-down zone (10..20)
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_insulin = insulin_tak.apply(df_raw[df_raw["ConceptName"] == "INSULIN_DOSAGE"])
+    df_in = pd.concat([df_admission, df_insulin], ignore_index=True)
+
+    df_out = pattern_tak.apply(df_in)
+
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["TimeConstraintScore"] == 1.0
+    assert row["ValueConstraintScore"] is not None
+    assert 0.0 < row["ValueConstraintScore"] < 1.0
+    # Depending on your combined-score logic, this should typically be Partial:
+    assert row["Value"] == "Partial"
+
+def test_overlap_existence_value_compliance_not_found_has_zero_scores(repo_overlap_existence_value_pattern):
+    admission_tak = repo_overlap_existence_value_pattern.get("ADMISSION_EVENT")
+    insulin_tak = repo_overlap_existence_value_pattern.get("INSULIN_BITZUA")
+    pattern_tak = repo_overlap_existence_value_pattern.get("INSULIN_DURING_ADMISSION_EXISTENCE_VALUE")
+
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("12:00"), "True"),
+        (1, "INSULIN_DOSAGE", make_ts("14:00"), make_ts("14:00"), 5),  # no overlap
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+
+    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_insulin = insulin_tak.apply(df_raw[df_raw["ConceptName"] == "INSULIN_DOSAGE"])
+    df_in = pd.concat([df_admission, df_insulin], ignore_index=True)
+
+    df_out = pattern_tak.apply(df_in)
+
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["Value"] == "False"
+    assert row["TimeConstraintScore"] == 0.0
+
+    # Decide your policy here:
+    # If you implemented "missed anchor => 0.0 value score when value compliance exists", assert it:
+    assert row["ValueConstraintScore"] == 0.0
+
+
 # -----------------------------
 # Tests: Edge Cases
 # -----------------------------
@@ -1490,7 +1802,7 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, t
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="24h" trapezeD="48h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="24h" trapezD="48h"/>
                     </function>
                 </time-constraint-compliance>
                 <value-constraint-compliance>
@@ -1499,7 +1811,7 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, t
                     </target>
                     <function name="mul">
                         <parameter ref="P1"/>
-                        <trapeze trapezeA="0" trapezeB="0.2" trapezeC="0.6" trapezeD="1"/>
+                        <trapez trapezA="0" trapezB="0.2" trapezC="0.6" trapezD="1"/>
                     </function>
                 </value-constraint-compliance>
             </compliance-function>
@@ -1604,7 +1916,186 @@ def test_pattern_combined_score_averages_time_and_value(repo_value_compliance, t
     print(f"   Value score: {row['ValueConstraintScore']:.3f}")
     print(f"   Combined value: {row['Value']}")
 
+def test_stop_antidiabetics_on_hypoglycemia_time_compliance_backward_missing_is_good(tmp_path: Path):
+    """
+    Pattern expectation:
+    - Antidiabetics within 24h after hypoglycemia -> Partial (0 < score < 1)
+    - Antidiabetics within 72h after hypoglycemia -> True (score == 1)
+    - No antidiabetics at all (unfulfilled anchor) -> True (missing_score == 1)
+    """
 
+    # -----------------------------
+    # Minimal TAK XMLs
+    # -----------------------------
+    raw_glucose_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="GLUCOSE_MEASURE" concept-type="raw-numeric">
+  <categories>Measurements</categories>
+  <description>Glucose measure</description>
+  <attributes>
+    <attribute name="GLUCOSE_MEASURE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="600"/>
+      </numeric-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+
+    disglycemia_event_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="DISGLYCEMIA_EVENT">
+  <categories>Measurements</categories>
+  <description>Disglycemia event</description>
+  <derived-from>
+    <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="G1"/>
+  </derived-from>
+  <abstraction-rules>
+    <rule value="Hypoglycemia" operator="or">
+      <attribute ref="G1">
+        <allowed-value max="70"/>
+      </attribute>
+    </rule>
+  </abstraction-rules>
+</event>
+"""
+
+    # ANTIDIABETIC_BITZUA raw boolean
+    raw_antidiabetic_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ANTIDIABETIC_BITZUA" concept-type="raw-boolean">
+  <categories>Medications</categories>
+  <description>Antidiabetic medication administration</description>
+  <attributes>
+    <attribute name="ANTIDIABETIC_BITZUA" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+
+    pattern_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="STOP_ANTIDIABETICS_ON_HYPOGLYCEMIA_PATTERN" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Captures if perscribed antidiabetic medications were stopped for 72 hours after hypoglycemia event</description>
+    <derived-from>
+        <attribute name="DISGLYCEMIA_EVENT" tak="event" ref="A1"/>
+        <attribute name="ANTIDIABETIC_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+
+    <abstraction-rules>
+        <rule>
+            <temporal-relation how='before' min-distance="0h" max-distance='14d'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="Hypoglycemia"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapez trapezA="0h" trapezB="72h" trapezC="14d" trapezD="14d"/>
+                    </function>
+                </time-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
+"""
+
+    # -----------------------------
+    # Write XMLs
+    # -----------------------------
+    write_xml(tmp_path, "GLUCOSE_MEASURE.xml", raw_glucose_xml)
+    write_xml(tmp_path, "DISGLYCEMIA_EVENT.xml", disglycemia_event_xml)
+    write_xml(tmp_path, "ANTIDIABETIC_BITZUA.xml", raw_antidiabetic_xml)
+    write_xml(tmp_path, "PATTERN_STOP_ANTI.xml", pattern_xml)
+
+    # -----------------------------
+    # Build repository
+    # -----------------------------
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(tmp_path / "GLUCOSE_MEASURE.xml"))
+    repo.register(RawConcept.parse(tmp_path / "ANTIDIABETIC_BITZUA.xml"))
+    set_tak_repository(repo)
+
+    from core.tak.event import Event
+    repo.register(Event.parse(tmp_path / "DISGLYCEMIA_EVENT.xml"))
+    repo.register(LocalPattern.parse(tmp_path / "PATTERN_STOP_ANTI.xml"))
+
+    glucose_raw = repo.get("GLUCOSE_MEASURE")
+    disglycemia_event = repo.get("DISGLYCEMIA_EVENT")
+    anti = repo.get("ANTIDIABETIC_BITZUA")
+    pattern = repo.get("STOP_ANTIDIABETICS_ON_HYPOGLYCEMIA_PATTERN")
+
+    # Helper: base time
+    t0 = make_ts("08:00")
+
+    # -----------------------------
+    # Case 1: antidiabetics within 24h -> Partial (0 < score < 1)
+    # -----------------------------
+    df_raw = pd.DataFrame([
+        (1000, "GLUCOSE_MEASURE", t0, t0, 60),                           # hypoglycemia at t0
+        (1000, "ANTIDIABETIC_BITZUA", t0 + pd.Timedelta(hours=24),       # given at +24h
+         t0 + pd.Timedelta(hours=24), "True"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+
+    df_glucose = glucose_raw.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_MEASURE"])
+    df_event = disglycemia_event.apply(df_glucose)
+    df_anti = anti.apply(df_raw[df_raw["ConceptName"] == "ANTIDIABETIC_BITZUA"])
+    df_in = pd.concat([df_event, df_anti], ignore_index=True)
+
+    out = pattern.apply(df_in)
+    assert len(out) == 1
+    assert out.iloc[0]["Value"] == "Partial"
+    assert out.iloc[0]["TimeConstraintScore"] is not None
+    assert 0.0 < float(out.iloc[0]["TimeConstraintScore"]) < 1.0
+
+    # -----------------------------
+    # Case 2: antidiabetics within 72h -> True (score == 1)
+    # -----------------------------
+    df_raw2 = pd.DataFrame([
+        (1000, "GLUCOSE_MEASURE", t0, t0, 60),
+        (1000, "ANTIDIABETIC_BITZUA", t0 + pd.Timedelta(hours=72),
+         t0 + pd.Timedelta(hours=72), "True"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+
+    df_glucose2 = glucose_raw.apply(df_raw2[df_raw2["ConceptName"] == "GLUCOSE_MEASURE"])
+    df_event2 = disglycemia_event.apply(df_glucose2)
+    df_anti2 = anti.apply(df_raw2[df_raw2["ConceptName"] == "ANTIDIABETIC_BITZUA"])
+    df_in2 = pd.concat([df_event2, df_anti2], ignore_index=True)
+
+    out2 = pattern.apply(df_in2)
+    assert len(out2) == 1
+    assert out2.iloc[0]["Value"] == "True"
+    assert float(out2.iloc[0]["TimeConstraintScore"]) == 1.0
+
+    # -----------------------------
+    # Case 3: no antidiabetics at all -> unfulfilled anchor -> True (missing_score == 1)
+    # -----------------------------
+    df_raw3 = pd.DataFrame([
+        (1000, "GLUCOSE_MEASURE", t0, t0, 60),
+        # no ANTIDIABETIC_BITZUA rows
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+
+    df_glucose3 = glucose_raw.apply(df_raw3[df_raw3["ConceptName"] == "GLUCOSE_MEASURE"])
+    df_event3 = disglycemia_event.apply(df_glucose3)
+    df_in3 = df_event3  # only the anchor stream
+
+    out3 = pattern.apply(df_in3)
+
+    # With your current logic, this should emit an unfulfilled anchor row (not NaT),
+    # and since trapez is backward for time, missing_score should be 1.0 -> Value "True"
+    assert len(out3) == 1
+    assert out3.iloc[0]["Value"] == "True"
+    assert float(out3.iloc[0]["TimeConstraintScore"]) == 1.0
+    
 # -----------------------------
 # Tests: Actual KB Patterns (Self-Contained Debug Tests)
 # -----------------------------
@@ -1782,7 +2273,7 @@ def test_debug_insulin_on_admission_basic(tmp_path: Path):
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="48h" trapezD="72h"/>
                     </function>
                 </time-constraint-compliance>
                 <value-constraint-compliance>
@@ -1792,7 +2283,7 @@ def test_debug_insulin_on_admission_basic(tmp_path: Path):
                     </target>
                     <function name="mul">
                         <parameter ref="P1"/>
-                        <trapeze trapezeA="0" trapezeB="0.2" trapezeC="0.6" trapezeD="1"/>
+                        <trapez trapezA="0" trapezB="0.2" trapezC="0.6" trapezD="1"/>
                     </function>
                 </value-constraint-compliance>
             </compliance-function>
@@ -1986,7 +2477,7 @@ def test_debug_glucose_on_admission_multi_rule(tmp_path: Path):
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="8h" trapezeD="12h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="8h" trapezD="12h"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>
@@ -2007,7 +2498,7 @@ def test_debug_glucose_on_admission_multi_rule(tmp_path: Path):
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="24h" trapezeD="36h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="24h" trapezD="36h"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>
@@ -2222,7 +2713,7 @@ def test_debug_insulin_on_high_glucose_context_clipping(tmp_path: Path):
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="1h" trapezeD="2h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="1h" trapezD="2h"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>
@@ -2303,17 +2794,28 @@ GLOBAL_PATTERN_SIMPLE_XML = """\
     <derived-from>
         <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/> <!-- Anchor for start time -->
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="RELEASE_EVENT" tak="raw-concept" idx="0" ref="C1"/>
     </derived-from>
     <abstraction-rules>
         <rule>
             <!-- Start 0h from anchor, end 48h from anchor. Window size 24h. -->
             <!-- Expecting 2 windows: [0, 24], [24, 48] -->
             <cyclic start='0h' end='48h' time-window='24h' min-occurrences="1" max-occurrences="10">
+                <initiator>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </initiator>
                 <event>
                     <attribute ref="E1">
                         <allowed-value min="0"/>
                     </attribute>
                 </event>
+                <clipper>
+                    <attribute ref="C1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </clipper>
             </cyclic>
         </rule>
     </abstraction-rules>
@@ -2328,21 +2830,32 @@ GLOBAL_PATTERN_CYCLIC_COMPLIANCE_XML = """\
     <derived-from>
         <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="RELEASE_EVENT" tak="raw-concept" idx="0" ref="C1"/>
     </derived-from>
     <abstraction-rules>
         <rule>
-            <cyclic start='0h' end='24h' time-window='24h' min-occurrences="1" max-occurrences="10">
+            <cyclic start='0h' end='24h' time-window='12h' min-occurrences="1" max-occurrences="10">
+                <initiator>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </initiator>
                 <event>
                     <attribute ref="E1">
                         <allowed-value min="0"/>
                     </attribute>
                 </event>
+                <clipper>
+                    <attribute ref="C1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </clipper>
             </cyclic>
             <compliance-function>
                 <cyclic-constraint-compliance>
                     <function name="id">
                         <!-- 1 check = 0.5 score, 2 checks = 1.0 score -->
-                        <trapeze trapezeA="0" trapezeB="2" trapezeC="10" trapezeD="100"/>
+                        <trapez trapezA="0" trapezB="2" trapezC="10" trapezD="100"/>
                     </function>
                 </cyclic-constraint-compliance>
             </compliance-function>
@@ -2359,15 +2872,26 @@ GLOBAL_PATTERN_VALUE_COMPLIANCE_XML = """\
     <derived-from>
         <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="RELEASE_EVENT" tak="raw-concept" idx="0" ref="C1"/>
     </derived-from>
     <abstraction-rules>
         <rule>
-            <cyclic start='0h' end='24h' time-window='24h' min-occurrences="1" max-occurrences="10">
+            <cyclic start='0h' end='24h' time-window='2h' min-occurrences="1" max-occurrences="10">
+                <initiator>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </initiator>
                 <event>
                     <attribute ref="E1">
                         <allowed-value min="0"/>
                     </attribute>
                 </event>
+                <clipper>
+                    <attribute ref="C1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </clipper>
             </cyclic>
             <compliance-function>
                 <value-constraint-compliance>
@@ -2376,7 +2900,7 @@ GLOBAL_PATTERN_VALUE_COMPLIANCE_XML = """\
                     </target>
                     <function name="id">
                         <!-- Value < 140 is score 1.0. Value 200 is score 0.0 -->
-                        <trapeze trapezeA="0" trapezeB="0" trapezeC="140" trapezeD="200"/>
+                        <trapez trapezA="0" trapezB="0" trapezC="140" trapezD="200"/>
                     </function>
                 </value-constraint-compliance>
             </compliance-function>
@@ -2394,6 +2918,7 @@ GLOBAL_PATTERN_CONTEXT_XML = """\
         <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
         <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
+        <attribute name="RELEASE_EVENT" tak="raw-concept" idx="0" ref="C2"/>
     </derived-from>
     <abstraction-rules>
         <rule>
@@ -2403,11 +2928,21 @@ GLOBAL_PATTERN_CONTEXT_XML = """\
                 </attribute>
             </context>
             <cyclic start='0h' end='48h' time-window='24h' min-occurrences="1" max-occurrences="10">
+                <initiator>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </initiator>
                 <event>
                     <attribute ref="E1">
                         <allowed-value min="0"/>
                     </attribute>
                 </event>
+                <clipper>
+                    <attribute ref="C2">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </clipper>
             </cyclic>
         </rule>
     </abstraction-rules>
@@ -2420,16 +2955,28 @@ GLOBAL_PATTERN_IGNORE_UNFULFILLED_ANCHORS_XML = """\
         <categories>Test</categories>
         <description>Should fail</description>
         <derived-from>
+            <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/>
             <attribute name="SOME_EVENT" tak="raw-concept" idx="0" ref="E1"/>
+            <attribute name="RELEASE_EVENT" tak="raw-concept" idx="0" ref="C2"/>
         </derived-from>
         <abstraction-rules>
             <rule>
                 <cyclic-relation min-count="1" max-count="10" window="24h">
+                    <initiator>
+                        <attribute ref="A1">
+                            <allowed-value equal="True"/>
+                        </attribute>
+                    </initiator>
                     <event>
                         <attribute ref="E1">
                             <allowed-value min="0"/>
                         </attribute>
                     </event>
+                    <clipper>
+                        <attribute ref="C2">
+                            <allowed-value equal="True"/>
+                        </attribute>
+                    </clipper>
                 </cyclic-relation>
             </rule>
         </abstraction-rules>
@@ -2443,13 +2990,16 @@ GLOBAL_PATTERN_IGNORE_UNFULFILLED_ANCHORS_XML = """\
 @pytest.fixture
 def repo_global_simple(tmp_path: Path) -> TAKRepository:
     from core.tak.pattern import GlobalPattern
+
     admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
     glucose_path = write_xml(tmp_path, "GLUCOSE.xml", RAW_GLUCOSE_XML)
+    release_path = write_xml(tmp_path, "RELEASE.xml", RAW_RELEASE_XML)
     pattern_path = write_xml(tmp_path, "GLOBAL_SIMPLE.xml", GLOBAL_PATTERN_SIMPLE_XML)
-    
+
     repo = TAKRepository()
     repo.register(RawConcept.parse(admission_path))
     repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(release_path))
     set_tak_repository(repo)
     repo.register(GlobalPattern.parse(pattern_path))
     return repo
@@ -2459,11 +3009,13 @@ def repo_global_cyclic_compliance(tmp_path: Path) -> TAKRepository:
     from core.tak.pattern import GlobalPattern
     admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
     glucose_path = write_xml(tmp_path, "GLUCOSE.xml", RAW_GLUCOSE_XML)
+    release_path = write_xml(tmp_path, "RELEASE.xml", RAW_RELEASE_XML)
     pattern_path = write_xml(tmp_path, "GLOBAL_CYCLIC.xml", GLOBAL_PATTERN_CYCLIC_COMPLIANCE_XML)
     
     repo = TAKRepository()
     repo.register(RawConcept.parse(admission_path))
     repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(release_path))
     set_tak_repository(repo)
     repo.register(GlobalPattern.parse(pattern_path))
     return repo
@@ -2512,71 +3064,114 @@ def test_global_pattern_rejects_ignore_unfulfilled_anchors(tmp_path: Path):
         GlobalPattern.parse(xml_path)
 
 def test_global_pattern_basic_windows(repo_global_simple):
-    """
-    Test basic global pattern:
-    - 2 windows of 24h each (0-24, 24-48).
-    - Events present in both.
-    - Expect 2 True instances.
-    """
-    admission_tak = repo_global_simple.get("ADMISSION_EVENT") # Actually raw-concept in fixture
+    admission_tak = repo_global_simple.get("ADMISSION_EVENT")
     glucose_tak = repo_global_simple.get("GLUCOSE_MEASURE")
+    release_tak = repo_global_simple.get("RELEASE_EVENT")
     pattern_tak = repo_global_simple.get("ROUTINE_VITALS_CHECK")
-    
-    # Admission at 08:00.
-    # Window 1: 08:00 -> 08:00+1d.
-    # Window 2: 08:00+1d -> 08:00+2d.
+
     df_raw = pd.DataFrame([
         (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
-        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100),       # In Window 1
-        (1, "GLUCOSE_LAB", make_ts("10:00", day=1), make_ts("10:00", day=1), 100), # In Window 2
+        (1, "RELEASE_EVENT", make_ts("08:00", day=2), make_ts("08:00", day=2), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100),
+        (1, "GLUCOSE_LAB", make_ts("10:00", day=1), make_ts("10:00", day=1), 100),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
-    
+
     df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
+    df_release = release_tak.apply(df_raw[df_raw["ConceptName"] == "RELEASE_EVENT"])
     df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
-    df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
-    
+
+    df_input = pd.concat([df_admission, df_release, df_glucose], ignore_index=True)
     df_out = pattern_tak.apply(df_input)
-    
+
     assert len(df_out) == 2
-    
-    # Window 1
-    row1 = df_out.iloc[0]
-    assert row1["StartDateTime"] == make_ts("08:00")
-    assert row1["EndDateTime"] == make_ts("08:00", day=1)
-    assert row1["Value"] == "True"
-    
-    # Window 2
-    row2 = df_out.iloc[1]
-    assert row2["StartDateTime"] == make_ts("08:00", day=1)
-    assert row2["EndDateTime"] == make_ts("08:00", day=2)
-    assert row2["Value"] == "True"
+    assert df_out.iloc[0]["StartDateTime"] == make_ts("08:00")
+    assert df_out.iloc[0]["EndDateTime"] == make_ts("08:00", day=1)
+    assert df_out.iloc[0]["Value"] == "True"
+
+    assert df_out.iloc[1]["StartDateTime"] == make_ts("08:00", day=1)
+    assert df_out.iloc[1]["EndDateTime"] == make_ts("08:00", day=2)
+    assert df_out.iloc[1]["Value"] == "True"
 
 
 def test_global_pattern_missing_events_in_window(repo_global_simple):
+    admission_tak = repo_global_simple.get("ADMISSION_EVENT")
+    glucose_tak = repo_global_simple.get("GLUCOSE_MEASURE")
+    release_tak = repo_global_simple.get("RELEASE_EVENT")
+    pattern_tak = repo_global_simple.get("ROUTINE_VITALS_CHECK")
+
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "RELEASE_EVENT", make_ts("08:00", day=2), make_ts("08:00", day=2), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100),  # only window 1
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+
+    df_input = pd.concat([
+        admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"]),
+        release_tak.apply(df_raw[df_raw["ConceptName"] == "RELEASE_EVENT"]),
+        glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"]),
+    ], ignore_index=True)
+
+    df_out = pattern_tak.apply(df_input)
+
+    assert len(df_out) == 2
+    assert df_out.iloc[0]["Value"] == "True"
+    assert df_out.iloc[1]["Value"] == "False"
+
+def test_global_pattern_two_episodes_only_scores_inside_initiator_clipper(repo_global_simple):
     """
-    Test global pattern with missing events:
-    - Window 1 has event -> True.
-    - Window 2 has NO event -> False (min-occurrences=1).
+    Ensures windows are generated ONLY inside initiator->clipper episodes.
+    Two admissions -> two episodes, each 48h with 24h windows => 2 windows per episode.
+    We provide glucose only in episode #1, so episode #2 windows must be False.
     """
     admission_tak = repo_global_simple.get("ADMISSION_EVENT")
     glucose_tak = repo_global_simple.get("GLUCOSE_MEASURE")
+    release_tak = repo_global_simple.get("RELEASE_EVENT")
     pattern_tak = repo_global_simple.get("ROUTINE_VITALS_CHECK")
-    
-    df_raw = pd.DataFrame([
-        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
-        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100), # Window 1 only
-    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
-    
-    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
-    df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
-    df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
-    
-    df_out = pattern_tak.apply(df_input)
-    
-    assert len(df_out) == 2
-    assert df_out.iloc[0]["Value"] == "True"
-    assert df_out.iloc[1]["Value"] == "False" # Count=0, Min=1
 
+    df_raw = pd.DataFrame([
+        # Episode 1: day0 -> day2
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "RELEASE_EVENT", make_ts("08:00", day=2), make_ts("08:00", day=2), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100),                  # ep1 window1
+        (1, "GLUCOSE_LAB", make_ts("10:00", day=1), make_ts("10:00", day=1), 100),    # ep1 window2
+
+        # Episode 2: day4 -> day6
+        (1, "ADMISSION", make_ts("08:00", day=4), make_ts("08:00", day=4), "True"),
+        (1, "RELEASE_EVENT", make_ts("08:00", day=6), make_ts("08:00", day=6), "True"),
+        # no glucose in episode 2
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+
+    df_input = pd.concat([
+        admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"]),
+        release_tak.apply(df_raw[df_raw["ConceptName"] == "RELEASE_EVENT"]),
+        glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"]),
+    ], ignore_index=True)
+
+    df_out = pattern_tak.apply(df_input).sort_values("StartDateTime").reset_index(drop=True)
+
+    # Expect 4 windows total: 2 in episode1 + 2 in episode2
+    assert len(df_out) == 4
+
+    # Episode 1 windows True
+    assert df_out.iloc[0]["StartDateTime"] == make_ts("08:00")
+    assert df_out.iloc[0]["EndDateTime"] == make_ts("08:00", day=1)
+    assert df_out.iloc[0]["Value"] == "True"
+
+    assert df_out.iloc[1]["StartDateTime"] == make_ts("08:00", day=1)
+    assert df_out.iloc[1]["EndDateTime"] == make_ts("08:00", day=2)
+    assert df_out.iloc[1]["Value"] == "True"
+
+    # Episode 2 windows should exist but be False (min-occ=1)
+    assert df_out.iloc[2]["StartDateTime"] == make_ts("08:00", day=4)
+    assert df_out.iloc[2]["EndDateTime"] == make_ts("08:00", day=5)
+    assert df_out.iloc[2]["Value"] == "False"
+
+    assert df_out.iloc[3]["StartDateTime"] == make_ts("08:00", day=5)
+    assert df_out.iloc[3]["EndDateTime"] == make_ts("08:00", day=6)
+    assert df_out.iloc[3]["Value"] == "False"
+
+    # And critically: no windows in the gap day2->day4
+    assert not ((df_out["StartDateTime"] >= make_ts("08:00", day=2)) & (df_out["StartDateTime"] < make_ts("08:00", day=4))).any()
 
 def test_global_pattern_cyclic_compliance(repo_global_cyclic_compliance):
     """
@@ -2588,22 +3183,102 @@ def test_global_pattern_cyclic_compliance(repo_global_cyclic_compliance):
     admission_tak = repo_global_cyclic_compliance.get("ADMISSION_EVENT")
     glucose_tak = repo_global_cyclic_compliance.get("GLUCOSE_MEASURE")
     pattern_tak = repo_global_cyclic_compliance.get("STRICT_VITALS_CHECK")
+    release_tak = repo_global_cyclic_compliance.get("RELEASE_EVENT")
     
+    # First window only has 1 event, but window is too short (2h compared to 12h) so it will be skipped and nothing will be generated
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100), # 1 event
+        (1, "RELEASE_EVENT", make_ts("10:00"), make_ts("10:00"), "True"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_input = pd.concat([
+        admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"]),
+        release_tak.apply(df_raw[df_raw["ConceptName"] == "RELEASE_EVENT"]),
+        glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"]),
+    ], ignore_index=True)
+    
+    df_out = pattern_tak.apply(df_input)
+    
+    assert len(df_out) == 0  # No output because window too short to consider
+
+    # First window only has 1 event, but window is too short (2h compared to 12h) so it will be skipped and nothing will be generated
     df_raw = pd.DataFrame([
         (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
         (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100), # 1 event
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
     
-    df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
-    df_glucose = glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"])
-    df_input = pd.concat([df_admission, df_glucose], ignore_index=True)
+    df_input = pd.concat([
+        admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"]),
+        glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"]),
+    ], ignore_index=True)
     
     df_out = pattern_tak.apply(df_input)
+
+    assert len(df_out) == 0  # No output because window too short to consider
+
+    # First window only has 1 event, but no release, so window is full 12h and will be considered because of the max-time
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100), # 1 event
+        (1, "RELEASE_EVENT", make_ts("10:00", day=1), make_ts("10:00", day=1), "True"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
     
-    assert len(df_out) == 1
+    df_input = pd.concat([
+        admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"]),
+        release_tak.apply(df_raw[df_raw["ConceptName"] == "RELEASE_EVENT"]),
+        glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"]),
+    ], ignore_index=True)
+    
+    df_out = pattern_tak.apply(df_input)
+    # First window has 1 event -> score 0.5
+    # Second window has 0 events -> score 0.0
+    # All within the admission-release episode
+    assert len(df_out) == 2
     row = df_out.iloc[0]
     assert row["Value"] == "Partial"
     assert row["CyclicConstraintScore"] == 0.5
+    row = df_out.iloc[1]
+    assert row["Value"] == "False"
+    assert row["CyclicConstraintScore"] == 0.0
+
+    # First window only has 1 event, but no release, so window is full 12h and will be considered because of the max-time
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 100), # 1 event
+        (1, "GLUCOSE_LAB", make_ts("12:00"), make_ts("12:00"), 100), # 1 event
+        (1, "GLUCOSE_LAB", make_ts("16:00"), make_ts("16:00"), 100), # 1 event
+        (1, "RELEASE_EVENT", make_ts("10:00", day=1), make_ts("10:00", day=1), "True"),
+        (1, "ADMISSION", make_ts("08:00", day=4), make_ts("08:00", day=4), "True"),
+        (1, "GLUCOSE_LAB", make_ts("10:00", day=4), make_ts("10:00", day=4), 100), # 1 event
+        (1, "RELEASE_EVENT", make_ts("10:00", day=5), make_ts("10:00", day=5), "True"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    
+    df_input = pd.concat([
+        admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"]),
+        release_tak.apply(df_raw[df_raw["ConceptName"] == "RELEASE_EVENT"]),
+        glucose_tak.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_LAB"]),
+    ], ignore_index=True)
+    
+    df_out = pattern_tak.apply(df_input)
+    # First window has 3 events -> score 1.0
+    # Second window has 0 events -> score 0.0
+    # Third window (new episode) has 1 event -> score 0.5
+    # Fourth window has 0 events -> score 0.0
+    # All within the admission-release episode
+    assert len(df_out) == 4
+    row = df_out.iloc[0]
+    assert row["Value"] == "True"
+    assert row["CyclicConstraintScore"] == 1.0
+    row = df_out.iloc[1]
+    assert row["Value"] == "False"
+    assert row["CyclicConstraintScore"] == 0.0
+    row = df_out.iloc[2]
+    assert row["Value"] == "Partial"
+    assert row["CyclicConstraintScore"] == 0.5
+    row = df_out.iloc[3]
+    assert row["Value"] == "False"
+    assert row["CyclicConstraintScore"] == 0.0
 
 
 def test_global_pattern_value_compliance(repo_global_value_compliance):
@@ -2619,7 +3294,9 @@ def test_global_pattern_value_compliance(repo_global_value_compliance):
     
     df_raw = pd.DataFrame([
         (1, "ADMISSION", make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "GLUCOSE_LAB", make_ts("09:00"), make_ts("09:00"), 170),
         (1, "GLUCOSE_LAB", make_ts("10:00"), make_ts("10:00"), 170),
+        (1, "GLUCOSE_LAB", make_ts("11:00"), make_ts("11:00"), 170),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
     
     df_admission = admission_tak.apply(df_raw[df_raw["ConceptName"] == "ADMISSION"])
@@ -2798,7 +3475,7 @@ def test_pattern_with_context_no_events_no_crash(tmp_path: Path):
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="48h" trapezD="72h"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>
@@ -2976,7 +3653,7 @@ def test_pattern_with_context_events_present_no_crash(tmp_path: Path):
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="48h" trapezD="72h"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>

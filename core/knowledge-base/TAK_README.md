@@ -461,15 +461,19 @@ Patterns use **ref-based indexing** to reference attributes/parameters (similar 
 
 6. **Output Generation:**
     - **Input NOT found:** Output for the pattern is only calculated if the patient has any records related to that pattern (anchor / event / parameters / context) otherwise - an empty df is returned.
-   - **Pattern found:** One or more intervals with `Value="True"/"Partial"/"False"`, compliance scores in separate columns
-   - **Pattern NOT found:** Single row with `Value="False"`, `StartDateTime/EndDateTime=NaT`,
-   compliance scores in seperate columns will be 0, if compliance function is defined for the Pattern.
+   - **Pattern found:** One or more intervals with `Value="True"/"Partial"/"False"`, compliance scores in separate columns.
+   - **Pattern NOT found:** Single row with `Value="False"`, `StartDateTime/EndDateTime=NaT` if (anchors not found), or a row per missed anchor if didn't find events that satisfy the anchors. 
+   compliance scores in seperate columns will be 0/1, if compliance function is defined for the Pattern.
    Some patterns might be irrelevant for `Value="False"` rows, so you can add a ignore_unfulfilled_anchors flag in `<pattern>` to ignore them, like:
    
    ```bash
    <pattern name="..." concept-type="local-pattern" ignore-unfulfilled-anchors="true">
    ```
     >> Note, this will raise if applied for global-pattern taks
+
+    The score for unfulfilled anchors is set under `FuzzyLogicTrapez.missing_score` and is determined inside `FuzzyLogicTrapez.compliance_direction()` and depends on the type of trapezoid. If higher values cause deminishing returns (`C < D`) then a missing event for anchor will give a score of 0. If higher values cause increasing returns (`A < B`) then a missing event for anchor means the undesired operation stopped, and will grant a score of 1. If both apply (`C < D, A < B`) then accuracy matters, meaning a missing score will still give 0. Thats my logic, feel free to modify if you have different needs. Remember the validation that `min-distance` / `max-distance` are tied to the trapezoid's `(A, D)`, so values outside the trapezoid are not discovered as patterns, meaning they will be treated as unfulfilled anchors (if not covered by a different pattern). 
+
+    >> Note, pattern not found with `FuzzyLogicTrapez.missing_score == 1.0` will automatically return `Value = "True"`, which is intentional.  
 
 #### Compliance Functions
 
@@ -485,24 +489,26 @@ Score
         A    B                  C    D  (time or value)
 ```
 - **[A, B]:** Score linearly increases 0 → 1
-- **[B, C]:** Score = 1 (full compliance)
+- **[B, C]:** Score = 1 (full compliance). Trapez is always flat-top at 1, the trapez nodes does not define different Y values.
 - **[C, D]:** Score linearly decreases 1 → 0
-- **Outside [A, D]:** Score = 0
+- **Outside [A, D]:** Score = self.missing_score, the score defined for anchors missing an event.
 
 **Types:**
-- **Time-constraint:** Trapez values are duration strings (e.g., `"0h"`, `"8h"`)
-  - Scores actual time gap: `event.start - anchor.end`
+- **Time-constraint (LocalPattern only):** Trapez values are duration strings (e.g., `"0h"`, `"8h"`)
+  - Scores actual time gap: `event.start - anchor.end`.
+  - Inherently this is designed to support `how="before"`, as `how="overlap"` does not define distance between anchor and event. The time constraint for `how="overlap"` is purely a score of 0 or 1 based on existance, and only if the temporal relation defines `<temporal-relation how='overlap' existence-compliance='true'>`.
 - **Value-constraint:** Trapez values are numeric (floats)
   - Scores target attribute values (from anchor/event rows)
+- **Cyclic-constraint (GlobalPattern only):** Trapez values are numeric (floats) representing No. occurences per window.
 
 #### External Functions for Compliance
 
-Compliance functions can transform trapez values dynamically using external functions:
+Compliance functions can transform trapez values dynamically (per patient) using external functions:
 
 - **`id`** — Identity (trapez values used as-is)
   ```xml
   <function name="id">
-      <trapeze trapezeA="0h" trapezeB="0h" trapezeC="8h" trapezeD="12h"/>
+      <trapez trapezA="0h" trapezB="0h" trapezC="8h" trapezD="12h"/>
   </function>
   ```
 
@@ -510,10 +516,13 @@ Compliance functions can transform trapez values dynamically using external func
   ```xml
   <function name="mul">
       <parameter ref="P1"/>  <!-- e.g., weight -->
-      <trapeze trapezeA="0" trapezeB="0.2" trapezeC="0.6" trapezeD="1"/>
+      <trapez trapezA="0" trapezB="0.2" trapezC="0.6" trapezD="1"/>
       <!-- Result: [0, 0.2*weight, 0.6*weight, 1*weight] -->
   </function>
   ```
+
+Applying these functions will return a copy of the Trapezoid per patient, but pay attention, this copy is not retained by `apply()`, meaning it is used by the `_compute_*_compliance` functions, but cannot be accesed later.
+Should you care? not really, just don't create functions that change the original magnitude order of `A, B, C, D`, otherwise the `FuzzyLogicTrapez.missing_score` will not be updated with it (intentionally). 
 
 - **Custom functions:** Register in `external_functions.py` (see [External Functions](#external-functions) section)
 
@@ -550,8 +559,14 @@ Parameters can be numeric, time-duration strings, or arbitrary strings (from all
 #### Algorithm
 
 1. **Window Generation:**
-   - Determine global start time (earliest timestamp in patient data).
+   - Episode = time range to scan for windows, between initiator/ absolute start and a clipper / cyclic end. An episode can yield multiple windows.
+   - Determine global start time (earliest timestamp in patient data) and global end time (latest time in input).
+    
+    >> Note, input is only comprised of the ConceptNames relevant to this specific TAK, so you better include as clipper and initiator options the absolute `ADMISSION/ RELEASE/DEATH` events you have in your data, otherwise your windows will be limited only to the times where the event data exists.
+   
+   - A rule can have multiple episodes (one per initiator), as long as the next initiator is after the previous clipper
    - Generate windows of size `time-window` starting from `global_start + start` up to `global_start + end`.
+   - Window generation 
 
 2. **Context Filtering:**
    - If a `<context>` is defined, check if the context exists and overlaps the generated window.
@@ -854,9 +869,9 @@ else:
 #### Patterns
 - ✅ All derived-from TAKs exist in repository
 - ✅ `idx` values within bounds for raw-concept tuples
-- ✅ `time-constraint-compliance` only valid for `how='before'`
-- ✅ `max-distance >= trapezeD` (pattern captures all valid instances)
-- ✅ `min-distance <= trapezeA` (pattern captures all valid instances)
+- ✅ `time-constraint-compliance` only valid for `how='before'` and `existence-compliance` is only relevant for `how='overlap'`.
+- ✅ `max-distance >= trapezD` (pattern captures all valid instances)
+- ✅ `min-distance <= trapezA` (pattern captures all valid instances)
 - ✅ Value-constraint targets must reference **anchor or event** (not context/parameter)
 - ✅ Compliance function names exist in `external_functions.REPO`
 - ✅ Parameter refs declared in `<parameters>` block
@@ -925,7 +940,7 @@ def custom_dosage_adjustment(x, *args):
     Parameters are passed as *args in the order declared in XML.
     
     Args:
-        x: Single trapez value (e.g., trapezeA=0 or trapezeB=0.2)
+        x: Single trapez value (e.g., trapezA=0 or trapezB=0.2)
         *args: Variable parameters in declaration order
                args[0] = weight (from P1)
                args[1] = age (from P2)
@@ -968,7 +983,7 @@ def custom_dosage_adjustment(x, *args):
     <function name="custom_dosage">
         <parameter ref="P1"/>  <!-- Weight (args[0]) -->
         <parameter ref="P2"/>  <!-- Age (args[1]) -->
-        <trapeze trapezeA="0" trapezeB="0.2" trapezeC="0.6" trapezeD="1"/>
+        <trapez trapezA="0" trapezB="0.2" trapezC="0.6" trapezD="1"/>
     </function>
 </value-constraint-compliance>
 ```
@@ -992,10 +1007,10 @@ def my_function(trapez_value: float, *params) -> float:
     External function contract for compliance calculations.
     
     The function is called FOUR times per compliance calculation:
-    - Once for trapezeA
-    - Once for trapezeB
-    - Once for trapezeC
-    - Once for trapezeD
+    - Once for trapezA
+    - Once for trapezB
+    - Once for trapezC
+    - Once for trapezD
     
     Args:
         trapez_value: Single trapez value (A, B, C, or D)
@@ -1355,7 +1370,7 @@ StartDateTime | EndDateTime
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="8h" trapezeD="12h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="8h" trapezD="12h"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>
@@ -1464,7 +1479,7 @@ Output:
                 <!-- Time compliance: 0-48h ideal, up to 72h acceptable -->
                 <time-constraint-compliance>
                     <function name="id">
-                        <trapeze trapezeA="0h" trapezeB="0h" trapezeC="48h" trapezeD="72h"/>
+                        <trapez trapezA="0h" trapezB="0h" trapezC="48h" trapezD="72h"/>
                     </function>
                 </time-constraint-compliance>
                 
@@ -1476,7 +1491,7 @@ Output:
                     </target>
                     <function name="mul">
                         <parameter ref="P1"/>  <!-- Weight -->
-                        <trapeze trapezeA="0" trapezeB="0.2" trapezeC="0.6" trapezeD="1"/>
+                        <trapez trapezA="0" trapezB="0.2" trapezC="0.6" trapezD="1"/>
                     </function>
                 </value-constraint-compliance>
             </compliance-function>
@@ -1526,67 +1541,164 @@ Output:
   PatientId | ... | Value   | TimeConstraintScore | ValueConstraintScore
   1000      | ... | Partial | 1.0                 | 0.42
 ```
-### Example 9: Global Pattern (Routine Vitals Check)
 
-**File:** `patterns/ROUTINE_VITALS.xml`
+### Example 9: Pattern with overlap relationship
+
+**File:** `patterns/REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN.xml`
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<pattern name="ROUTINE_VITALS_PATTERN" concept-type="global-pattern">
-    <categories>Routine</categories>
-    <description>Ensure glucose is checked at least once every 24h</description>
-    
+<pattern name="REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN" concept-type="local-pattern"  ignore-unfulfilled-anchors="true">
+    <categories>RoutineTreatment</categories>
+    <description>Captures if long term INSULIN (BASAL) was reduced after low glucose measured (if given within 24h of event)</description>
+    <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
     <derived-from>
-        <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="A1"/>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="LOW_GLUCOSE_CONTEXT" tak="context" ref="A1"/>
+        <attribute name="DISGLYCEMIA_EVENT" tak="context" ref="A2"/>
+        <attribute name="BASAL_BITZUA_RATIO" tak="raw-concept" idx="0" ref="E1"/>
     </derived-from>
- 
+
+    <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
     <abstraction-rules>
         <rule>
-            <!-- Generate 24h windows for 14 days starting from admission -->
-            <cyclic start='0h' end='14d' time-window='24h' min-occurrences="1" max-occurrences="100">
-                <event>
+            <!-- Relation between 2 KBTA objects -->
+            <!-- existence-compliance means that for unfulfilled anchors, TimeCompliance score will be 0.0 -->
+            <!-- Here, if a dose of Basal is not found within the Low Glucose context, that's a good thing -->
+            <temporal-relation how='overlap' existence-compliance='false'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
                     <attribute ref="E1">
                         <allowed-value min="0"/>
                     </attribute>
                 </event>
+            </temporal-relation>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <value-constraint-compliance>
+                    <target>
+                        <attribute ref="E1"/>
+                    </target>
+                    <function name="id">
+                        <!-- Any decrease in dose will is good compliance -->
+                        <trapez trapezA="0" trapezB="0" trapezC="0.99" trapezD="1"/>
+                    </function>
+                </value-constraint-compliance>
+            </compliance-function>
+        </rule>
+        <rule>
+            <!-- Rule 2: No overlap within low glucose context, but did we reduce dose outside this context within 24h? -->
+            <!-- This is only relevant if glucose level balanced back, but insulin dose was given -->
+            <!-- 24h after hypoglycemia event: Don't care about the insulin dose -->
+            <temporal-relation how='before' max-distance='24h'>
+                <anchor>
+                    <attribute ref="A2">
+                        <allowed-value equal="Hypoglycemia"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <value-constraint-compliance>
+                    <target>
+                        <attribute ref="E1"/>
+                    </target>
+                    <function name="id">
+                        <!-- Any decrease in dose will is good compliance -->
+                        <trapez trapezA="0" trapezB="0" trapezC="0.99" trapezD="1"/>
+                    </function>
+                </value-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
+
+
+### Example 10: Global Pattern with compliance
+
+**File:** `patterns/ROUTINE_GLUCOSE_MEASURE_PATTERN.xml`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="ROUTINE_GLUCOSE_MEASURE_PATTERN" concept-type="global-pattern">
+    <categories>RoutineTreatment</categories>
+    <description>Captures if glucose measurement was performed routinly every 24 hours</description>
+    <derived-from>
+        <attribute name="ADMISSION" tak="raw-concept" idx="0" ref="I1"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="DEATH" tak="raw-concept" idx="0" ref="C1"/>
+        <attribute name="RELEASE" tak="raw-concept" idx="0" ref="C2"/>
+    </derived-from>
+ 
+    <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
+    <!-- By enforcing "min-distance" we ensure a minimum time gap between anchor and event, meaning the test is not a "double check"-->
+    <abstraction-rules>
+        <rule>
+            <!-- Relation between 2 KBTA objects -->
+            <cyclic start='0h' end='14d' time-window='24h' min-occurrences="1" max-occurrences="100">
+                <initiator>
+                    <attribute ref="I1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </initiator>
+                <event>
+                    <attribute ref="E1">
+                        <allowed-value min="20"/>
+                    </attribute>
+                </event>
+                <clipper>
+                    <attribute ref="C1"/>
+                        <allowed-value equal="True"/>\
+                    </attribute>
+                    <attribute ref="C2"/>
+                        <allowed-value equal="True"/>\
+                    </attribute>
+                </clipper>
             </cyclic>
 
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
             <compliance-function>
-                <!-- Cyclic Compliance: Score based on COUNT of events -->
                 <cyclic-constraint-compliance>
                     <function name="id">
-                        <!-- 0 checks=0.0, 1 check=1.0, 100 checks=1.0 -->
-                        <trapeze trapezeA="0" trapezeB="1" trapezeC="100" trapezeD="100"/>
+                        <trapez trapezA="0" trapezB="1" trapezC="1" trapezD="100"/>
                     </function>
                 </cyclic-constraint-compliance>
             </compliance-function>
         </rule>
     </abstraction-rules>
 </pattern>
-
 ---
 
 ## Pattern Design Best Practices
 
 ### 1. Choose Appropriate `max-distance` / `min-distance`
 
-**Rule:** `max-distance` should be **≥ trapezeD** and `min-distance` should be **≤ trapezeA** (if using time-constraint compliance), 
+**Rule:** `max-distance` should be **≥ trapezD** and `min-distance` should be **≤ trapezA** (if using time-constraint compliance), 
 
-**Rationale:** Pattern matching uses `max-distance` to filter candidates. If `max-distance < trapezeD`, valid instances may be missed (Same for `min-distance`).
+**Rationale:** Pattern matching uses `max-distance` to filter candidates. If `max-distance < trapezD`, valid instances may be missed (Same for `min-distance`).
 
 ```xml
 <!-- ❌ Bad: max-distance too small -->
 <temporal-relation how='before' max-distance='24h'>...</temporal-relation>
 <time-constraint-compliance>
-    <trapeze trapezeA="0h" trapezeB="0h" trapezeC="24h" trapezeD="48h"/>
+    <trapez trapezA="0h" trapezB="0h" trapezC="24h" trapezD="48h"/>
     <!-- Pattern will NEVER find instances in [24h, 48h] gap! -->
 </time-constraint-compliance>
 
 <!-- ✅ Good: max-distance covers full trapez -->
 <temporal-relation how='before' max-distance='48h'>...</temporal-relation>
 <time-constraint-compliance>
-    <trapeze trapezeA="0h" trapezeB="0h" trapezeC="24h" trapezeD="48h"/>
+    <trapez trapezA="0h" trapezB="0h" trapezC="24h" trapezD="48h"/>
 </time-constraint-compliance>
 ```
 
@@ -1613,7 +1725,7 @@ Output:
 
 ```xml
 <!-- Clinical guideline: Glucose within 8h ideal, up to 12h acceptable -->
-<trapeze trapezeA="0h" trapezeB="0h" trapezeC="8h" trapezeD="12h"/>
+<trapez trapezA="0h" trapezB="0h" trapezC="8h" trapezD="12h"/>
 ```
 
 **Value-Constraint Example (Insulin Dosage):**
@@ -1622,7 +1734,7 @@ Output:
 <!-- Clinical guideline: 0.2-0.6 units/kg ideal, up to 1.0 acceptable -->
 <function name="mul">
     <parameter ref="P1"/>  <!-- Weight -->
-    <trapeze trapezeA="0" trapezeB="0.2" trapezeC="0.6" trapezeD="1"/>
+    <trapez trapezA="0" trapezB="0.2" trapezC="0.6" trapezD="1"/>
 </function>
 ```
 
