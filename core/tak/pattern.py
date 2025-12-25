@@ -1731,8 +1731,8 @@ class GlobalPattern(Pattern):
         
         # Patient timeline clipping to avoid punishing outside observed data
         # The maximum relevant time for a patient is between their earliest StartDateTime and latest EndDateTime, within their *input* data
-        patient_start = df["StartDateTime"].min()
-        patient_end = df["EndDateTime"].max()
+        patient_start = pd.Timestamp(df["StartDateTime"].min())
+        patient_end = pd.Timestamp(df["EndDateTime"].max())
         
         instances_map = {}
         used_event_idxs = set()
@@ -1758,7 +1758,8 @@ class GlobalPattern(Pattern):
             initiators = self._extract_candidates(df, rule.initiator_spec) if getattr(rule, "initiator_spec", None) else None
             clippers = self._extract_candidates(df, rule.clipper_spec) if getattr(rule, "clipper_spec", None) else None
 
-            window_duration = rule.time_window
+            # Always use pandas time types for safe arithmetic
+            window_duration = pd.Timedelta(rule.time_window)
 
             # -------------------------
             # Build episodes (episode = time range to scan for windows, between initiator/ absolute start and a clipper / cyclic end)
@@ -1769,12 +1770,19 @@ class GlobalPattern(Pattern):
             if initiators is None or initiators.empty:
                 initiator_times = [patient_start]
             else:
-                initiator_times = sorted(pd.Series(initiators["StartDateTime"]).dropna().unique())
+                initiator_times = (
+                    pd.to_datetime(initiators["StartDateTime"], errors="coerce")
+                    .dropna()
+                    .sort_values()
+                    .drop_duplicates()
+                    .map(pd.Timestamp)
+                    .tolist()
+                )
 
             for init_time in initiator_times:
                 # Episode start/end relative to initiator (or patient_start)
-                episode_start = init_time + rule.start
-                episode_end = init_time + rule.end
+                episode_start = pd.Timestamp(init_time) + pd.Timedelta(rule.start)
+                episode_end   = pd.Timestamp(init_time) + pd.Timedelta(rule.end)
 
                 # Clip to observed patient timeline (prevents "punishing" after discharge / end-of-data)
                 if episode_start < patient_start:

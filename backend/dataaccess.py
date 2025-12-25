@@ -439,9 +439,18 @@ class DataAccess:
         def normalize_chunk_for_insert(df, idxs):
             # coerce PatientId -> int (and ensure no NaN)
             df.iloc[:, idxs['patient_idx']] = pd.to_numeric(df.iloc[:, idxs['patient_idx']], errors='coerce').astype('Int64').astype(int)
-            # parse and format datetimes
-            df.iloc[:, idxs['start_idx']] = pd.to_datetime(df.iloc[:, idxs['start_idx']], errors='coerce', utc=True).dt.strftime('%Y-%m-%d %H:%M:%S')
-            df.iloc[:, idxs['end_idx']] = pd.to_datetime(df.iloc[:, idxs['end_idx']], errors='coerce', utc=True).dt.strftime('%Y-%m-%d %H:%M:%S')
+            # parse datetimes with UTC, convert to naive UTC (consistent storage), then format
+            # Using astype('datetime64[ns]') removes timezone info while preserving UTC instant
+            parsed_s = pd.to_datetime(df.iloc[:, idxs['start_idx']], errors='coerce', utc=True)
+            if getattr(parsed_s.dt, "tz", None) is not None:
+                parsed_s = parsed_s.dt.tz_convert('UTC').dt.tz_localize(None)
+            df.iloc[:, idxs['start_idx']] = parsed_s.dt.strftime('%Y-%m-%d %H:%M:%S')
+
+            parsed_e = pd.to_datetime(df.iloc[:, idxs['end_idx']], errors='coerce', utc=True)
+            if getattr(parsed_e.dt, "tz", None) is not None:
+                parsed_e = parsed_e.dt.tz_convert('UTC').dt.tz_localize(None)
+            df.iloc[:, idxs['end_idx']] = parsed_e.dt.strftime('%Y-%m-%d %H:%M:%S')
+
             # ensure Value is string (non-null)
             df.iloc[:, idxs['value_idx']] = df.iloc[:, idxs['value_idx']].astype(str)
             return df
