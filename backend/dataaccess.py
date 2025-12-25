@@ -440,8 +440,8 @@ class DataAccess:
             # coerce PatientId -> int (and ensure no NaN)
             df.iloc[:, idxs['patient_idx']] = pd.to_numeric(df.iloc[:, idxs['patient_idx']], errors='coerce').astype('Int64').astype(int)
             # parse and format datetimes
-            df.iloc[:, idxs['start_idx']] = pd.to_datetime(df.iloc[:, idxs['start_idx']], errors='coerce').dt.strftime('%Y-%m-%d %H:%M:%S')
-            df.iloc[:, idxs['end_idx']] = pd.to_datetime(df.iloc[:, idxs['end_idx']], errors='coerce').dt.strftime('%Y-%m-%d %H:%M:%S')
+            df.iloc[:, idxs['start_idx']] = pd.to_datetime(df.iloc[:, idxs['start_idx']], errors='coerce', utc=True).dt.strftime('%Y-%m-%d %H:%M:%S')
+            df.iloc[:, idxs['end_idx']] = pd.to_datetime(df.iloc[:, idxs['end_idx']], errors='coerce', utc=True).dt.strftime('%Y-%m-%d %H:%M:%S')
             # ensure Value is string (non-null)
             df.iloc[:, idxs['value_idx']] = df.iloc[:, idxs['value_idx']].astype(str)
             return df
