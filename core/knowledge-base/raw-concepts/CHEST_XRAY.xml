@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<raw-concept name="CHEST_XRAY" concept-type="raw-boolean">
-    <categories>Measurements</categories>
-    <description>Raw concept to state a CHEST X-RAY was performed (with no result - partial information)</description>
-    <attributes>
-        <attribute name="CHEST_XRAY" type="boolean"/>
-    </attributes>
-</raw-concept>

@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<raw-concept name="URINE_CULTURE" concept-type="raw-boolean">
-    <categories>Measurements</categories>
-    <description>Raw concept to state a URINE CULTURE was performed (with no result - partial information)</description>
-    <attributes>
-        <attribute name="URINE_CULTURE" type="boolean"/>
-    </attributes>
-</raw-concept>

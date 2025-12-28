@@ -439,8 +439,8 @@ Patterns use **ref-based indexing** to reference attributes/parameters (similar 
    - **Optimization:** Vectorized pandas masks reduce O(N²) nested loop to O(N×M) (where M is # of valid pairs)
 
 3. **Context Checking (Optional):**
-   - Check if context interval overlaps `[min(anchor.start, event.start), max(anchor.end, event.end)]`
-   - Context must exist and overlap the pattern timeframe
+   - Check if context interval overlaps the anchor `[anchor.start, anchor.end]`
+   - A context is used to determine irrelevant anchors.
 
 4. **One-to-One Pairing:**
    - Track used anchor/event indices (no reuse across rules)

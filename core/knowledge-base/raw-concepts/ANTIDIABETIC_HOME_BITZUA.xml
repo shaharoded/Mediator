@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="ANTIDIABETIC_HOME_BITZUA" concept-type="raw-boolean">
+    <categories>DrugAdministration</categories>
+    <description>Raw concept to mark antidiabetic PO drugs administration event (at home, signaling valuable context) that have high hypoglycemia risk (used only to monitor if were stopped during the first 3 days or after event)</description>
+    <attributes>
+        <attribute name="ANTIDIABETIC_HIGH_HYPO_HOME_BITZUA" type="boolean"/>
+    </attributes>
+</raw-concept>

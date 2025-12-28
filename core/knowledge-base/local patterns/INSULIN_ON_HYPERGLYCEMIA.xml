@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <pattern name="INSULIN_ON_HYPERGLYCEMIA_PATTERN" concept-type="local-pattern">
     <categories>RoutineTreatment</categories>
-    <description>Captures if INSULIN (BASAL/BOLUS/IV) was performed within the high glucose window</description>
+    <description>Captures if INSULIN (BASAL/BOLUS/IV) was performed within proximity to a meal, assuming glucose was high at the time</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
     <derived-from>
-        <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="A1"/>
+        <attribute name="MEAL_CONTEXT" tak="context" ref="A1"/>
+        <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="C1"/>
         
         <!-- BOLUS_BITZUA is used to clip HIGH_GLUCOSE_CONTEXT, so "before" relation will fit -->
         <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
@@ -15,6 +16,13 @@
     <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
     <abstraction-rules>
         <rule>
+            <!-- OPTIONAL: Contextual Information relevant if begins at / before the last event of the pattern starts-->
+            <!-- Context will be relevant here only if the high glucose context is true before the insulin event-->
+            <context>
+                <attribute ref="C1">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
             <!-- Relation between 2 KBTA objects -->
             <!-- max-distance is not the recommended distance, but the max acceptable one -->
             <temporal-relation how='overlap' existence-compliance='true'>

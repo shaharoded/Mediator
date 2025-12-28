@@ -4,7 +4,7 @@
     <description>Marks Antidiabetic Drugs administration event in hospital (PO) - High hypoglycemia risk medications</description>
     <derived-from>
         <!-- ref optional when no abstraction-rules -->
-        <attribute name="ANTIDIABETIC_BITZUA" tak="raw-concept" idx="0" ref='A1'/>
+        <attribute name="ANTIDIABETIC_HOSPITAL_BITZUA" tak="raw-concept" idx="0" ref='A1'/>
     </derived-from>
 
     <abstraction-rules>

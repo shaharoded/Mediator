@@ -1,22 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<pattern name="ROUTINE_GLUCOSE_MEASURE_PATTERN" concept-type="global-pattern">
+<pattern name="ROUTINE_GLUCOSE_MEASURE_ON_STEROIDS_PATTERN" concept-type="global-pattern">
     <categories>RoutineTreatment</categories>
-    <description>Captures if glucose measurement was performed routinly every 24 hours</description>
+    <description>Captures if glucose measurement was performed routinly every 24 hours, 3 times if patient is treated with steroids in hospital</description>
     <derived-from>
-        <attribute name="ADMISSION" tak="raw-concept" idx="0" ref="I1"/>
+        <attribute name="STEROIDS_IV_BITZUA" tak="raw-concept" idx="0" ref="I1"/>
+        <attribute name="STEROIDS_PO_BITZUA" tak="raw-concept" idx="0" ref="I2"/>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
         <attribute name="DEATH" tak="raw-concept" idx="0" ref="C1"/>
         <attribute name="RELEASE" tak="raw-concept" idx="0" ref="C2"/>
     </derived-from>
  
     <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
-    <!-- By enforcing "min-distance" we ensure a minimum time gap between anchor and event, meaning the test is not a "double check"-->
     <abstraction-rules>
         <rule>
-            <!-- Relation between 2 KBTA objects -->
-            <cyclic start='0h' end='14d' time-window='24h' min-occurrences="1" max-occurrences="100">
+            <cyclic start='0h' end='2d' time-window='24h' min-occurrences="1" max-occurrences="100">
                 <initiator>
                     <attribute ref="I1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                    <attribute ref="I2">
                         <allowed-value equal="True"/>
                     </attribute>
                 </initiator>
@@ -39,7 +41,7 @@
             <compliance-function>
                 <cyclic-constraint-compliance>
                     <function name="id">
-                        <trapez trapezA="0" trapezB="1" trapezC="1" trapezD="100"/>
+                        <trapez trapezA="0" trapezB="3" trapezC="3" trapezD="100"/>
                     </function>
                 </cyclic-constraint-compliance>
             </compliance-function>

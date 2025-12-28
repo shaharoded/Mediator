@@ -1,51 +1,57 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<pattern name="INSULIN_ON_ADMISSION_PATTERN" concept-type="local-pattern">
-    <categories>Admission</categories>
-    <description>Captures if INSULIN (BASAL) was performed within reasonable time of admission. Uses weight as a parameter for dosage calculation, default to 81KG - Cohort avg.</description>
-    <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
+<pattern name="ROUTINE_INSULIN_PATTERN" concept-type="global-pattern">
+    <categories>RoutineTreatment</categories>
+    <description>Captures if Basal was given at least once a day and no more than 4 times within 14 days of admission, with correct dosage compared to body weight</description>
     <derived-from>
-        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C1"/>
-        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
+        <attribute name="ADMISSION" tak="raw-concept" idx="0" ref="I1"/>
         <attribute name="BASAL_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="DEATH" tak="raw-concept" idx="0" ref="C1"/>
+        <attribute name="RELEASE" tak="raw-concept" idx="0" ref="C2"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="C3"/>
     </derived-from>
 
     <!-- Will use the closest instance to the beginning of the pattern -->
     <parameters>
         <parameter name="WEIGHT_MEASURE" tak="raw-concept" idx="0" ref="P1" default="81"/>
     </parameters>
-
+ 
     <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
     <abstraction-rules>
         <rule>
-            <!-- OPTIONAL: Contextual Information relevant if begins at / before the last event of the pattern starts-->
             <context>
-                <attribute ref="C1">
-                    <allowed-value equal="True"/>
+                <attribute ref="C3">
+                    <allowed-value min="180"/>
                 </attribute>
             </context>
-
             <!-- Relation between 2 KBTA objects -->
-            <!-- max-distance is not the recommended distance, but the max acceptable one -->
-            <temporal-relation how='before' max-distance='72h'>
-                <anchor>
-                    <attribute ref="A1">
+            <cyclic start='0h' end='14d' time-window='24h' min-occurrences="1" max-occurrences="100">
+                <initiator>
+                    <attribute ref="I1">
                         <allowed-value equal="True"/>
                     </attribute>
-                </anchor>
-                <event select='first'>
+                </initiator>
+                <event>
                     <attribute ref="E1">
                         <allowed-value min="1"/>
                     </attribute>
                 </event>
-            </temporal-relation>
+                <clipper>
+                    <attribute ref="C1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                    <attribute ref="C2">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </clipper>
+            </cyclic>
 
-            <!-- OPTIONAL: Compliance function to define fuzzy window -->
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
             <compliance-function>
-                <time-constraint-compliance>
+                <cyclic-constraint-compliance>
                     <function name="id">
-                        <trapez trapezA="0h" trapezB="0h" trapezC="48h" trapezD="72h"/>
+                        <trapez trapezA="0" trapezB="1" trapezC="4" trapezD="100"/>
                     </function>
-                </time-constraint-compliance>
+                </cyclic-constraint-compliance>
                 <value-constraint-compliance>
                     <target>
                         <attribute ref="E1"/>

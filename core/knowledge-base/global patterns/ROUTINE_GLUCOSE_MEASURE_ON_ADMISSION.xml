@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="ROUTINE_GLUCOSE_MEASURE_ON_ADMISSION_PATTERN" concept-type="global-pattern">
+    <categories>RoutineTreatment</categories>
+    <description>Captures if glucose measurement was performed routinly every 24 hours for the first 2-3 days, depending on diabetes status</description>
+    <derived-from>
+        <attribute name="ADMISSION" tak="raw-concept" idx="0" ref="I1"/>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="DEATH" tak="raw-concept" idx="0" ref="C1"/>
+        <attribute name="RELEASE" tak="raw-concept" idx="0" ref="C2"/>
+        <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C3"/>
+    </derived-from>
+ 
+    <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
+    <abstraction-rules>
+        <rule>
+            <context>
+                <attribute ref="C3">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
+            <cyclic start='0h' end='3d' time-window='24h' min-occurrences="1" max-occurrences="100">
+                <initiator>
+                    <attribute ref="I1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </initiator>
+                <event>
+                    <attribute ref="E1">
+                        <allowed-value min="20"/>
+                    </attribute>
+                </event>
+                <clipper>
+                    <attribute ref="C1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                    <attribute ref="C2">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </clipper>
+            </cyclic>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <cyclic-constraint-compliance>
+                    <function name="id">
+                        <trapez trapezA="0" trapezB="3" trapezC="3" trapezD="100"/>
+                    </function>
+                </cyclic-constraint-compliance>
+            </compliance-function>
+        </rule>
+        <rule>
+            <cyclic start='0h' end='2d' time-window='24h' min-occurrences="1" max-occurrences="100">
+                <initiator>
+                    <attribute ref="I1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </initiator>
+                <event>
+                    <attribute ref="E1">
+                        <allowed-value min="20"/>
+                    </attribute>
+                </event>
+                <clipper>
+                    <attribute ref="C1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                    <attribute ref="C2">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </clipper>
+            </cyclic>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <cyclic-constraint-compliance>
+                    <function name="id">
+                        <trapez trapezA="0" trapezB="3" trapezC="3" trapezD="100"/>
+                    </function>
+                </cyclic-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>

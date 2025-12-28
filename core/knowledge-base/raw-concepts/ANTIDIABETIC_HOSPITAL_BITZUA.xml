@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<raw-concept name="ANTIDIABETIC_BITZUA" concept-type="raw-boolean">
+<raw-concept name="ANTIDIABETIC_HOSPITAL_BITZUA" concept-type="raw-boolean">
     <categories>DrugAdministration</categories>
     <description>Raw concept to mark antidiabetic PO drugs administration event (in hospital) that have high hypoglycemia risk (used only to monitor if were stopped during the first 3 days or after event)</description>
     <attributes>
-        <attribute name="ANTIDIABETIC_HIGH_HYPO_BITZUA" type="boolean"/>
+        <attribute name="ANTIDIABETIC_HIGH_HYPO_HOSPITAL_BITZUA" type="boolean"/>
     </attributes>
 </raw-concept>

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- In this case must ignore-unfulfilled-anchors="true" otherwise unfulfilled anchors emit 'False' / 0.0, which is the opposite of what we want -->
 <!-- We are effectively only outputting compliance for fulfilled anchors, meaning cases where dose was given -->
-<pattern name="REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN_2" concept-type="local-pattern" ignore-unfulfilled-anchors="true">
+<pattern name="REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN" concept-type="local-pattern" ignore-unfulfilled-anchors="true">
     <categories>RoutineTreatment</categories>
-    <description>Captures if long term INSULIN (BASAL) was reduced after low glucose measured (if given within 24h of event)</description>
+    <description>Captures if long term INSULIN (BASAL) was reduced after low glucose measured (if was given within 24h of the event, ignores otherwise)</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
     <derived-from>
         <attribute name="DISGLYCEMIA_EVENT" tak="event" ref="A2"/>
