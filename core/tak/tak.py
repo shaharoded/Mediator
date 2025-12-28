@@ -272,8 +272,8 @@ class TemporalRelationRule(TAKRule):
         if not self._temporal_match(anchor_row, event_row):
             return False
         
-        # Check context (if defined)
-        if not self._context_satisfied(anchor_row, event_row, contexts):
+        # Check context (if defined) -> overlaps anchor?
+        if not self._context_satisfied(anchor_row, contexts):
             return False
         
         return True
@@ -299,67 +299,24 @@ class TemporalRelationRule(TAKRule):
             return True
         return delta <= self.max_delta
 
-    def _context_satisfied(
-        self,
-        anchor_row: pd.Series,
-        event_row: pd.Series,
-        contexts: Optional[pd.DataFrame]
-    ) -> bool:
+    def _context_satisfied(self, anchor_row: pd.Series, contexts: Optional[pd.DataFrame]) -> bool:
         """
-        Check if context requirements are satisfied.
-        
-        Context must:
-        1. Have values matching the required constraints (equal checks only)
-        2. Overlap the pattern timeframe [min_start, max_start]
-        
-        IMPORTANT: Pattern context blocks can only reference ONE context TAK (enforced in validation).
-        
-        Args:
-            anchor_row: Anchor row
-            event_row: Event row
-            contexts: Context intervals DataFrame
-        
-        Returns:
-            True if context requirements satisfied
+        Context gates the anchor only:
+        context must overlap the anchor interval [anchor_start, anchor_end]
+        and match the allowed-value constraints (already applied by _extract_candidates).
         """
-        # No context requirement → always satisfied
         if not self.context_spec or not self.context_spec.get("attributes"):
             return True
-        
-        # No context data → fail
+
         if contexts is None or contexts.empty:
             return False
-        
-        # ASSUMPTION: Only ONE context attribute (enforced in validation)
-        # Extract the single context attribute specification
-        
-        attr_name, attr_spec = next(iter(self.context_spec["attributes"].items()))
-        allowed_values = attr_spec.get("allowed_values", set())
-        
-        if not allowed_values:
-            # No value constraint → just check temporal overlap
-            attr_mask = (contexts["ConceptName"] == attr_name)
-            if not attr_mask.any():
-                return False
-            matching_contexts = contexts[attr_mask]
-        else:
-            # Filter by ConceptName AND value (vectorized)
-            concept_mask = (contexts["ConceptName"] == attr_name)
-            value_mask = contexts["Value"].astype(str).isin(allowed_values)
-            combined_mask = concept_mask & value_mask
-            
-            if not combined_mask.any():
-                return False
-            
-            matching_contexts = contexts[combined_mask]
-        
-        # Check temporal overlap on filtered contexts
-        min_start = min(anchor_row["StartDateTime"], event_row["StartDateTime"])
-        max_start = max(anchor_row["StartDateTime"], event_row["StartDateTime"])
-        
-        overlap_mask = (matching_contexts["StartDateTime"] <= max_start) & (matching_contexts["EndDateTime"] >= min_start)
-        
-        return overlap_mask.any()
+
+        a_start = anchor_row["StartDateTime"]
+        a_end = anchor_row["EndDateTime"]
+
+        # contexts is already filtered by ConceptName/value constraints via _extract_candidates()
+        overlap_mask = (contexts["StartDateTime"] <= a_end) & (contexts["EndDateTime"] >= a_start)
+        return bool(overlap_mask.any())
 
 
 class CyclicRule(TAKRule):
