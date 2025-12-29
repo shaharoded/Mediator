@@ -21,6 +21,10 @@
             <context>
                 <attribute ref="C1">
                     <allowed-value equal="True"/>
+                    <allowed-value equal="Breakfast"/>
+                    <allowed-value equal="Lunch"/>
+                    <allowed-value equal="Dinner"/>
+                    <allowed-value equal="Night-Snack"/>
                 </attribute>
             </context>
             <!-- Relation between 2 KBTA objects -->
