@@ -53,7 +53,10 @@ class Pattern(TAK):
         patient_df["TimeDist"] = (patient_df["StartDateTime"] - pattern_start).abs()
         param_names = list(param_specs_by_name.keys())
         param_df = patient_df[patient_df["ConceptName"].isin(param_names)]
+        logger.debug("[%s] _resolve_parameters: params=%s patient_rows=%d param_rows=%d",
+                     self.name, param_names, len(patient_df), len(param_df))
         if param_df.empty:
+            logger.debug("[%s] _resolve_parameters: no parameter rows found — using defaults", self.name)
             for param_spec in self.parameters:
                 resolved[param_spec["ref"]] = self._parse_parameter_value(param_spec["default"])
             return resolved
@@ -74,6 +77,8 @@ class Pattern(TAK):
             if val is not None:
                 resolved[param_ref] = self._parse_parameter_value(val)
             else:
+                logger.debug("[%s] _resolve_parameters: closest row for param '%s' had no usable value -> using default '%s'",
+                             self.name, param_name, param_default)
                 resolved[param_ref] = self._parse_parameter_value(param_default)
         return resolved
 
@@ -88,24 +93,40 @@ class Pattern(TAK):
 
     def _extract_candidates(self, df: pd.DataFrame, spec: Optional[Dict[str, Any]]) -> pd.DataFrame:
         attrs = spec.get("attributes", {})
-        if not attrs: return pd.DataFrame(columns=df.columns)
+        if not attrs:
+            logger.debug("[%s] _extract_candidates: spec empty, returning no candidates", self.name)
+            return pd.DataFrame(columns=df.columns)
         masked_parts = []
         for attr_name, constraints in attrs.items():
             idx = constraints.get("idx", 0)
             rows = df[df["ConceptName"] == attr_name].copy()
-            if rows.empty: continue
+            logger.debug("[%s] _extract_candidates: attribute='%s' initial_rows=%d idx=%s",
+                         self.name, attr_name, len(rows), idx)
+            if rows.empty:
+                logger.debug("[%s] _extract_candidates: no rows for attribute '%s'", self.name, attr_name)
+                continue
             if idx == 0:
                 rows["__value__"] = rows["Value"].apply(lambda v: v[0] if isinstance(v, tuple) and len(v) > 0 else v)
             else:
                 rows["__value__"] = rows["Value"].apply(lambda v: v[idx] if isinstance(v, tuple) and idx < len(v) else None)
             allowed = constraints.get("allowed_values") or set()
-            if allowed: rows = rows[rows["__value__"].astype(str).isin(allowed)]
+            if allowed:
+                before_cnt = len(rows)
+                rows = rows[rows["__value__"].astype(str).isin(allowed)]
+                logger.debug("[%s] _extract_candidates: attribute='%s' allowed filter kept %d/%d rows",
+                             self.name, attr_name, len(rows), before_cnt)
             if constraints.get("min") is not None:
+                before_cnt = len(rows)
                 numeric_vals = pd.to_numeric(rows["__value__"], errors="coerce")
                 rows = rows[numeric_vals >= constraints["min"]]
+                logger.debug("[%s] _extract_candidates: attribute='%s' min filter kept %d/%d rows",
+                             self.name, attr_name, len(rows), before_cnt)
             if constraints.get("max") is not None:
+                before_cnt = len(rows)
                 numeric_vals = pd.to_numeric(rows["__value__"], errors="coerce")
                 rows = rows[numeric_vals <= constraints["max"]]
+                logger.debug("[%s] _extract_candidates: attribute='%s' max filter kept %d/%d rows",
+                             self.name, attr_name, len(rows), before_cnt)
             if not rows.empty: masked_parts.append(rows)
         if not masked_parts: return pd.DataFrame(columns=df.columns)
         return pd.concat(masked_parts, ignore_index=False).sort_values("StartDateTime")
@@ -954,6 +975,7 @@ class LocalPattern(Pattern):
             contexts = self._extract_candidates(patient_df, rule.context_spec) if rule.context_spec else None
 
             if anchors.empty:
+                logger.debug("[%s] _find_pattern_instances: rule has no anchor candidates", self.name)
                 continue
 
             # We've seen at least one anchor candidate in this patient
@@ -1031,6 +1053,7 @@ class LocalPattern(Pattern):
                 # Context is an anchor-eligibility gate.
                 # If context is not satisfied, the anchor is irrelevant -> do NOT punish it.
                 if rule.context_spec and not rule._context_satisfied(anchor_row, contexts):
+                    logger.debug("[%s] _find_pattern_instances: anchor at %s ignored due to context gate for rule", self.name, anchor_row["StartDateTime"])
                     continue
 
                 if self.ignore_unfulfilled_anchors:
@@ -1128,6 +1151,9 @@ class LocalPattern(Pattern):
                 
                 # Get matching event indices (in order)
                 matching_event_idxs = [idx for idx in event_order if idx in events[mask].index]
+                if not matching_event_idxs:
+                    logger.debug("[%s] _prefilter_temporal_matches: anchor_idx=%s found 0 matching events (how='before')",
+                                 self.name, anchor_idx)
                 
                 # Add pairs (anchor, event) to valid list
                 for event_idx in matching_event_idxs:
@@ -1147,6 +1173,9 @@ class LocalPattern(Pattern):
                 
                 # Get matching event indices (in order)
                 matching_event_idxs = [idx for idx in event_order if idx in events[mask].index]
+                if not matching_event_idxs:
+                    logger.debug("[%s] _prefilter_temporal_matches: anchor_idx=%s found 0 matching events (how='overlap')",
+                                 self.name, anchor_idx)
                 
                 # Add pairs
                 for event_idx in matching_event_idxs:

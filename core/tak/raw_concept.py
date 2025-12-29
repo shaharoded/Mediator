@@ -567,6 +567,18 @@ class ParameterizedRawConcept(RawConcept):
                         # Not enough rows to compute baseline
                         static_values[param["ref"]] = None
                 else:
+                    # Resolve normally - if default exists, will use it if unresolved at the first parent row,
+                    # Otherwise will filter filter parent rows based on first parameter appearance
+                    # Otherwise (no default and no parent rows after filtering) -> None
+                    if param["name"] != self.derived_from and param.get("default") is None:
+                        p_rows_all = df[df["ConceptName"] == param["name"]]
+                        if not p_rows_all.empty:
+                            first_param_time = p_rows_all["StartDateTime"].min()
+                            parent_rows = parent_rows[parent_rows["StartDateTime"] > first_param_time].reset_index(drop=True)
+                            if parent_rows.empty:
+                                # no parent rows after parameter pivot -> unresolved
+                                static_values[param["ref"]] = None
+                                continue
                     baseline_time = parent_rows.iloc[0]["StartDateTime"]
                     val = self._resolve_parameter_value(param, baseline_time, df)
                     if val is None:

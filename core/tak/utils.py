@@ -60,12 +60,16 @@ class FuzzyLogicTrapez:
             float: 1.0 if higher values are better, 0.0 if lower values are better.
         """
         if self.C < self.D and self.A == self.B:
-            # Later -> deminishing returns: higher values are worse, missing score 0.0
+            if self.B == 0 and not self.is_time:
+                # Perfect compliance at zero, so lower to None values for value compliance are better.
+                return 1.0
+            # Later -> deminishing returns: higher values for time compliance are worse, missing score 0.0
+            # Or, if value constraint but not A==B<>0 then we can't tell direction, so default to 0.0 
             return 0.0
         elif self.A < self.B and self.C == self.D:
             # Later -> increasing returns: higher values are better, missing score 1.0
             # Can only happen for time-constraint where missing event can count as longer time between events
-            # For value-constraint, this shape is nonsensical, since higher values are not compareable to missing value
+            # For value-constraint, this shape is nonsensical, since higher values are not compareable to missing value, but missing values are like lower values
             if self.is_time:
                 return 1.0
             else:

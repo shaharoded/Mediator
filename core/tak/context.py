@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 from .tak import TAK, EventAbstractionRule, validate_xml_against_schema
 from .repository import get_tak_repository
 from .raw_concept import RawConcept
+from .event import Event
 from .utils import parse_duration
 
 
@@ -72,8 +73,8 @@ class Context(TAK):
                 raise ValueError(f"{name}: <derived-from><attribute> must have 'name' and 'tak' attributes")
             
             tak_type = attr_el.attrib["tak"]
-            if tak_type not in ["raw-concept", "parameterized-raw-concept"]:
-                raise ValueError(f"{name}: Contexts can only be derived from 'raw-concept'.")
+            if tak_type not in ["raw-concept", "parameterized-raw-concept", "event"]:
+                raise ValueError(f"{name}: Contexts can only be derived from 'raw-concept' or 'event'.")
             
             # idx only required for raw-concept
             if tak_type == 'raw-concept':
@@ -222,13 +223,13 @@ class Context(TAK):
         """Business logic validation using global TAKRepository."""
         repo = get_tak_repository()
 
-        # 1) Check all derived_from TAKs exist and are RawConcepts
+        # 1) Check all derived_from TAKs exist and are RawConcepts or Events
         for df in self.derived_from:
             parent_tak = repo.get(df["name"])
             if parent_tak is None:
                 raise ValueError(f"{self.name}: derived_from='{df['name']}' not found in TAK repository")
-            if not isinstance(parent_tak, RawConcept):
-                raise ValueError(f"{self.name}: derived_from='{df['name']}' is not a RawConcept (found {parent_tak.family})")
+            if not isinstance(parent_tak, (RawConcept, Event)):
+                raise ValueError(f"{self.name}: derived_from='{df['name']}' is not a RawConcept or Event (found {parent_tak.family})")
 
         # 2) Check clippers exist (ANY TAK type allowed)
         for clipper in self.clippers:
@@ -263,6 +264,8 @@ class Context(TAK):
                         parent_attr = next((a for a in parent_tak.attributes if a["name"] == attr_name_in_parent), None)
                     else:
                         parent_attr = parent_tak.attributes[0] if parent_tak.attributes else None
+                elif isinstance(parent_tak, Event):
+                    parent_attr = parent_tak.attributes[0] if parent_tak.attributes else None
                 
                 if parent_attr:
                     for c in constraints:

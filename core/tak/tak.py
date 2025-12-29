@@ -361,6 +361,7 @@ class CyclicRule(TAKRule):
         if not self.context_spec or not self.context_spec.get("attributes"):
             return True
         if contexts is None or contexts.empty:
+            logger.debug(f"CyclicRule: No contexts available to satisfy context_spec for window {window_start} - {window_end}.")
             return False
         
         # ASSUMPTION: Only ONE context attribute (enforced in validation)
@@ -369,18 +370,25 @@ class CyclicRule(TAKRule):
         
         if not allowed_values:
             attr_mask = (contexts["ConceptName"] == attr_name)
-            if not attr_mask.any(): return False
+            if not attr_mask.any(): 
+                logger.debug(f"CyclicRule: No contexts with ConceptName '{attr_name}' found for window {window_start} - {window_end}.")
+                return False
             matching_contexts = contexts[attr_mask]
         else:
             concept_mask = (contexts["ConceptName"] == attr_name)
             value_mask = contexts["Value"].astype(str).isin(allowed_values)
             combined_mask = concept_mask & value_mask
-            if not combined_mask.any(): return False
+            if not combined_mask.any(): 
+                logger.debug(f"CyclicRule: No contexts with ConceptName '{attr_name}' and allowed values {allowed_values} found for window {window_start} - {window_end}.")
+                return False
             matching_contexts = contexts[combined_mask]
         
         # Check temporal overlap with window
         overlap_mask = (matching_contexts["StartDateTime"] < window_end) & (matching_contexts["EndDateTime"] > window_start)
-        return overlap_mask.any()
+        matched = overlap_mask.any()
+        if not matched:
+            logger.debug(f"CyclicRule: No contexts overlapping window {window_start} - {window_end}.")
+        return matched
 
 
 def validate_xml_against_schema(xml_path: Path, schema_path: Optional[Path] = None) -> None:
