@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="METFORMIN_HOME_BITZUA" concept-type="raw-boolean">
+    <categories>DrugAdministration</categories>
+    <description>Raw concept to mark METFORMIN drugs administration event (at home) that have low hypoglycemia risk (but we'll want to monitor this)</description>
+    <attributes>
+        <attribute name="METFORMIN_HOME_BITZUA" type="boolean"/>
+    </attributes>
+</raw-concept>

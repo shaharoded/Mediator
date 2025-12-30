@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="CONTINUE_BASAL_ON_ADMISSION_PATTERN" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Captures if BASAL_BITZUA was performed within reasonable time of admission, assuming patient is regularly treated at home</description>
+    <derived-from>
+        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
+        <attribute name="BASAL_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="BASAL_HOME_BITZUA_CONTEXT" tak="context" ref="C1"/>
+    </derived-from>
+ 
+    <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
+    <abstraction-rules>
+        <rule>
+            <!-- Context will be relevant here only if the patient is regularly treated at home (self reported) -->
+            <context>
+                <attribute ref="C1">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
+            <!-- Relation between 2 KBTA objects -->
+            <temporal-relation how='before' max-distance='48h'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="1"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <trapez trapezA="0h" trapezB="0h" trapezC="36h" trapezD="48h"/>
+                    </function>
+                </time-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>

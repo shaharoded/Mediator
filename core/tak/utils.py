@@ -60,8 +60,8 @@ class FuzzyLogicTrapez:
             float: 1.0 if higher values are better, 0.0 if lower values are better.
         """
         if self.C < self.D and self.A == self.B:
-            if self.B == 0 and not self.is_time:
-                # Perfect compliance at zero, so lower to None values for value compliance are better.
+            if not self.is_time:
+                # Perfect compliance at left edge, so lower to None values for value compliance are better.
                 return 1.0
             # Later -> deminishing returns: higher values for time compliance are worse, missing score 0.0
             # Or, if value constraint but not A==B<>0 then we can't tell direction, so default to 0.0 

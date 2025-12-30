@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="STOP_SGLT2_ON_ADMISSION_PATTERN" concept-type="local-pattern">
+    <categories>Admission</categories>
+    <description>Captures if perscribed antidiabetic medications with high hypo risk were stopped during the first 3 days of admission</description>
+    <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
+    <derived-from>
+        <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
+        <attribute name="SGLT2_HOME_BITZUA_CONTEXT" tak="context" idx="0" ref="C1"/>
+        <attribute name="SGLT2_HOSPITAL_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+
+    <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
+    <abstraction-rules>
+        <rule>
+            <!-- OPTIONAL: Contextual Information relevant if begins at / before the last event of the pattern starts-->
+            <context>
+                <attribute ref="C1">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
+
+            <!-- Relation between 2 KBTA objects -->
+            <!-- max-distance is not the recommended distance, but the max acceptable one -->
+            <temporal-relation how='before' max-distance='21d'>
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <time-constraint-compliance>
+                    <function name="id">
+                        <!-- If found will have a score of 0 (max hospitalization is 14 days, so will never get a positive score) -->
+                        <!-- If not found will have a score of 1 (since time constraint not found is assumed larger than node D) -->
+                        <trapez trapezA="14d" trapezB="21d" trapezC="21d" trapezD="21d"/>
+                    </function>
+                </time-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
