@@ -371,7 +371,7 @@ A DataFrame with the same shape and columns as the parent raw concept, but with 
 **Purpose:** Background facts with interval windowing and clipping (similar to Events with temporal extension).
 
 **Key Parameters:**
-- `<derived-from>` — List of raw-concepts
+- `<derived-from>` — List of raw-concepts or events
 - `<context-windows>` — Per-value windows: `good-before`, `good-after`
 - `<clippers>` — External events that trim intervals (e.g., ADMISSION, DEATH)
 
@@ -441,6 +441,7 @@ Patterns use **ref-based indexing** to reference attributes/parameters (similar 
 3. **Context Checking (Optional):**
    - Check if context interval overlaps the anchor `[anchor.start, anchor.end]`
    - A context is used to determine irrelevant anchors.
+   - Context can have 1 or more attribute, and the relationship between them is determined by flag `how='or'/'and'`, where OR condition (default when only 1 context concept) looks for match with any of the concept names in the context, and AND condition (only allowed when context has more than 1 attribute) will first calculate all of the intersections in the context df (all intervals where all unique contexts intersect) and will then match that anchor row with the updated context df.
 
 4. **One-to-One Pairing:**
    - Track used anchor/event indices (no reuse across rules)

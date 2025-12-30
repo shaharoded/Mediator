@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<context name="ANTIDIABETIC_HOME_BITZUA_CONTEXT">
+<context name="BASAL_HOME_BITZUA_CONTEXT">
     <categories>DrugAdministration</categories>
-    <description>Context to identify if antidiabetic medication administration at home is chronic, which will affect compliance patterns</description>
+    <description>Context to identify if basal medication administration at home is chronic, which will affect compliance patterns</description>
     <derived-from>
-        <attribute name="ANTIDIABETIC_HOME_BITZUA" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="BASAL_HOME_BITZUA" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
 
     <abstraction-rules>

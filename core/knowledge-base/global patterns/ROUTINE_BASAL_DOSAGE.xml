@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<pattern name="ROUTINE_INSULIN_PATTERN" concept-type="global-pattern">
+<pattern name="ROUTINE_BASAL_DOSAGE_PATTERN" concept-type="global-pattern">
     <categories>RoutineTreatment</categories>
     <description>Captures if Basal was given at least once a day and no more than 4 times within 14 days of admission, with correct dosage compared to body weight</description>
     <derived-from>
@@ -7,7 +7,8 @@
         <attribute name="BASAL_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
         <attribute name="DEATH" tak="raw-concept" idx="0" ref="C1"/>
         <attribute name="RELEASE" tak="raw-concept" idx="0" ref="C2"/>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="C3"/>
+        <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" idx="0" ref="C3"/>
+        <attribute name="BASAL_HOME_BITZUA_CONTEXT" tak="context" idx="0" ref="C4"/>
     </derived-from>
 
     <!-- Will use the closest instance to the beginning of the pattern -->
@@ -18,9 +19,58 @@
     <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
     <abstraction-rules>
         <rule>
-            <context>
+            <context how="and">
                 <attribute ref="C3">
-                    <allowed-value min="180"/>
+                    <allowed-value equal="True"/>
+                </attribute>
+                <attribute ref="C4">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
+            <!-- Relation between 2 KBTA objects -->
+            <cyclic start='0h' end='14d' time-window='24h' min-occurrences="1" max-occurrences="100">
+                <initiator>
+                    <attribute ref="I1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </initiator>
+                <event>
+                    <attribute ref="E1">
+                        <allowed-value min="1"/>
+                    </attribute>
+                </event>
+                <clipper>
+                    <attribute ref="C1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                    <attribute ref="C2">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </clipper>
+            </cyclic>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <cyclic-constraint-compliance>
+                    <function name="id">
+                        <trapez trapezA="0" trapezB="1" trapezC="4" trapezD="100"/>
+                    </function>
+                </cyclic-constraint-compliance>
+                <value-constraint-compliance>
+                    <target>
+                        <attribute ref="E1"/>
+                    </target>
+                    <function name="id">
+                        <!-- If patient recieves BASAL at home, every dosage counts fully -->
+                        <trapez trapezA="0" trapezB="0" trapezC="300" trapezD="300"/>
+                    </function>
+                </value-constraint-compliance>
+            </compliance-function>
+        </rule>
+        <rule>
+            <context how="or">
+                <attribute ref="C3">
+                    <allowed-value equal="True"/>
                 </attribute>
             </context>
             <!-- Relation between 2 KBTA objects -->
@@ -58,6 +108,7 @@
                     </target>
                     <function name="mul">
                         <parameter ref="P1"/>
+                        <!-- If patient does not receive BASAL at home, dosage must use body weight as normalizer -->
                         <trapez trapezA="0" trapezB="0.2" trapezC="0.6" trapezD="1"/>
                     </function>
                 </value-constraint-compliance>

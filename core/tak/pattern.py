@@ -425,7 +425,7 @@ class LocalPattern(Pattern):
             context_spec = None
             context_el = rule_el.find("context")
             if context_el is not None:
-                context_spec = {"attributes": {}}
+                context_spec = {"how": context_el.attrib.get("how"), "attributes": {}}
                 for attr_el in context_el.findall("attribute"):
                     ref = attr_el.attrib.get("ref")
                     if not ref or ref not in declared_refs:
@@ -434,17 +434,22 @@ class LocalPattern(Pattern):
                     df_entry = next((d for d in derived_from if d["ref"] == ref), None)
                     attr_name = df_entry["name"]
                     
+                    min_val = None
+                    max_val = None
                     allowed_values = set()
                     for av in attr_el.findall("allowed-value"):
-                        if "equal" in av.attrib:
-                            allowed_values.add(av.attrib["equal"])
-                        else:
-                            raise ValueError(f"{name}: only 'equal' constraints supported in context attributes")
+                        if "equal" in av.attrib: allowed_values.add(av.attrib["equal"])
+                        if "min" in av.attrib or "max" in av.attrib:
+                            raise ValueError(f"{name}: context attribute allowed-value cannot have min/max, only equal. You can define a Context TAK for range-based context and reference it here.")
                     
                     context_spec["attributes"][attr_name] = {
                         "idx": df_entry["idx"],
                         "allowed_values": allowed_values
                     }
+                if len(context_spec["attributes"]) > 1 and not context_spec.get("how"):
+                    raise ValueError(f"{name}: context with multiple attributes requires explicit how attribute ('and'/'or') to determine relationship")
+                if len(context_spec["attributes"]) == 1 and context_spec.get("how") == "and":
+                    logger.warning(f"{name}: context with single attribute and how='and' is redundant, consider removing how attribute")
             
             # Build derived_map (name → df_entry) for TemporalRelationRule
             derived_map = {d["name"]: d for d in derived_from}
@@ -610,6 +615,17 @@ class LocalPattern(Pattern):
 
     def validate(self) -> None:
         """Validate ref-based pattern structure and constraints."""
+        def _get_parent_attribute(tak, idx):
+            """Extract the parent attribute spec from a TAK at the given idx."""
+            if isinstance(tak, RawConcept):
+                if tak.concept_type == "raw":
+                    attr_name = tak.tuple_order[idx]
+                    return next((a for a in tak.attributes if a["name"] == attr_name), None)
+                else:
+                    # raw-numeric, raw-nominal, raw-boolean: single attribute at idx=0
+                    return tak.attributes[0] if tak.attributes else None
+            return None
+
         repo = get_tak_repository()
         
         # Build lookup maps: ref → derived_from entry
@@ -635,9 +651,9 @@ class LocalPattern(Pattern):
         
         # 2) Validate all used refs are declared
         for rule in self.abstraction_rules:
-            # Check context refs
+            # Validate context refs
             if rule.context_spec:
-                for attr_name in rule.context_spec.get("attributes", {}):
+                for attr_name, attr_spec in rule.context_spec.get("attributes", {}).items():
                     # Find ref from derived_from that matches this attr_name
                     df_entry = next((d for d in self.derived_from if d["name"] == attr_name), None)
                     if df_entry is None:
@@ -645,6 +661,21 @@ class LocalPattern(Pattern):
                     ref = df_entry["ref"]
                     if ref not in all_declared_refs:
                         raise ValueError(f"{self.name}: context uses undeclared ref '{ref}'")
+                    
+                    tak = repo.get(df_entry["name"])
+                    if not isinstance(tak, RawConcept):
+                        continue
+                    
+                    parent_attr = _get_parent_attribute(tak, df_entry["idx"])
+                    if parent_attr is None:
+                        continue
+                    
+                    # Context only supports nominal (no min/max)
+                    if attr_spec.get("min") is not None or attr_spec.get("max") is not None:
+                        raise ValueError(
+                            f"{self.name}: context attribute '{attr_name}' (ref='{ref}') has min/max constraints. Context attributes are nominal only; "
+                            f"use only 'equal' constraints."
+                        )
             
             tr = rule.relation_spec
             # Check anchor refs
@@ -676,19 +707,6 @@ class LocalPattern(Pattern):
                 for target_ref in rule.value_constraint_compliance.get("targets", []):
                     if target_ref not in all_declared_refs:
                         raise ValueError(f"{self.name}: value-constraint-compliance target uses undeclared ref '{target_ref}'")
-                # Check parameter refs
-                for param_ref in rule.value_constraint_compliance.get("parameters", []):
-                    if param_ref not in all_declared_refs:
-                        raise ValueError(f"{self.name}: value-constraint-compliance uses undeclared parameter ref '{param_ref}'")
-        
-        # Validate value-constraint-compliance targets
-        for rule in self.abstraction_rules:
-            if rule.value_constraint_compliance:
-                for target_ref in rule.value_constraint_compliance.get("targets", []):
-                    # Ensure target is from anchor or event (not context or parameter)
-                    df_entry = derived_from_by_ref.get(target_ref)
-                    if df_entry is None:
-                        raise ValueError(f"{self.name}: value-constraint target ref '{target_ref}' not found in derived-from")
                     
                     # Check if target is used in anchor or event
                     tr = rule.relation_spec
@@ -701,19 +719,12 @@ class LocalPattern(Pattern):
                             f"{self.name}: value-constraint target ref '{target_ref}' ('{target_attr_name}') "
                             f"must reference an attribute used in anchor or event"
                         )
+                # Check parameter refs
+                for param_ref in rule.value_constraint_compliance.get("parameters", []):
+                    if param_ref not in all_declared_refs:
+                        raise ValueError(f"{self.name}: value-constraint-compliance uses undeclared parameter ref '{param_ref}'")
         
-        # 3) Validate numeric range constraints match TAK's attribute types
-        def _get_parent_attribute(tak, idx):
-            """Extract the parent attribute spec from a TAK at the given idx."""
-            if isinstance(tak, RawConcept):
-                if tak.concept_type == "raw":
-                    attr_name = tak.tuple_order[idx]
-                    return next((a for a in tak.attributes if a["name"] == attr_name), None)
-                else:
-                    # raw-numeric, raw-nominal, raw-boolean: single attribute at idx=0
-                    return tak.attributes[0] if tak.attributes else None
-            return None
-        
+        # 3) Validate numeric range constraints match TAK's attribute types        
         for rule in self.abstraction_rules:
             tr = rule.relation_spec
             
@@ -853,19 +864,6 @@ class LocalPattern(Pattern):
                             f"use only 'equal' constraints."
                         )
 
-        # Validate context blocks (only ONE attribute allowed per context block)
-        for rule in self.abstraction_rules:
-            if rule.context_spec and rule.context_spec.get("attributes"):
-                num_context_attrs = len(rule.context_spec["attributes"])
-                if num_context_attrs > 1:
-                    raise ValueError(
-                        f"{self.name}: Pattern context blocks can only reference ONE context TAK. "
-                        f"Found {num_context_attrs} context attributes in rule. "
-                        f"Reason: A single DataFrame row cannot match multiple ConceptName values simultaneously."
-                        f"You can consider a few differnt contexts (OR condition) by splitting to different rules."
-                        f"Or you can consider only the intersection of 2 or more contexts as context of it's own by defining this as a seperate <context> file."
-                    )
-
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Apply LocalPattern to find and rate pattern instances.
@@ -972,7 +970,15 @@ class LocalPattern(Pattern):
             # Extract anchor/event/context candidates (OPTIMIZED)
             anchors = self._extract_candidates(patient_df, rule.relation_spec.get("anchor"))
             events = self._extract_candidates(patient_df, rule.relation_spec.get("event"))
-            contexts = self._extract_candidates(patient_df, rule.context_spec) if rule.context_spec else None
+            if rule.context_spec:
+                contexts = self._extract_candidates(patient_df, rule.context_spec)
+                how = rule.context_spec.get("how")
+                if how not in (None, "or", "and"):
+                    raise ValueError(f"[{self.name}] _find_pattern_instances: unknown context how='{how}', expected 'and' or 'or'")
+                if how == "and":
+                    contexts = rule.intersect_many_interval_sets(contexts, rule.context_spec)
+            else:
+                contexts = None
 
             if anchors.empty:
                 logger.debug("[%s] _find_pattern_instances: rule has no anchor candidates", self.name)
@@ -1401,11 +1407,35 @@ class GlobalPattern(Pattern):
             if rule_el.find("temporal-relation") is not None:
                 raise ValueError(f"{name}: GlobalPattern rule cannot have <temporal-relation>; only <cyclic> allowed.")
             
-            # Look for context block in rule
+            # --- Parse context (optional) ---
             context_spec = None
             context_el = rule_el.find("context")
             if context_el is not None:
-                context_spec = _parse_filter_block(context_el, derived_from)
+                context_spec = {"how": context_el.attrib.get("how"), "attributes": {}}
+                for attr_el in context_el.findall("attribute"):
+                    ref = attr_el.attrib.get("ref")
+                    if not ref or ref not in declared_refs:
+                        raise ValueError(f"{name}: context attribute ref='{ref}' not declared")
+                    
+                    df_entry = next((d for d in derived_from if d["ref"] == ref), None)
+                    attr_name = df_entry["name"]
+                    
+                    min_val = None
+                    max_val = None
+                    allowed_values = set()
+                    for av in attr_el.findall("allowed-value"):
+                        if "equal" in av.attrib: allowed_values.add(av.attrib["equal"])
+                        if "min" in av.attrib or "max" in av.attrib:
+                            raise ValueError(f"{name}: context attribute allowed-value cannot have min/max, only equal. You can define a Context TAK for range-based context and reference it here.")
+                    
+                    context_spec["attributes"][attr_name] = {
+                        "idx": df_entry["idx"],
+                        "allowed_values": allowed_values
+                    }
+                if len(context_spec["attributes"]) > 1 and not context_spec.get("how"):
+                    raise ValueError(f"{name}: context with multiple attributes requires explicit how attribute ('and'/'or') to determine relationship")
+                if len(context_spec["attributes"]) == 1 and context_spec.get("how") == "and":
+                    logger.warning(f"{name}: context with single attribute and how='and' is redundant, consider removing how attribute")
             
             cyclic_el = rule_el.find("cyclic")
             if cyclic_el is None:
@@ -1523,6 +1553,8 @@ class GlobalPattern(Pattern):
                     ref = df_entry["ref"]
                     if ref not in all_declared_refs:
                         raise ValueError(f"{self.name}: context uses undeclared ref '{ref}'")
+                    if "min" in rule.context_spec["attributes"][attr_name] or "max" in rule.context_spec["attributes"][attr_name]:
+                        raise ValueError(f"{self.name}: context attribute '{attr_name}' cannot have min/max constraints. Contexts are exact-match filters only. You can define a Context TAK for range-based context and reference it here.")
             
             # Check initiator/ event /clipper / context refs
             for spec_name, spec in [("initiator", rule.initiator_spec), ("event", rule.event_spec), ("clipper", rule.clipper_spec), ("context", rule.context_spec)]:
@@ -1546,19 +1578,6 @@ class GlobalPattern(Pattern):
                 for target_ref in rule.value_constraint_compliance.get("targets", []):
                     if target_ref not in all_declared_refs:
                         raise ValueError(f"{self.name}: value-constraint-compliance target uses undeclared ref '{target_ref}'")
-                # Check parameter refs
-                for param_ref in rule.value_constraint_compliance.get("parameters", []):
-                    if param_ref not in all_declared_refs:
-                        raise ValueError(f"{self.name}: value-constraint-compliance uses undeclared parameter ref '{param_ref}'")
-        
-        # Validate value-constraint-compliance targets
-        for rule in self.abstraction_rules:
-            if rule.value_constraint_compliance:
-                for target_ref in rule.value_constraint_compliance.get("targets", []):
-                    # Ensure target is from event (not context or parameter)
-                    df_entry = derived_from_by_ref.get(target_ref)
-                    if df_entry is None:
-                        raise ValueError(f"{self.name}: value-constraint target ref '{target_ref}' not found in derived-from")
                     
                     # Check if target is used in event
                     event_attrs = set(rule.event_spec.get("attributes", {}).keys())
@@ -1569,6 +1588,10 @@ class GlobalPattern(Pattern):
                             f"{self.name}: value-constraint target ref '{target_ref}' ('{target_attr_name}') "
                             f"must reference an attribute used in event"
                         )
+                # Check parameter refs
+                for param_ref in rule.value_constraint_compliance.get("parameters", []):
+                    if param_ref not in all_declared_refs:
+                        raise ValueError(f"{self.name}: value-constraint-compliance uses undeclared parameter ref '{param_ref}'")
         
         # 3) Validate numeric range constraints match TAK's attribute types
         def _get_parent_attribute(tak, idx):
@@ -1660,19 +1683,6 @@ class GlobalPattern(Pattern):
                             f"use only 'equal' constraints."
                         )
 
-        # Validate context blocks (only ONE attribute allowed per context block)
-        for rule in self.abstraction_rules:
-            if rule.context_spec and rule.context_spec.get("attributes"):
-                num_context_attrs = len(rule.context_spec["attributes"])
-                if num_context_attrs > 1:
-                    raise ValueError(
-                        f"{self.name}: Pattern context blocks can only reference ONE context TAK. "
-                        f"Found {num_context_attrs} context attributes in rule. "
-                        f"Reason: A single DataFrame row cannot match multiple ConceptName values simultaneously."
-                        f"You can consider a few differnt contexts (OR condition) by splitting to different rules."
-                        f"Or you can consider only the intersection of 2 or more contexts as context of it's own by defining this as a seperate <context> file."
-                    )
-
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Apply GlobalPattern to find and rate pattern instances.
@@ -1728,7 +1738,15 @@ class GlobalPattern(Pattern):
         for rule in self.abstraction_rules:
             # Extract candidates once per rule (filtered by spec)
             events = self._extract_candidates(df, rule.event_spec)
-            contexts = self._extract_candidates(df, rule.context_spec) if rule.context_spec else None
+            if rule.context_spec:
+                contexts = self._extract_candidates(df, rule.context_spec)
+                how = rule.context_spec.get("how")
+                if how not in (None, "or", "and"):
+                    raise ValueError(f"[{self.name}] apply(): unknown context how='{how}', expected 'and' or 'or'")
+                if how == "and":
+                    contexts = rule.intersect_many_interval_sets(contexts, rule.context_spec)
+            else:
+                contexts = None
 
             initiators = self._extract_candidates(df, rule.initiator_spec) if getattr(rule, "initiator_spec", None) else None
             clippers = self._extract_candidates(df, rule.clipper_spec) if getattr(rule, "clipper_spec", None) else None

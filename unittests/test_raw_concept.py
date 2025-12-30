@@ -119,6 +119,77 @@ RAW_GLUCOSE_XML = """\
   <merge require-all="false"/>
 </raw-concept>
 """
+HIGH_GLUCOSE_IND_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="HIGH_GLUCOSE_IND" concept-type="raw-numeric">
+    <categories>Context</categories>
+    <description>Raw concept to indicate the transition to high glucose range in admission</description>
+    <attributes>
+        <attribute name="GLUCOSE_MEASURE" type="numeric">
+            <numeric-allowed-values>
+                <allowed-value min="180"/>
+            </numeric-allowed-values>
+        </attribute>
+    </attributes>
+</raw-concept>    
+    """
+
+LOW_GLUCOSE_IND_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="LOW_GLUCOSE_IND" concept-type="raw-numeric">
+    <categories>Context</categories>
+    <description>Raw concept to indicate the transition to low glucose range in admission</description>
+    <attributes>
+        <attribute name="GLUCOSE_MEASURE" type="numeric">
+            <numeric-allowed-values>
+                <allowed-value min="20" max="70"/>
+            </numeric-allowed-values>
+        </attribute>
+    </attributes>
+</raw-concept>
+    """
+
+STEADY_GLUCOSE_MEASURE_HIGH_AFTER_FIRST_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="STEADY_GLUCOSE_MEASURE_HIGH_AFTER_FIRST">
+    <categories>Measurements</categories>
+    <description>Raw concept that outputs only the glucose measurements after the first high glucose measurement (meaning it's repetative if high)</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    
+    <!-- Will use the closest instance to the beginning of the pattern -->
+    <parameters>
+        <parameter name="HIGH_GLUCOSE_IND" tak="raw-concept" how='before' dynamic="false" idx="0" ref="P1"/>
+    </parameters>
+
+    <functions>
+        <function name="id">
+            <value idx="0"/>
+        </function>
+    </functions>
+
+</parameterized-raw-concept>    
+    """
+
+STEADY_GLUCOSE_MEASURE_LOW_AFTER_FIRST_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="STEADY_GLUCOSE_MEASURE_LOW_AFTER_FIRST">
+    <categories>Measurements</categories>
+    <description>Raw concept that outputs only the glucose measurements after the first low glucose measurement (meaning it's repetative if low)</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    
+    <!-- Will use the closest instance to the beginning of the pattern -->
+    <parameters>
+        <parameter name="LOW_GLUCOSE_IND" tak="raw-concept" how='before' dynamic="false" idx="0" ref="P1"/>
+    </parameters>
+
+    <functions>
+        <function name="id">
+            <value idx="0"/>
+        </function>
+    </functions>
+
+</parameterized-raw-concept>    
+    """
 
 
 # -----------------------------
@@ -521,6 +592,64 @@ def test_apply_parameterized_raw_concept_with_how_flag(tmp_path: Path):
     # Even though 09:00 (80) exists and is before 10:00, it is ignored because dynamic=false.
     # Result: 200/50 = 4.0. (If dynamic=true, it would be 200/80 = 2.5)
     assert out.iloc[1]["Value"][0] == 4.0
+
+def test_steady_glucose_high_pivot_emits_only_after_first_indicator(tmp_path: Path):
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    high_ind_path = write_xml(tmp_path, "HIGH_GLUCOSE_IND.xml", HIGH_GLUCOSE_IND_XML)
+    param_path = write_xml(tmp_path, "STEADY_HIGH_AFTER_FIRST.xml", STEADY_GLUCOSE_MEASURE_HIGH_AFTER_FIRST_XML)
+
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(high_ind_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("06:00"), make_ts("06:00"), (100,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (110,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("07:30"), make_ts("07:30"), (210,), "raw-concept"),
+        (1, "HIGH_GLUCOSE_IND", make_ts("08:00"), make_ts("08:00"), ("True",), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("09:00"), make_ts("09:00"), (200,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), (150,), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+
+    out = tak.apply(df)
+    assert len(out) == 2
+    assert list(out["StartDateTime"]) == [make_ts("09:00"), make_ts("10:00")]
+
+    df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("06:00"), make_ts("06:00"), (100,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), (190,), "raw-concept"),
+        (1, "HIGH_GLUCOSE_IND", make_ts("08:00"), make_ts("08:00"), ("True",), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("09:00"), make_ts("09:00"), (200,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("10:00"), make_ts("10:00"), (150,), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+
+    out = tak.apply(df)
+    assert len(out) == 2
+    assert list(out["StartDateTime"]) == [make_ts("09:00"), make_ts("10:00")]
+
+
+def test_steady_glucose_high_no_indicator_emits_nothing(tmp_path: Path):
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    high_ind_path = write_xml(tmp_path, "HIGH_GLUCOSE_IND.xml", HIGH_GLUCOSE_IND_XML)
+    param_path = write_xml(tmp_path, "STEADY_HIGH_AFTER_FIRST.xml", STEADY_GLUCOSE_MEASURE_HIGH_AFTER_FIRST_XML)
+
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(high_ind_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("06:00"), make_ts("06:00"), (100,), "raw-concept"),
+        (1, "GLUCOSE_MEASURE", make_ts("07:00"), make_ts("07:00"), (110,), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+
+    out = tak.apply(df)
+    assert out.empty
 
 
 def test_apply_creatinine_rel_serum_measure(tmp_path: Path):

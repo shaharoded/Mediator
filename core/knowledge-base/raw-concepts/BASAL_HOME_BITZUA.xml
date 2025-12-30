@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="BASAL_HOME_BITZUA" concept-type="raw-boolean">
+    <categories>DrugAdministration</categories>
+    <description>Raw concept to mark basal medication administration event (at home, signaling valuable context) that the patient is already treated routinely at home</description>
+    <attributes>
+        <attribute name="BASAL_HOME_BITZUA" type="boolean"/>
+    </attributes>
+</raw-concept>

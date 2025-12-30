@@ -58,6 +58,103 @@ class TAKRule(ABC):
         """Check if rule matches given input."""
         pass
 
+    @staticmethod
+    def _intervals_overlap(a_start, a_end, b_start, b_end, *, inclusive: bool = True) -> bool:
+        """
+        Overlap test.
+        inclusive=True means [end==start] counts as overlap.
+        """
+        if inclusive:
+            return (a_start <= b_end) and (b_start <= a_end)
+        else:
+            return (a_start < b_end) and (b_start < a_end)
+
+    @staticmethod
+    def _normalize_interval_df(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Keep only StartDateTime/EndDateTime and ensure correct dtypes + ordering.
+        """
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["StartDateTime", "EndDateTime"])
+
+        out = df[["StartDateTime", "EndDateTime"]].copy()
+        out["StartDateTime"] = pd.to_datetime(out["StartDateTime"])
+        out["EndDateTime"] = pd.to_datetime(out["EndDateTime"])
+
+        # Ensure start <= end (if your pipeline guarantees this, you can remove)
+        swap_mask = out["StartDateTime"] > out["EndDateTime"]
+        if swap_mask.any():
+            out.loc[swap_mask, ["StartDateTime", "EndDateTime"]] = out.loc[
+                swap_mask, ["EndDateTime", "StartDateTime"]
+            ].values
+
+        return out.sort_values(["StartDateTime", "EndDateTime"]).reset_index(drop=True)
+
+    @classmethod
+    def _intersect_two_interval_sets(cls, df1: pd.DataFrame, df2: pd.DataFrame) -> pd.DataFrame:
+        """
+        Return intersection intervals between df1 and df2.
+        Handles overlap + containment naturally.
+        Output columns: StartDateTime, EndDateTime.
+        """
+        a = cls._normalize_interval_df(df1)
+        b = cls._normalize_interval_df(df2)
+
+        if a.empty or b.empty:
+            return pd.DataFrame(columns=["StartDateTime", "EndDateTime"])
+
+        out = []
+        i = j = 0
+        a_rows = a.to_records(index=False)
+        b_rows = b.to_records(index=False)
+
+        while i < len(a_rows) and j < len(b_rows):
+            a_s, a_e = a_rows[i]
+            b_s, b_e = b_rows[j]
+
+            s = max(a_s, b_s)
+            e = min(a_e, b_e)
+
+            if s <= e:  # inclusive intersection
+                out.append((s, e))
+
+            # Advance pointer with earlier end
+            if a_e <= b_e:
+                i += 1
+            else:
+                j += 1
+
+        return pd.DataFrame(out, columns=["StartDateTime", "EndDateTime"])
+
+    @classmethod
+    def intersect_many_interval_sets(cls, contexts: pd.DataFrame, context_spec: Dict[str, Any]) -> pd.DataFrame:
+        """
+        Intersection across multiple interval sets derived from context concepts:
+        (((df0 ∩ df1) ∩ df2) ...).
+
+        Args:
+            contexts: DataFrame with columns [ConceptName, StartDateTime, EndDateTime]
+            context_spec: Context specification with "attributes" defining desired concept names
+        """
+        contexts = contexts.copy()
+        dfs = []
+        ctx_concepts = list(context_spec["attributes"].keys())
+        
+        for cn in ctx_concepts:
+            d = contexts[contexts["ConceptName"] == cn][["StartDateTime", "EndDateTime"]]
+            if d.empty:
+                return None
+            dfs.append(d)
+        if not dfs:
+            return pd.DataFrame(columns=["StartDateTime", "EndDateTime"])
+
+        inter = cls._normalize_interval_df(dfs[0])
+        for nxt in dfs[1:]:
+            inter = cls._intersect_two_interval_sets(inter, nxt)
+            if inter.empty:
+                logger.debug("TakRule: No intersection intervals found across all context concepts.")
+                break
+        return inter
 
 class StateAbstractionRule(TAKRule):
     """
@@ -242,11 +339,12 @@ class TemporalRelationRule(TAKRule):
         self.context_spec = context_spec or {}
         self.max_delta: Optional[timedelta] = None
         self.min_delta: Optional[timedelta] = None
+
         if relation_spec.get("max_distance"):
             self.max_delta = parse_duration(relation_spec["max_distance"])
         if relation_spec.get("min_distance"):
             self.min_delta = parse_duration(relation_spec["min_distance"])
-        
+
         # Compliance functions (optional)
         self.time_constraint_compliance = time_constraint_compliance  # {func_name, trapez, parameters}
         self.value_constraint_compliance = value_constraint_compliance  # {func_name, trapez, targets, parameters}
@@ -298,26 +396,31 @@ class TemporalRelationRule(TAKRule):
         if self.max_delta is None:
             return True
         return delta <= self.max_delta
-
+    
     def _context_satisfied(self, anchor_row: pd.Series, contexts: Optional[pd.DataFrame]) -> bool:
         """
         Context gates the anchor only:
         context must overlap the anchor interval [anchor_start, anchor_end]
         and match the allowed-value constraints (already applied by _extract_candidates).
+        - OR: anchor overlaps >=1 interval from ANY context concept referenced
+        - AND: anchor overlaps >=1 interval from the INTERSECTION of all unique context concepts referenced
+        Merging condition is already applied once on the rule level.
         """
         if not self.context_spec or not self.context_spec.get("attributes"):
             return True
 
         if contexts is None or contexts.empty:
+            logger.debug(f"TemporalRelationRule: No contexts available to satisfy context_spec for anchor {anchor_row['StartDateTime']} - {anchor_row['EndDateTime']}.")
             return False
 
         a_start = anchor_row["StartDateTime"]
-        a_end = anchor_row["EndDateTime"]
+        a_end   = anchor_row["EndDateTime"]
 
-        # contexts is already filtered by ConceptName/value constraints via _extract_candidates()
         overlap_mask = (contexts["StartDateTime"] <= a_end) & (contexts["EndDateTime"] >= a_start)
-        return bool(overlap_mask.any())
-
+        matched = bool(overlap_mask.any())
+        if not matched:
+            logger.debug(f"TemporalRelationRule: No contexts overlapping anchor {a_start} - {a_end}.")
+        return matched
 
 class CyclicRule(TAKRule):
     """
@@ -346,7 +449,7 @@ class CyclicRule(TAKRule):
         self.event_spec = event_spec
         self.initiator_spec = initiator_spec
         self.clipper_spec = clipper_spec
-        self.context_spec = context_spec
+        self.context_spec = context_spec or {}
         self.cyclic_constraint_compliance = cyclic_constraint_compliance
         self.value_constraint_compliance = value_constraint_compliance
 
@@ -358,38 +461,24 @@ class CyclicRule(TAKRule):
         pass
 
     def context_satisfied(self, window_start: pd.Timestamp, window_end: pd.Timestamp, contexts: Optional[pd.DataFrame]) -> bool:
+        """
+        Context gates the WINDOW for cyclic rules:
+        - OR: window overlaps >=1 interval from ANY context concept referenced
+        - AND: window overlaps >=1 interval from the INTERSECTION of all unique context concepts referenced
+        """
         if not self.context_spec or not self.context_spec.get("attributes"):
             return True
+
         if contexts is None or contexts.empty:
             logger.debug(f"CyclicRule: No contexts available to satisfy context_spec for window {window_start} - {window_end}.")
             return False
         
-        # ASSUMPTION: Only ONE context attribute (enforced in validation)
-        attr_name, attr_spec = next(iter(self.context_spec["attributes"].items()))
-        allowed_values = attr_spec.get("allowed_values", set())
-        
-        if not allowed_values:
-            attr_mask = (contexts["ConceptName"] == attr_name)
-            if not attr_mask.any(): 
-                logger.debug(f"CyclicRule: No contexts with ConceptName '{attr_name}' found for window {window_start} - {window_end}.")
-                return False
-            matching_contexts = contexts[attr_mask]
-        else:
-            concept_mask = (contexts["ConceptName"] == attr_name)
-            value_mask = contexts["Value"].astype(str).isin(allowed_values)
-            combined_mask = concept_mask & value_mask
-            if not combined_mask.any(): 
-                logger.debug(f"CyclicRule: No contexts with ConceptName '{attr_name}' and allowed values {allowed_values} found for window {window_start} - {window_end}.")
-                return False
-            matching_contexts = contexts[combined_mask]
-        
-        # Check temporal overlap with window
-        overlap_mask = (matching_contexts["StartDateTime"] < window_end) & (matching_contexts["EndDateTime"] > window_start)
-        matched = overlap_mask.any()
+        # Since contexts are already the intersection intervals (if AND), we can just check overlap directly
+        overlap_mask = (contexts["StartDateTime"] <= window_end) & (contexts["EndDateTime"] >= window_start)
+        matched = bool(overlap_mask.any())
         if not matched:
             logger.debug(f"CyclicRule: No contexts overlapping window {window_start} - {window_end}.")
         return matched
-
 
 def validate_xml_against_schema(xml_path: Path, schema_path: Optional[Path] = None) -> None:
     """

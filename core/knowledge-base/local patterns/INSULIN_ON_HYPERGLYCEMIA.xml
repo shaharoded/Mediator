@@ -1,30 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <pattern name="INSULIN_ON_HYPERGLYCEMIA_PATTERN" concept-type="local-pattern">
     <categories>RoutineTreatment</categories>
-    <description>Captures if INSULIN (BASAL/BOLUS/IV) was performed within proximity to a meal, assuming glucose was high at the time</description>
+    <description>Captures if reactive INSULIN (BOLUS/IV) was performed within proximity to a meal, assuming glucose was high at the time</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
     <derived-from>
         <attribute name="MEAL_CONTEXT" tak="context" ref="A1"/>
         <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="C1"/>
         
         <!-- BOLUS_BITZUA is used to clip HIGH_GLUCOSE_CONTEXT, so "before" relation will fit -->
-        <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
-        <attribute name="BASAL_BITZUA" tak="raw-concept" idx="0" ref="E2"/>
-        <attribute name="INSULIN_BITZUA" tak="raw-concept" idx="0" ref="E3"/>
+        <attribute name="REACTIVE_INSULIN_BITZUA_CONTEXT" tak="context" ref="E1"/>
     </derived-from>
 
     <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
     <abstraction-rules>
         <rule>
-            <!-- OPTIONAL: Contextual Information relevant if begins at / before the last event of the pattern starts-->
             <!-- Context will be relevant here only if the high glucose context is true before the insulin event-->
             <context>
                 <attribute ref="C1">
                     <allowed-value equal="True"/>
-                    <allowed-value equal="Breakfast"/>
-                    <allowed-value equal="Lunch"/>
-                    <allowed-value equal="Dinner"/>
-                    <allowed-value equal="Night-Snack"/>
                 </attribute>
             </context>
             <!-- Relation between 2 KBTA objects -->
@@ -32,18 +25,16 @@
             <temporal-relation how='overlap' existence-compliance='true'>
                 <anchor>
                     <attribute ref="A1">
-                        <allowed-value equal="True"/>
+                        <allowed-value equal="Breakfast"/>
+                        <allowed-value equal="Lunch"/>
+                        <allowed-value equal="Dinner"/>
+                        <allowed-value equal="Night-Snack"/>
                     </attribute>
                 </anchor>
                 <event select='first'>
                     <attribute ref="E1">
-                        <allowed-value min="1"/>
-                    </attribute>
-                    <attribute ref="E2">
-                        <allowed-value min="1"/>    
-                    </attribute>
-                    <attribute ref="E3">
-                        <allowed-value min="0.01"/>    
+                        <allowed-value equal="IV"/>
+                        <allowed-value equal="Short"/>
                     </attribute>
                 </event>
             </temporal-relation>

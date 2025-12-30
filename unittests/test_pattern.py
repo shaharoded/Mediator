@@ -318,7 +318,7 @@ CTX_HIGH_GLUCOSE_XML = """\
     </rule>
   </abstraction-rules>
   <context-windows>
-    <persistence good-before="24h" good-after="24h"/>
+    <persistence good-before="0h" good-after="24h"/>
   </context-windows>
 </context>
 """
@@ -802,6 +802,7 @@ PATTERN_ROUTINE_GLUCOSE_XML = """\
     <derived-from>
         <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="I1"/>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+        <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="C3"/>
         <attribute name="DEATH_EVENT" tak="raw-concept" idx="0" ref="C1"/>
         <attribute name="RELEASE_EVENT" tak="raw-concept" idx="0" ref="C2"/>
     </derived-from>
@@ -809,8 +810,8 @@ PATTERN_ROUTINE_GLUCOSE_XML = """\
     <abstraction-rules>
         <rule>
             <context>
-                <attribute ref="E1">
-                    <allowed-value min="180"/>
+                <attribute ref="C3">
+                    <allowed-value equal="True"/>
                 </attribute>
             </context>
 
@@ -1025,6 +1026,7 @@ PATTERN_ROUTINE_INSULIN_DOSAGE_XML = """\
         <attribute name="DEATH_EVENT" tak="raw-concept" idx="0" ref="C1"/>
         <attribute name="RELEASE_EVENT" tak="raw-concept" idx="0" ref="C2"/>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="C3"/>
+        <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="C4"/>
     </derived-from>
 
     <parameters>
@@ -1034,8 +1036,8 @@ PATTERN_ROUTINE_INSULIN_DOSAGE_XML = """\
     <abstraction-rules>
         <rule>
             <context>
-                <attribute ref="C3">
-                    <allowed-value min="180"/>
+                <attribute ref="C4">
+                    <allowed-value equal="True"/>
                 </attribute>
             </context>
 
@@ -1168,11 +1170,11 @@ LOCAL_INSULIN_ON_HYPERGLYCEMIA_XML = """\
     </abstraction-rules>
 </pattern>
     """
-LOCAL_REDUCE_INSULIN_ON_HYPOGLYCEMIA_XML = """\
+LOCAL_REDUCE_INSULIN_ON_HYPOGLYCEMIA_IGNORE_UNFULFILLED_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- In this case must ignore-unfulfilled-anchors="true" otherwise unfulfilled anchors emit 'False' / 0.0, which is the opposite of what we want -->
 <!-- We are effectively only outputting compliance for fulfilled anchors, meaning cases where dose was given -->
-<pattern name="REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN" concept-type="local-pattern" ignore-unfulfilled-anchors="true">
+<pattern name="REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN_IGNORE_UNFULFILLED" concept-type="local-pattern" ignore-unfulfilled-anchors="true">
     <categories>RoutineTreatment</categories>
     <description>Captures if long term INSULIN (BASAL) was reduced after low glucose measured (if was given within 24h of the event, ignores otherwise)</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
@@ -1216,6 +1218,55 @@ LOCAL_REDUCE_INSULIN_ON_HYPOGLYCEMIA_XML = """\
     </abstraction-rules>
 </pattern>
     """
+
+LOCAL_REDUCE_INSULIN_ON_HYPOGLYCEMIA_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- We are effectively only outputting compliance for fulfilled anchors, meaning cases where dose was given -->
+<pattern name="REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN" concept-type="local-pattern">
+    <categories>RoutineTreatment</categories>
+    <description>Captures if long term INSULIN (BASAL) was reduced after low glucose measured (if was given within 24h of the event, ignores otherwise)</description>
+    <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
+    <derived-from>
+        <attribute name="DISGLYCEMIA_EVENT" tak="event" ref="A2"/>
+        <attribute name="BASAL_BITZUA_RATIO" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+
+    <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
+    <abstraction-rules>
+        <rule>
+            <!-- Rule 2: No overlap within low glucose context, but did we reduce dose outside this context within 24h? -->
+            <!-- This is only relevant if glucose level balanced back, but insulin dose was given -->
+            <!-- 24h after hypoglycemia event: Don't care about the insulin dose -->
+            <temporal-relation how='before' max-distance='24h'>
+                <anchor>
+                    <attribute ref="A2">
+                        <allowed-value equal="Hypoglycemia"/>
+                    </attribute>
+                </anchor>
+                <event select='first'>
+                    <attribute ref="E1">
+                        <allowed-value min="0"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+
+            <!-- OPTIONAL: Compliance function to define fuzzy time window -->
+            <compliance-function>
+                <value-constraint-compliance>
+                    <target>
+                        <attribute ref="E1"/>
+                    </target>
+                    <function name="id">
+                        <!-- Any decrease in dose will is good compliance -->
+                        <trapez trapezA="0" trapezB="0" trapezC="0.99" trapezD="1"/>
+                    </function>
+                </value-constraint-compliance>
+            </compliance-function>
+        </rule>
+    </abstraction-rules>
+</pattern>
+    """
+
 LOCAL_STOP_ANTIDIABETICS_ON_ADMISSION_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <pattern name="STOP_ANTIDIABETICS_ON_ADMISSION_PATTERN" concept-type="local-pattern">
@@ -1523,6 +1574,153 @@ GLOBAL_PATTERN_IGNORE_UNFULFILLED_ANCHORS_XML = """\
     </pattern>
     """
 
+LOCAL_MULTI_CONTEXT_AND_XML = '''\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="MEAL_AND_HIGH_GLUCOSE_GATES_BOLUS_PATTERN" concept-type="local-pattern">
+    <categories>RoutineTreatment</categories>
+    <description>Tests multi-context gating with how='and'</description>
+
+    <derived-from>
+        <attribute name="MEAL_CONTEXT" tak="context" ref="A1"/>
+        <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="C1"/>
+        <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+
+    <abstraction-rules>
+        <rule>
+            <context how="and">
+                <attribute ref="A1">
+                    <allowed-value equal="True"/>
+                </attribute>
+                <attribute ref="C1">
+                    <allowed-value equal="True"/>
+                </attribute>
+            </context>
+
+            <temporal-relation how="overlap" existence-compliance="true">
+                <anchor>
+                    <attribute ref="A1">
+                        <allowed-value equal="True"/>
+                    </attribute>
+                </anchor>
+                <event select="first">
+                    <attribute ref="E1">
+                        <allowed-value min="1"/>
+                    </attribute>
+                </event>
+            </temporal-relation>
+        </rule>
+    </abstraction-rules>
+</pattern>
+'''
+
+LOCAL_MULTI_CONTEXT_OR_XML = '''\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="MEAL_OR_HIGH_GLUCOSE_GATES_BOLUS_PATTERN" concept-type="local-pattern">
+    <categories>RoutineTreatment</categories>
+    <description>Tests multi-context gating with OR (default)</description>
+
+    <derived-from>
+        <attribute name="MEAL_CONTEXT" tak="context" ref="A1"/>
+        <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="C1"/>
+        <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
+    </derived-from>
+
+    <abstraction-rules>
+        <rule>
+            <!-- default is OR, but we make it explicit -->
+            <context how="or">
+                <attribute ref="A1"><allowed-value equal="True"/></attribute>
+                <attribute ref="C1"><allowed-value equal="True"/></attribute>
+            </context>
+
+            <temporal-relation how="overlap" existence-compliance="true">
+                <anchor>
+                    <attribute ref="A1"><allowed-value equal="True"/></attribute>
+                </anchor>
+                <event select="first">
+                    <attribute ref="E1"><allowed-value min="1"/></attribute>
+                </event>
+            </temporal-relation>
+        </rule>
+    </abstraction-rules>
+</pattern>
+'''
+
+GLOBAL_MULTI_CONTEXT_AND_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="GLOBAL_GLUCOSE_CHECK_DIAB_AND_HIGH_PATTERN" concept-type="global-pattern">
+  <categories>Test</categories>
+  <description>Global pattern gated by (DIABETES_CONTEXT AND HIGH_GLUCOSE_CONTEXT)</description>
+
+  <derived-from>
+    <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="I1"/>
+    <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+    <attribute name="RELEASE_EVENT" tak="raw-concept" idx="0" ref="C1"/>
+    <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C2"/>
+    <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="C3"/>
+  </derived-from>
+
+  <abstraction-rules>
+    <rule>
+      <context how="and">
+        <attribute ref="C2"><allowed-value equal="True"/></attribute>
+        <attribute ref="C3"><allowed-value equal="True"/></attribute>
+      </context>
+
+      <cyclic start="0h" end="48h" time-window="24h" min-occurrences="1" max-occurrences="100">
+        <initiator>
+          <attribute ref="I1"><allowed-value equal="True"/></attribute>
+        </initiator>
+        <event>
+          <attribute ref="E1"><allowed-value min="20"/></attribute>
+        </event>
+        <clipper>
+          <attribute ref="C1"><allowed-value equal="True"/></attribute>
+        </clipper>
+      </cyclic>
+    </rule>
+  </abstraction-rules>
+</pattern>
+"""
+
+GLOBAL_MULTI_CONTEXT_OR_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<pattern name="GLOBAL_GLUCOSE_CHECK_DIAB_OR_HIGH_PATTERN" concept-type="global-pattern">
+  <categories>Test</categories>
+  <description>Global pattern gated by (DIABETES_CONTEXT OR HIGH_GLUCOSE_CONTEXT)</description>
+
+  <derived-from>
+    <attribute name="ADMISSION_EVENT" tak="raw-concept" idx="0" ref="I1"/>
+    <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
+    <attribute name="RELEASE_EVENT" tak="raw-concept" idx="0" ref="C1"/>
+    <attribute name="DIABETES_DIAGNOSIS_CONTEXT" tak="context" ref="C2"/>
+    <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="C3"/>
+  </derived-from>
+
+  <abstraction-rules>
+    <rule>
+      <context how="or">
+        <attribute ref="C2"><allowed-value equal="True"/></attribute>
+        <attribute ref="C3"><allowed-value equal="True"/></attribute>
+      </context>
+
+      <cyclic start="0h" end="48h" time-window="24h" min-occurrences="1" max-occurrences="100">
+        <initiator>
+          <attribute ref="I1"><allowed-value equal="True"/></attribute>
+        </initiator>
+        <event>
+          <attribute ref="E1"><allowed-value min="20"/></attribute>
+        </event>
+        <clipper>
+          <attribute ref="C1"><allowed-value equal="True"/></attribute>
+        </clipper>
+      </cyclic>
+    </rule>
+  </abstraction-rules>
+</pattern>
+"""
+
 # -----------------------------
 # Main fixture
 # -----------------------------
@@ -1575,7 +1773,7 @@ def repo_protocol_kb(tmp_path: Path) -> "TAKRepository":
         "DISGLYCEMIA_EVENT.xml": DISGLYCEMIA_EVENT_XML,
 
         # -------------------------
-        # Unit-test local patterns (the ones behind old dedicated fixtures)
+        # Unit-test local patterns
         # -------------------------
         "GLUCOSE_ON_ADMISSION_SIMPLE.xml": PATTERN_SIMPLE_XML,
         "GLUCOSE_ON_ADMISSION_TIME.xml": PATTERN_TIME_COMPLIANCE_XML,
@@ -1586,12 +1784,12 @@ def repo_protocol_kb(tmp_path: Path) -> "TAKRepository":
         "INSULIN_DURING_ADMISSION.xml": PATTERN_OVERLAP_XML,
         "INSULIN_DURING_ADMISSION_EXISTENCE.xml": PATTERN_OVERLAP_EXISTENCE_XML,
         "INSULIN_DURING_ADMISSION_EXISTENCE_VALUE.xml": PATTERN_OVERLAP_EXISTENCE_VALUE_XML,
+        "MEAL_AND_HIGH_GLUCOSE_GATES_BOLUS_PATTERN.xml": LOCAL_MULTI_CONTEXT_AND_XML,
+        "MEAL_OR_HIGH_GLUCOSE_GATES_BOLUS_PATTERN.xml": LOCAL_MULTI_CONTEXT_OR_XML,
 
-        # -------------------------
-        # Protocol local patterns
-        # -------------------------
         "BMI_MEASURE_ON_ADMISSION.xml": LOCAL_BMI_ON_ADMISSION_XML,
         "INSULIN_ON_HYPERGLYCEMIA_PATTERN.xml": LOCAL_INSULIN_ON_HYPERGLYCEMIA_XML,
+        "REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN_IGNORE_UNFULFILLED.xml": LOCAL_REDUCE_INSULIN_ON_HYPOGLYCEMIA_IGNORE_UNFULFILLED_XML,
         "REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN.xml": LOCAL_REDUCE_INSULIN_ON_HYPOGLYCEMIA_XML,
         "STOP_ANTIDIABETICS_ON_ADMISSION_PATTERN.xml": LOCAL_STOP_ANTIDIABETICS_ON_ADMISSION_XML,
         "GLUCOSE_MEASURE_ON_ADMISSION_PATTERN.xml": GLUCOSE_MEASURE_ON_ADMISSION_XML,
@@ -1603,6 +1801,9 @@ def repo_protocol_kb(tmp_path: Path) -> "TAKRepository":
         "ROUTINE_GLUCOSE_MEASURE_ON_ADMISSION_PATTERN.xml": PATTERN_ROUTINE_GLUCOSE_ON_ADMISSION_XML,
         "ROUTINE_GLUCOSE_MEASURE_ON_STEROIDS_PATTERN.xml": PATTERN_ROUTINE_GLUCOSE_ON_STEROIDS_XML,
         "ROUTINE_INSULIN_PATTERN.xml": PATTERN_ROUTINE_INSULIN_DOSAGE_XML,
+        
+        "GLOBAL_GLUCOSE_CHECK_DIAB_AND_HIGH_PATTERN.xml": GLOBAL_MULTI_CONTEXT_AND_XML,
+        "GLOBAL_GLUCOSE_CHECK_DIAB_OR_HIGH_PATTERN.xml": GLOBAL_MULTI_CONTEXT_OR_XML,
 
         # -------------------------
         # Unit-test global patterns (the ones behind old dedicated fixtures)
@@ -1792,7 +1993,7 @@ def test_insulin_on_hyperglycemia_no_existence_returns_empty(repo_protocol_kb, t
     assert len(out) == 0
 
 # --------------------------------------------------------------------------------------
-# REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN
+# REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN_IGNORE_UNFULFILLED
 # TAK summary:
 # - ignore-unfulfilled-anchors="true"  (important behavior)
 # - temporal relation: anchor DISGLYCEMIA_EVENT with Value == "Hypoglycemia"
@@ -1802,7 +2003,7 @@ def test_insulin_on_hyperglycemia_no_existence_returns_empty(repo_protocol_kb, t
 # --------------------------------------------------------------------------------------
 
 def test_reduce_insulin_on_hypoglycemia_within_24h_good_ratio(repo_protocol_kb):
-    pattern = repo_protocol_kb.get("REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN")
+    pattern = repo_protocol_kb.get("REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN_IGNORE_UNFULFILLED")
 
     df_in = pd.DataFrame([
         (1, "DISGLYCEMIA_EVENT",    make_ts("08:00"), make_ts("08:00"), "Hypoglycemia"),
@@ -1821,7 +2022,7 @@ def test_reduce_insulin_on_hypoglycemia_within_24h_bad_ratio(repo_protocol_kb):
     Case: Hypoglycemia at T0, basal ratio at +6h but ratio=1.0.
     Expected: fires, but ValueConstraintScore should be 0.0 (trapezD boundary).
     """
-    pattern = repo_protocol_kb.get("REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN")
+    pattern = repo_protocol_kb.get("REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN_IGNORE_UNFULFILLED")
 
     df = pd.DataFrame([
         (1, "DISGLYCEMIA_EVENT", make_ts("08:00"), make_ts("08:00"), "Hypoglycemia"),
@@ -1842,7 +2043,7 @@ def test_reduce_insulin_on_hypoglycemia_no_basal_ratio_unfulfilled_anchor_ignore
     Because ignore-unfulfilled-anchors="true", we should NOT emit a 'False' row.
     Expected: output is empty.
     """
-    pattern = repo_protocol_kb.get("REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN")
+    pattern = repo_protocol_kb.get("REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN_IGNORE_UNFULFILLED")
 
     df = pd.DataFrame([
         (1, "DISGLYCEMIA_EVENT", make_ts("08:00"), make_ts("08:00"), "Hypoglycemia"),
@@ -1859,7 +2060,7 @@ def test_reduce_insulin_on_hypoglycemia_basal_ratio_after_24h_unfulfilled_anchor
     Case: BASAL_BITZUA_RATIO exists but only after 24h.
     Expected: no match; ignore-unfulfilled-anchors=true => no 'False' output.
     """
-    pattern = repo_protocol_kb.get("REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN")
+    pattern = repo_protocol_kb.get("REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN_IGNORE_UNFULFILLED")
 
     df = pd.DataFrame([
         (1, "DISGLYCEMIA_EVENT", make_ts("08:00"), make_ts("08:00"), "Hypoglycemia"),
@@ -1870,6 +2071,80 @@ def test_reduce_insulin_on_hypoglycemia_basal_ratio_after_24h_unfulfilled_anchor
 
     assert len(out) == 0
 
+
+# --------------------------------------------------------------------------------------
+# REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN
+# TAK summary:
+# - ignore-unfulfilled-anchors="false"  (should output rows for unmatched anchors with 'True', compliance score == 1.0)
+# - temporal relation: anchor DISGLYCEMIA_EVENT with Value == "Hypoglycemia"
+#   event BASAL_BITZUA_RATIO within 24h AFTER the hypoglycemia event (how='before', max-distance='24h')
+# - value constraint compliance on BASAL_BITZUA_RATIO via trapez [0,0,0.99,1]
+#   => ratio <= 0.99 should have ValueConstraintScore=1.0 (plateau), ratio=1.0 -> 0.0
+# --------------------------------------------------------------------------------------
+
+def test_reduce_insulin_unfulfilled_ignored_good_and_bad(repo_protocol_kb):
+    # TAK variant that ignores unfulfilled anchors
+    pattern = repo_protocol_kb.get("REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN_IGNORE_UNFULFILLED")
+    assert pattern is not None
+
+    # Good ratio within 24h -> True + ValueConstraintScore == 1.0
+    df_good = pd.DataFrame([
+        (1, "DISGLYCEMIA_EVENT",  make_ts("08:00"), make_ts("08:00"), "Hypoglycemia"),
+        (1, "BASAL_BITZUA_RATIO", make_ts("20:00"), make_ts("20:00"), 0.8),  # +12h
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    out = pattern.apply(df_good)
+    assert len(out) == 1
+    row = out.iloc[0]
+    assert row["Value"] == "True"
+    assert float(row["ValueConstraintScore"]) == pytest.approx(1.0, abs=1e-9)
+
+    # Bad ratio within 24h -> emits, but ValueConstraintScore == 0.0
+    df_bad = pd.DataFrame([
+        (1, "DISGLYCEMIA_EVENT",  make_ts("08:00"), make_ts("08:00"), "Hypoglycemia"),
+        (1, "BASAL_BITZUA_RATIO", make_ts("14:00"), make_ts("14:00"), 1.0),  # +6h
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    out = pattern.apply(df_bad)
+    assert len(out) == 1
+    row = out.iloc[0]
+    assert row["Value"] == "False"
+    assert float(row["ValueConstraintScore"]) == pytest.approx(0.0, abs=1e-9)
+
+def test_reduce_insulin_unfulfilled_ignored_no_ratio_emits_nothing(repo_protocol_kb):
+    # ignore-unfulfilled variant should NOT emit False rows when no BASAL_BITZUA_RATIO exists
+    pattern = repo_protocol_kb.get("REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN_IGNORE_UNFULFILLED")
+    df = pd.DataFrame([
+        (1, "DISGLYCEMIA_EVENT", make_ts("08:00"), make_ts("08:00"), "Hypoglycemia"),
+        # no BASAL_BITZUA_RATIO rows
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+    out = pattern.apply(df)
+    assert len(out) == 0
+
+def test_reduce_insulin_unfulfilled_not_ignored_emits_false(repo_protocol_kb):
+    # default pattern (ignore-unfulfilled=false) should emit a False row for an anchor with no matching event
+    pattern = repo_protocol_kb.get("REDUCE_INSULIN_ON_HYPOGLYCEMIA_PATTERN")
+    assert pattern is not None
+
+    df = pd.DataFrame([
+        (1, "DISGLYCEMIA_EVENT", make_ts("08:00"), make_ts("08:00"), "Hypoglycemia"),
+        # no BASAL_BITZUA_RATIO rows
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+    out = pattern.apply(df)
+
+    # Expect a single emitted row describing the unfulfilled anchor (Value == "True")
+    assert len(out) == 1
+    row = out.iloc[0]
+    assert row["Value"] == "True"
+
+    df = pd.DataFrame([
+        (1, "DISGLYCEMIA_EVENT", make_ts("08:00"), make_ts("08:00"), "Hypoglycemia"),
+        (1, "BASAL_BITZUA_RATIO", make_ts("14:00", day=1), make_ts("14:00", day=1), 1.0),  # After 24h
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+    out = pattern.apply(df)
+
+    # Expect a single emitted row describing the unfulfilled anchor (Value == "True")
+    assert len(out) == 1
+    row = out.iloc[0]
+    assert row["Value"] == "True"
 
 # --------------------------------------------------------------------------------------
 # STOP_ANTIDIABETICS_ON_ADMISSION_PATTERN
@@ -1962,6 +2237,7 @@ def test_stop_antidiabetics_no_match_after_14d(repo_protocol_kb):
 def test_routine_glucose_measure_hyperglycemia_requires_3_per_day(repo_protocol_kb):
     admission = repo_protocol_kb.get("ADMISSION_EVENT")
     glucose = repo_protocol_kb.get("GLUCOSE_MEASURE")
+    glucose_high = repo_protocol_kb.get("HIGH_GLUCOSE_CONTEXT")
     release = repo_protocol_kb.get("RELEASE_EVENT")
     pattern = repo_protocol_kb.get("ROUTINE_GLUCOSE_MEASURE_PATTERN")
 
@@ -1974,10 +2250,13 @@ def test_routine_glucose_measure_hyperglycemia_requires_3_per_day(repo_protocol_
     df_in = pd.concat([
         admission.apply(df[df["ConceptName"] == "ADMISSION_EVENT"]),
         glucose.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),
+        glucose_high.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),  # context derived from glucose
         release.apply(df[df["ConceptName"] == "RELEASE_EVENT"]),
     ], ignore_index=True)
+    print(df_in)
 
     out = pattern.apply(df_in)
+    print(out)
     assert len(out) == 10  # 10 days
     assert out.iloc[0]["Value"] == "Partial"
     assert out.iloc[1]["Value"] == "False"
@@ -1988,6 +2267,7 @@ def test_routine_glucose_measure_hyperglycemia_requires_3_per_day(repo_protocol_
 def test_routine_glucose_measure_hyperglycemia_compliant_with_three_measures(repo_protocol_kb):
     admission = repo_protocol_kb.get("ADMISSION_EVENT")
     glucose = repo_protocol_kb.get("GLUCOSE_MEASURE")
+    glucose_high = repo_protocol_kb.get("HIGH_GLUCOSE_CONTEXT")
     release = repo_protocol_kb.get("RELEASE_EVENT")
     pattern = repo_protocol_kb.get("ROUTINE_GLUCOSE_MEASURE_PATTERN")
 
@@ -2002,6 +2282,7 @@ def test_routine_glucose_measure_hyperglycemia_compliant_with_three_measures(rep
     df_in = pd.concat([
         admission.apply(df[df["ConceptName"] == "ADMISSION_EVENT"]),
         glucose.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),
+        glucose_high.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),  # context derived from glucose
         release.apply(df[df["ConceptName"] == "RELEASE_EVENT"]),
     ], ignore_index=True)
 
@@ -2240,6 +2521,7 @@ def test_routine_insulin_requires_hyperglycemia_context(repo_protocol_kb):
     admission = repo_protocol_kb.get("ADMISSION_EVENT")
     basal = repo_protocol_kb.get("BASAL_BITZUA")
     glucose = repo_protocol_kb.get("GLUCOSE_MEASURE")
+    glucose_high = repo_protocol_kb.get("HIGH_GLUCOSE_CONTEXT")
     release = repo_protocol_kb.get("RELEASE_EVENT")
     weight = repo_protocol_kb.get("WEIGHT_MEASURE")
     pattern = repo_protocol_kb.get("ROUTINE_INSULIN_PATTERN")
@@ -2255,10 +2537,14 @@ def test_routine_insulin_requires_hyperglycemia_context(repo_protocol_kb):
         admission.apply(df[df["ConceptName"] == "ADMISSION_EVENT"]),
         basal.apply(df[df["ConceptName"] == "BASAL_BITZUA"]),
         glucose.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),
+        glucose_high.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),  # context derived from glucose
         release.apply(df[df["ConceptName"] == "RELEASE_EVENT"]),
     ], ignore_index=True)
 
+    print(df_in)
+
     out = pattern.apply(df_in)
+    print(out)
     assert len(out) == 0
 
     df = pd.DataFrame([
@@ -2268,7 +2554,7 @@ def test_routine_insulin_requires_hyperglycemia_context(repo_protocol_kb):
         (1, "BASAL_BITZUA", make_ts("12:00"), make_ts("12:00"), 40),
         (1, "GLUCOSE_MEASURE", make_ts("09:00", day=1), make_ts("09:00", day=1), 200), # Context trigger on window 2
         (1, "BASAL_BITZUA", make_ts("16:00", day=1), make_ts("16:00", day=1), 50), # 50/80=0.625 - partial value score
-        (1, "GLUCOSE_MEASURE", make_ts("09:00", day=2), make_ts("09:00", day=2), 200), # Context trigger on window 3
+        (1, "GLUCOSE_MEASURE", make_ts("07:00", day=2), make_ts("07:00", day=2), 200), # Context trigger on window 3
         (1, "RELEASE_EVENT", make_ts("08:00", day=10), make_ts("08:00", day=10), "True"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
 
@@ -2276,11 +2562,14 @@ def test_routine_insulin_requires_hyperglycemia_context(repo_protocol_kb):
         admission.apply(df[df["ConceptName"] == "ADMISSION_EVENT"]),
         weight.apply(df[df["ConceptName"] == "WEIGHT_MEASURE"]),
         glucose.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),
+        glucose_high.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),  # context derived from glucose
         basal.apply(df[df["ConceptName"] == "BASAL_BITZUA"]),
         release.apply(df[df["ConceptName"] == "RELEASE_EVENT"]),
     ], ignore_index=True)
 
+    print(df_in)
     out = pattern.apply(df_in)
+    print(out)
     assert len(out) == 3
     row = out.iloc[0]
     assert row["Value"] == "True"
@@ -2302,6 +2591,7 @@ def test_routine_insulin_value_uses_weight_parameter(repo_protocol_kb):
     admission = repo_protocol_kb.get("ADMISSION_EVENT")
     basal = repo_protocol_kb.get("BASAL_BITZUA")
     glucose = repo_protocol_kb.get("GLUCOSE_MEASURE")
+    glucose_high = repo_protocol_kb.get("HIGH_GLUCOSE_CONTEXT")
     weight = repo_protocol_kb.get("WEIGHT_MEASURE")
     release = repo_protocol_kb.get("RELEASE_EVENT")
     death = repo_protocol_kb.get("DEATH_EVENT")
@@ -2320,12 +2610,13 @@ def test_routine_insulin_value_uses_weight_parameter(repo_protocol_kb):
         admission.apply(df[df["ConceptName"] == "ADMISSION_EVENT"]),
         weight.apply(df[df["ConceptName"] == "WEIGHT_MEASURE"]),
         glucose.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),
+        glucose_high.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),  # context derived from glucose
         basal.apply(df[df["ConceptName"] == "BASAL_BITZUA"]),
         release.apply(df[df["ConceptName"] == "RELEASE_EVENT"]),
     ], ignore_index=True)
 
     out = pattern.apply(df_in)
-    assert len(out) == 1
+    assert len(out) == 2
     row = out.iloc[0]
     assert row["Value"] == "True"
     _assert_close(_get_cyclic_score(row), 1.0, tol=0.05)
@@ -2336,6 +2627,7 @@ def test_routine_insulin_value_uses_default_weight_when_missing(repo_protocol_kb
     admission = repo_protocol_kb.get("ADMISSION_EVENT")
     basal = repo_protocol_kb.get("BASAL_BITZUA")
     glucose = repo_protocol_kb.get("GLUCOSE_MEASURE")
+    glucose_high = repo_protocol_kb.get("HIGH_GLUCOSE_CONTEXT")
     release = repo_protocol_kb.get("RELEASE_EVENT")
     death = repo_protocol_kb.get("DEATH_EVENT")
     pattern = repo_protocol_kb.get("ROUTINE_INSULIN_PATTERN")
@@ -2351,21 +2643,26 @@ def test_routine_insulin_value_uses_default_weight_when_missing(repo_protocol_kb
     df_in = pd.concat([
         admission.apply(df[df["ConceptName"] == "ADMISSION_EVENT"]),
         glucose.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),
+        glucose_high.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),
         basal.apply(df[df["ConceptName"] == "BASAL_BITZUA"]),
         release.apply(df[df["ConceptName"] == "RELEASE_EVENT"]),
     ], ignore_index=True)
 
     out = pattern.apply(df_in)
-    assert len(out) == 1
+    assert len(out) == 2
     row = out.iloc[0]
     assert row["Value"] == "True"
     _assert_close(_get_value_score(row), 1.0, tol=0.05)
+    row = out.iloc[1]
+    assert row["Value"] == "False"
+    _assert_close(_get_value_score(row), 0.0, tol=0.05)
 
 
 def test_routine_insulin_value_score_drops_when_dose_too_high(repo_protocol_kb):
     admission = repo_protocol_kb.get("ADMISSION_EVENT")
     basal = repo_protocol_kb.get("BASAL_BITZUA")
     glucose = repo_protocol_kb.get("GLUCOSE_MEASURE")
+    glucose_high = repo_protocol_kb.get("HIGH_GLUCOSE_CONTEXT")
     weight = repo_protocol_kb.get("WEIGHT_MEASURE")
     release = repo_protocol_kb.get("RELEASE_EVENT")
     death = repo_protocol_kb.get("DEATH_EVENT")
@@ -2386,12 +2683,13 @@ def test_routine_insulin_value_score_drops_when_dose_too_high(repo_protocol_kb):
         admission.apply(df[df["ConceptName"] == "ADMISSION_EVENT"]),
         weight.apply(df[df["ConceptName"] == "WEIGHT_MEASURE"]),
         glucose.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),
+        glucose_high.apply(df[df["ConceptName"] == "GLUCOSE_MEASURE"]),  # context derived from glucose
         basal.apply(df[df["ConceptName"] == "BASAL_BITZUA"]),
         release.apply(df[df["ConceptName"] == "RELEASE_EVENT"]),
     ], ignore_index=True)
 
     out = pattern.apply(df_in)
-    assert len(out) == 1
+    assert len(out) == 2
     row = out.iloc[0]
     assert row["Value"] == "Partial"
     _assert_close(_get_value_score(row), expected, tol=0.15)
@@ -3018,3 +3316,100 @@ def test_glucose_on_admission_context_filters_out_later_anchor(repo_protocol_kb)
     assert len(out) == 1
     assert out.iloc[0]["StartDateTime"] == make_ts("08:00", day=2)
     assert out.iloc[0]["Value"] in ["True", "Partial"]
+
+
+# -----------------------------
+# Tests: Multiple Contexts in 1 rule
+# -----------------------------
+
+def test_local_pattern_multi_context_and_intersection(tmp_path: Path, repo_protocol_kb):
+    """
+    how="and" means anchor must overlap an intersection interval where ALL context concepts are active.
+
+    MEAL_CONTEXT: 08:00-08:30, 09:15-09:45
+    HIGH_GLUCOSE_CONTEXT: 09:00-09:20 (overlaps only the second meal)
+    BOLUS happens during both meals
+    Expect: only the second meal produces output.
+    """
+    repo = _sandbox_repo(
+        repo_protocol_kb,
+        tak_names=["MEAL_CONTEXT", "HIGH_GLUCOSE_CONTEXT", "BOLUS_BITZUA"],
+    )
+
+    pattern_path = write_xml(tmp_path, "LOCAL_MULTI_CONTEXT_AND_PATTERN.xml", LOCAL_MULTI_CONTEXT_AND_XML)
+    _register_xml_strict(repo, pattern_path)
+    pattern = _require(repo, "MEAL_AND_HIGH_GLUCOSE_GATES_BOLUS_PATTERN")
+
+    df = pd.DataFrame([
+        (1000, "MEAL_CONTEXT",         make_ts("08:00"), make_ts("08:30"), "True"),
+        (1000, "BOLUS_BITZUA",         make_ts("08:10"), make_ts("08:10"), 1), # Overlapping meal 1
+        (1000, "MEAL_CONTEXT",         make_ts("09:15"), make_ts("09:45"), "True"),
+        (1000, "HIGH_GLUCOSE_CONTEXT", make_ts("09:00"), make_ts("09:20"), "True"), # Overlaps meal 2 between 09:15-09:20 (should be counted as relevant anchor between 09:15-09:45)
+        (1000, "BOLUS_BITZUA",         make_ts("09:25"), make_ts("09:25"), 1), # Overlapping meal 2
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+    print(df)
+    out = pattern.apply(df)
+    print(out)
+    assert len(out) == 1
+    assert out.iloc[0]["StartDateTime"] == make_ts("09:15")
+
+
+def test_local_context_and_vs_or_behavior(repo_protocol_kb):
+    p_and = repo_protocol_kb.get("MEAL_AND_HIGH_GLUCOSE_GATES_BOLUS_PATTERN")
+    p_or  = repo_protocol_kb.get("MEAL_OR_HIGH_GLUCOSE_GATES_BOLUS_PATTERN")
+    assert p_and is not None and p_or is not None
+
+    df_in = pd.DataFrame([
+        (1, "MEAL_CONTEXT",  make_ts("09:00"), make_ts("11:00"), "True"),
+        # HIGH_GLUCOSE_CONTEXT intentionally missing
+        (1, "BOLUS_BITZUA",  make_ts("10:00"), make_ts("10:00"), 3),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+
+    out_and = p_and.apply(df_in)
+    out_or  = p_or.apply(df_in)
+
+    assert len(out_and) == 0, "AND gating must fail when one context is missing"
+    assert len(out_or) == 1, "OR gating must pass when at least one context is satisfied"
+    assert out_or.iloc[0]["Value"] == "True"
+
+def test_global_context_and_vs_or_behavior(repo_protocol_kb):
+    p_and = repo_protocol_kb.get("GLOBAL_GLUCOSE_CHECK_DIAB_AND_HIGH_PATTERN")
+    p_or  = repo_protocol_kb.get("GLOBAL_GLUCOSE_CHECK_DIAB_OR_HIGH_PATTERN")
+    assert p_and is not None and p_or is not None
+
+    admission = repo_protocol_kb.get("ADMISSION_EVENT")
+    glucose   = repo_protocol_kb.get("GLUCOSE_MEASURE")
+    release   = repo_protocol_kb.get("RELEASE_EVENT")
+
+    diab_raw  = repo_protocol_kb.get("DIABETES_DIAGNOSIS")
+    diab_ctx  = repo_protocol_kb.get("DIABETES_DIAGNOSIS_CONTEXT")
+
+    high_ctx  = repo_protocol_kb.get("HIGH_GLUCOSE_CONTEXT")
+    assert all(x is not None for x in [admission, glucose, release, diab_raw, diab_ctx, high_ctx])
+
+    df_raw = pd.DataFrame([
+        (1, "ADMISSION_EVENT",     make_ts("08:00"), make_ts("08:00"), "True"),
+        (1, "DIABETES_DIAGNOSIS",  make_ts("07:00"), make_ts("07:00"), "True"),
+
+        # glucose is present but NOT high
+        (1, "GLUCOSE_MEASURE",     make_ts("10:00"), make_ts("10:00"), 160),
+        (1, "GLUCOSE_MEASURE",     make_ts("10:00", day=1), make_ts("10:00", day=1), 160),
+
+        (1, "RELEASE_EVENT",       make_ts("08:00", day=3), make_ts("08:00", day=3), "True"),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+
+    df_adm  = admission.apply(df_raw[df_raw["ConceptName"] == "ADMISSION_EVENT"])
+    df_rel  = release.apply(df_raw[df_raw["ConceptName"] == "RELEASE_EVENT"])
+
+    df_glu  = glucose.apply(df_raw[df_raw["ConceptName"] == "GLUCOSE_MEASURE"])
+    df_high = high_ctx.apply(df_glu)  # will produce HIGH_GLUCOSE_CONTEXT rows (False in this case)
+
+    df_diab = diab_ctx.apply(diab_raw.apply(df_raw[df_raw["ConceptName"] == "DIABETES_DIAGNOSIS"]))
+
+    df_in = pd.concat([df_adm, df_glu, df_high, df_diab, df_rel], ignore_index=True)
+
+    out_and = p_and.apply(df_in)
+    out_or  = p_or.apply(df_in)
+
+    assert len(out_and) == 0, "AND gating must block when HIGH_GLUCOSE_CONTEXT is not True"
+    assert len(out_or) > 0, "OR gating must allow when DIABETES_DIAGNOSIS_CONTEXT is True"

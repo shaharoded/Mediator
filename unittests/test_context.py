@@ -9,7 +9,8 @@ from datetime import timedelta
 from core.tak.context import Context
 from core.tak.raw_concept import RawConcept
 from core.tak.repository import set_tak_repository, TAKRepository
-from unittests.test_utils import write_xml, make_ts  # FIXED: correct import path
+from core.tak.event import Event
+from unittests.test_utils import write_xml, make_ts
 
 
 # XML Fixtures
@@ -153,6 +154,45 @@ CONTEXT_VALUE_SPECIFIC_WINDOW_XML = """\
 </context>
 """
 
+EVENT_XML = """
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="ADMISSION_EVENT">
+  <categories>Admin</categories>
+  <description>Admission event abstraction</description>
+  <derived-from>
+    <attribute name="ADMISSION" tak="raw-concept" ref="A1"/>
+  </derived-from>
+  <abstraction-rules>
+    <rule value="Admitted" operator="or">
+      <attribute ref="A1">
+        <allowed-value equal="True"/>
+      </attribute>
+    </rule>
+  </abstraction-rules>
+</event>
+"""
+
+CONTEXT_ON_EVENT_XML = """
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="ADMISSION_CONTEXT">
+  <categories>Contexts</categories>
+  <description>Context derived from Event TAK</description>
+  <derived-from>
+    <attribute name="ADMISSION_EVENT" tak="event" ref="E1"/>
+  </derived-from>
+  <abstraction-rules>
+    <rule value="Admitted" operator="or">
+      <attribute ref="E1">
+        <allowed-value equal="Admitted"/>
+      </attribute>
+    </rule>
+  </abstraction-rules>
+  <context-windows>
+    <persistence good-before="1h" good-after="2h"/>
+  </context-windows>
+</context>
+"""
+
 
 @pytest.fixture
 def repo_with_hypoglycemia_context(tmp_path: Path) -> TAKRepository:
@@ -177,6 +217,27 @@ def repo_with_clipped_context(tmp_path: Path) -> TAKRepository:
     repo.register(RawConcept.parse(admission_path))
     set_tak_repository(repo)
     repo.register(Context.parse(context_path))
+    return repo
+
+
+@pytest.fixture
+def repo_with_event_context(tmp_path: Path) -> TAKRepository:
+    """Fixture to set up a repository with Event-derived Context."""
+    repo = TAKRepository()
+    set_tak_repository(repo)
+
+    # Register ADMISSION raw-concept
+    admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
+    repo.register(RawConcept.parse(admission_path))
+
+    # Register ADMISSION_EVENT event
+    event_path = write_xml(tmp_path, "ADMISSION_EVENT.xml", EVENT_XML)
+    repo.register(Event.parse(event_path))
+
+    # Register ADMISSION_CONTEXT context
+    context_path = write_xml(tmp_path, "ADMISSION_CONTEXT.xml", CONTEXT_ON_EVENT_XML)
+    repo.register(Context.parse(context_path))
+
     return repo
 
 
@@ -513,3 +574,35 @@ def test_context_no_overlap_no_clipping(repo_with_hypoglycemia_context):
     # No clipping should occur
     assert df_out.iloc[0]["EndDateTime"] == make_ts("10:00")  # Unchanged
     assert df_out.iloc[1]["EndDateTime"] == make_ts("14:00")  # Unchanged
+
+
+def test_context_on_event_parsing(repo_with_event_context, tmp_path):
+    """Validate parsing of Context derived from Event TAK."""
+    admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
+    event_path = write_xml(tmp_path, "ADMISSION_EVENT.xml", EVENT_XML)
+    context = repo_with_event_context.get("ADMISSION_CONTEXT")
+    assert context.name == "ADMISSION_CONTEXT"
+    assert len(context.derived_from) == 1
+    assert context.derived_from[0]["tak_type"] == "event"
+    assert len(context.abstraction_rules) == 1
+
+
+def test_context_on_event_application(repo_with_event_context, tmp_path):
+    """Test application of Context derived from Event TAK."""
+    admission_path = write_xml(tmp_path, "ADMISSION.xml", RAW_ADMISSION_XML)
+    event_path = write_xml(tmp_path, "ADMISSION_EVENT.xml", EVENT_XML)
+    context = repo_with_event_context.get("ADMISSION_CONTEXT")
+
+    df_in = pd.DataFrame([
+        (1, "ADMISSION_EVENT", make_ts("08:00"), make_ts("08:00"), "Admitted", "event"),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
+
+    df_out = context.apply(df_in)
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["Value"] == "Admitted"
+    assert row["ConceptName"] == "ADMISSION_CONTEXT"
+    # Original: 08:00 - 08:00
+    # Windowed: StartDateTime = 08:00 - 1h = 07:00, EndDateTime = 08:00 + 2h = 10:00
+    assert row["StartDateTime"] == make_ts("07:00")
+    assert row["EndDateTime"] == make_ts("10:00")

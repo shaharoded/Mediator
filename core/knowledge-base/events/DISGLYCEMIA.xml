@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <event name="DISGLYCEMIA_EVENT">
     <categories>Complications</categories>
-    <description>Dysglycemia event</description>
+    <description>Dysglycemia event (only after the 2nd unstable event or extreme measurement)</description>
     <derived-from>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
-        <attribute name="HYPERGLYCEMIA" tak="raw-concept" idx="0" ref="A2"/>
-        <attribute name="HYPOGLYCEMIA" tak="raw-concept" idx="0" ref="A3"/>
+        <attribute name="STEADY_GLUCOSE_MEASURE_HIGH_AFTER_FIRST" tak="raw-concept" idx="0" ref="S1"/>
+        <attribute name="STEADY_GLUCOSE_MEASURE_LOW_AFTER_FIRST" tak="raw-concept" idx="0" ref="S2"/>
+        <attribute name="HYPERGLYCEMIA" tak="raw-concept" idx="0" ref="O1"/>
+        <attribute name="HYPOGLYCEMIA" tak="raw-concept" idx="0" ref="O2"/>
     </derived-from>
     
     <!-- 
@@ -18,18 +20,24 @@
     <abstraction-rules>
         <rule value="Hypoglycemia" operator="or">
             <attribute ref="A1">
-                <allowed-value max="70"/>  <!-- <= 70 -->
+                <allowed-value max="54"/>  <!-- 1 time <= 54 -->
             </attribute>
-            <attribute ref="A3">
+            <attribute ref="S2">
+                <allowed-value max="70"/>  <!-- Stable <= 70 -->
+            </attribute>
+            <attribute ref="O2">
                 <allowed-value equal="True"/>  <!-- exact match -->
             </attribute>
         </rule>
         <rule value="Hyperglycemia" operator="or">
             <attribute ref="A1">
-                <allowed-value min="180"/>  <!-- >= 180 -->
+                <allowed-value min="250"/>  <!-- 1 time >= 250 -->
             </attribute>
-            <attribute ref="A2">
-                <allowed-value equal="True"/>
+            <attribute ref="S1">
+                <allowed-value min="180"/>  <!-- Stable >= 180 -->
+            </attribute>
+            <attribute ref="O1">
+                <allowed-value equal="True"/> <!-- exact match -->
             </attribute>
         </rule>
     </abstraction-rules>

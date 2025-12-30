@@ -3,7 +3,7 @@
     <categories>Diagnosis</categories>
     <description>LOW GLUCOSE context to mark time windows where insulin treatment is dangerous (risk for hypoglycemia)</description>
     <derived-from>
-        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="DISGLYCEMIA_EVENT" tak="event" ref="A1"/>
     </derived-from>
 
     <!-- An instance of these will clip the context windows -->
@@ -16,7 +16,7 @@
     <abstraction-rules>
         <rule value="True" operator="or">
             <attribute ref="A1">
-                <allowed-value max="70"/>
+                <allowed-value equal="Hypoglycemia"/>
             </attribute>
         </rule>
     </abstraction-rules>

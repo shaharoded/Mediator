@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="STEADY_GLUCOSE_MEASURE_HIGH_AFTER_FIRST">
+    <categories>Measurements</categories>
+    <description>Raw concept that outputs only the glucose measurements after the first high glucose measurement (meaning it's repetative if high)</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    
+    <!-- Will use the closest instance to the beginning of the pattern -->
+    <parameters>
+        <parameter name="HIGH_GLUCOSE_IND" tak="raw-concept" how='before' dynamic="false" idx="0" ref="P1"/>
+    </parameters>
+
+    <functions>
+        <function name="id">
+            <value idx="0"/>
+        </function>
+    </functions>
+
+</parameterized-raw-concept>
