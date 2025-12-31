@@ -1033,8 +1033,8 @@ class LocalPattern(Pattern):
                     value_label = "True" if combined_score == 1.0 else ("Partial" if combined_score > 0 else "False")
 
                     instances.append({
-                        "StartDateTime": anchor_row["StartDateTime"],
-                        "EndDateTime": event_row["EndDateTime"],
+                        "StartDateTime": event_row["StartDateTime"],
+                        "EndDateTime": event_row["StartDateTime"] + pd.Timedelta(seconds=1),  # A pattern is logged at it's end, like event
                         "Value": value_label,
                         "TimeConstraintScore": time_score,
                         "ValueConstraintScore": value_score
@@ -1095,7 +1095,7 @@ class LocalPattern(Pattern):
                 # >> First rule to claim this anchor emits the potential_false row
                 potential_falses.append({
                     "StartDateTime": anchor_row["StartDateTime"],
-                    "EndDateTime": anchor_row["EndDateTime"],
+                    "EndDateTime": anchor_row["StartDateTime"] + pd.Timedelta(seconds=1),  # Log at anchor start time
                     "Value": value_label,
                     "TimeConstraintScore": time_score,
                     "ValueConstraintScore": value_score
@@ -1862,8 +1862,8 @@ class GlobalPattern(Pattern):
                         instances_map[key] = {
                             "PatientId": patient_id,
                             "ConceptName": self.name,
-                            "StartDateTime": current_start,
-                            "EndDateTime": current_end,
+                            "StartDateTime": current_end,
+                            "EndDateTime": current_end + pd.Timedelta(seconds=1),  # make end > start by 1 second
                             "Value": value_label,
                             "TimeConstraintScore": None,
                             "ValueConstraintScore": v_score,

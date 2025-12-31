@@ -1945,7 +1945,7 @@ def test_insulin_on_hyperglycemia_does_not_fire_when_no_overlap(repo_protocol_kb
     assert out.iloc[0]["ConceptName"] == "INSULIN_ON_HYPERGLYCEMIA_PATTERN"
     assert out.iloc[0]["Value"] == "False"
     assert out.iloc[0]["StartDateTime"] == make_ts("09:00")
-    assert out.iloc[0]["EndDateTime"] == make_ts("11:00")
+    assert out.iloc[0]["EndDateTime"] == make_ts("09:00") + pd.Timedelta(seconds=1)  # default 1s duration
     assert out.iloc[0]["TimeConstraintScore"] == 0.0  # because existence-compliance
 
 def test_insulin_on_hyperglycemia_no_existence_returns_empty(repo_protocol_kb, tmp_path):
@@ -2813,8 +2813,8 @@ def test_pattern_found_simple(repo_protocol_kb, tmp_path):
     assert len(df_out) == 1
     row = df_out.iloc[0]
     assert row["Value"] == "True"
-    assert row["StartDateTime"] == make_ts("08:00")
-    assert row["EndDateTime"] == make_ts("10:00")
+    assert row["StartDateTime"] == make_ts("10:00")
+    assert row["EndDateTime"] == make_ts("10:00") + pd.Timedelta(seconds=1)
     assert pd.isna(row["TimeConstraintScore"])
     assert pd.isna(row["ValueConstraintScore"])
 
@@ -2844,7 +2844,7 @@ def test_pattern_not_found_no_event(repo_protocol_kb, tmp_path):
     row = df_out.iloc[0]
     assert row["Value"] == "False"
     assert row["StartDateTime"] == make_ts("08:00")
-    assert row["EndDateTime"] == make_ts("08:00")
+    assert row["EndDateTime"] == make_ts("08:00") + pd.Timedelta(seconds=1)
 
 
 def test_pattern_not_found_event_too_late(repo_protocol_kb, tmp_path):
@@ -2878,7 +2878,7 @@ def test_pattern_not_found_event_too_late(repo_protocol_kb, tmp_path):
     row = df_out.iloc[0]
     assert row["Value"] == "False"
     assert row["StartDateTime"] == make_ts("08:00")
-    assert row["EndDateTime"] == make_ts("08:00")
+    assert row["EndDateTime"] == make_ts("08:00") + pd.Timedelta(seconds=1)
 
 def test_pattern_one_to_one_pairing(repo_protocol_kb, tmp_path):
     admission_path = write_xml(tmp_path, "ADMISSION_EVENT.xml", RAW_ADMISSION_XML)
@@ -2943,10 +2943,10 @@ def test_missed_opportunity_mixed_results(repo_protocol_kb, tmp_path):
 
     assert len(df_out) == 2
     assert df_out.iloc[0]["Value"] == "True"
-    assert df_out.iloc[0]["StartDateTime"] == make_ts("08:00")
+    assert df_out.iloc[0]["StartDateTime"] == make_ts("09:00")
     assert df_out.iloc[1]["Value"] == "False"
     assert df_out.iloc[1]["StartDateTime"] == make_ts("12:00")
-    assert df_out.iloc[1]["EndDateTime"] == make_ts("12:00")
+    assert df_out.iloc[1]["EndDateTime"] == make_ts("12:00") + pd.Timedelta(seconds=1)
 
 
 def test_missed_opportunity_filtered_by_overlap(repo_protocol_kb, tmp_path):
@@ -2979,7 +2979,7 @@ def test_missed_opportunity_filtered_by_overlap(repo_protocol_kb, tmp_path):
 
     assert len(df_out) == 1
     assert df_out.iloc[0]["Value"] == "True"
-    assert df_out.iloc[0]["StartDateTime"] == make_ts("08:00")
+    assert df_out.iloc[0]["StartDateTime"] == make_ts("12:00")
 
 
 def test_pattern_empty_input_returns_false(repo_protocol_kb, tmp_path):
@@ -3133,7 +3133,7 @@ def test_time_compliance_outside_max_distance_is_false(repo_protocol_kb, tmp_pat
         assert len(out) == 1
         assert out.iloc[0]["Value"] == "False"
         assert out.iloc[0]["StartDateTime"] == make_ts("08:00")
-        assert out.iloc[0]["EndDateTime"] == make_ts("08:00")
+        assert out.iloc[0]["EndDateTime"] == make_ts("08:00") + pd.Timedelta(seconds=1)
     finally:
         set_tak_repository(old_repo)
 
@@ -3314,7 +3314,7 @@ def test_glucose_on_admission_context_filters_out_later_anchor(repo_protocol_kb)
 
     # Only the first admission is eligible due to context gating
     assert len(out) == 1
-    assert out.iloc[0]["StartDateTime"] == make_ts("08:00", day=2)
+    assert out.iloc[0]["StartDateTime"] == make_ts("10:00", day=2)
     assert out.iloc[0]["Value"] in ["True", "Partial"]
 
 
@@ -3351,7 +3351,7 @@ def test_local_pattern_multi_context_and_intersection(tmp_path: Path, repo_proto
     out = pattern.apply(df)
     print(out)
     assert len(out) == 1
-    assert out.iloc[0]["StartDateTime"] == make_ts("09:15")
+    assert out.iloc[0]["StartDateTime"] == make_ts("09:25")
 
 
 def test_local_context_and_vs_or_behavior(repo_protocol_kb):
