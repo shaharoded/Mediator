@@ -320,7 +320,8 @@ class DataAccess:
         return stats
 
     # Load CSV to input table with prompt, tqdm, auto dask heuristic
-    def load_csv_to_input(self, csv_path, if_exists='append', clear_output_and_qa=False, yes=False, batch_size=2000):
+    def load_csv_to_input(self, csv_path, if_exists='append', 
+                            clear_output_and_qa=False, yes=False, batch_size=2000, column_mapping=None):
         """
         Load a CSV into InputPatientData with strict validation and fast bulk insert.
 
@@ -340,6 +341,7 @@ class DataAccess:
         clear_output_and_qa (bool): If True, clears OutputPatientData and PatientQAScores before load.
         yes (bool): Auto-confirm prompts if tables are non-empty.
         batch_size (int): Number of rows per executemany batch (affects DB roundtrips).
+        column_mapping (dict): Mapping of required column names to their possible variants in the CSV (e.g., {'PatientId': ['VisitId', 'PatientId'], ...}).
 
         Returns:
         int: Number of rows actually inserted (excludes INSERT OR IGNORE duplicates).
@@ -370,36 +372,56 @@ class DataAccess:
         filesize = os.path.getsize(csv_path)
         use_dask_effective = DASK_AVAILABLE and (filesize >= DASK_FILESIZE_THRESHOLD)
 
-        # map header -> indices using header only
+        # Read the CSV header to map column names
         header_df = pd.read_csv(csv_path, nrows=0)
         cols = list(header_df.columns)
         col_index = {c.lower(): i for i, c in enumerate(cols)}
+
+        # Define required columns and default mappings
+        required_columns = ['PatientId', 'ConceptName', 'StartDateTime', 'EndDateTime', 'Value']
+        default_mapping = {
+            'PatientId': ['PatientId', 'patientid', 'patient_id', 'Patient Id', 'patient id'],
+            'ConceptName': ['ConceptName', 'concept name'],
+            'StartDateTime': ['StartDateTime', 'Start', 'StartTime'],
+            'EndDateTime': ['EndDateTime', 'End', 'EndTime'],
+            'Value': ['Value', 'Result'],
+            'Unit': ['Unit', 'Units']
+        }
+
         def find_index(candidates):
+            """
+            Find the first matching column index for any of the candidate names.
+            """
             for name in candidates:
                 idx = col_index.get(name.lower())
                 if idx is not None:
                     return idx
             return None
 
-        indices = {
-            'patient_idx': find_index(['PatientId','patientid','patient_id','Patient Id','patient id']),
-            'concept_idx': find_index(['ConceptName','concept','LOINC-NUM','Code','Concept','concept name']),
-            'start_idx': find_index(['StartDateTime','Start','StartTime','Timestamp','Time','startdatetime']),
-            'end_idx': find_index(['EndDateTime','End','EndTime','enddatetime']),
-            'value_idx': find_index(['Value','value','Result','result']),
-            'unit_idx': find_index(['Unit','unit','Units']),
-            'cols': cols
-        }
+        # Map required columns to their indices using user-provided or default mappings
+        indices = {}
+        for req in required_columns:
+            variants = column_mapping.get(req, default_mapping[req]) if column_mapping else default_mapping[req]
+            idx = find_index(variants)
+            if idx is None:
+                raise ValueError(f"Missing required column '{req}'. Expected one of: {', '.join(variants)}.")
+            indices[f"{req.lower()}_idx"] = idx
+
+        # Handle optional Unit column
+        unit_variants = column_mapping.get('Unit', default_mapping['Unit']) if column_mapping else default_mapping['Unit']
+        unit_idx = find_index(unit_variants)
+        indices['unit_idx'] = unit_idx
+        indices['cols'] = cols
 
         # required column check (fail fast)
         required_missing = []
-        if indices['patient_idx'] is None:
+        if indices['patientid_idx'] is None:
             required_missing.append('PatientId')
-        if indices['concept_idx'] is None:
+        if indices['conceptname_idx'] is None:
             required_missing.append('ConceptName')
-        if indices['start_idx'] is None:
+        if indices['startdatetime_idx'] is None:
             required_missing.append('StartDateTime')
-        if indices['end_idx'] is None:
+        if indices['enddatetime_idx'] is None:
             required_missing.append('EndDateTime')
         if indices['value_idx'] is None:
             required_missing.append('Value')
@@ -412,13 +434,13 @@ class DataAccess:
             if ln == 0:
                 return
             # PatientId -> all integer-convertible
-            p_series = df.iloc[:, idxs['patient_idx']].astype(str).str.strip().replace({'': None})
+            p_series = df.iloc[:, idxs['patientid_idx']].astype(str).str.strip().replace({'': None})
             p_numeric = pd.to_numeric(p_series, errors='coerce')
             if p_numeric.isna().any():
                 n_bad = int(p_numeric.isna().sum())
                 raise ValueError(f"PatientId validation failed: {n_bad}/{ln} rows are not integer-convertible.")
             # ConceptName non-empty
-            c_series = df.iloc[:, idxs['concept_idx']].astype(str).str.strip()
+            c_series = df.iloc[:, idxs['conceptname_idx']].astype(str).str.strip()
             if (c_series == "").any() or c_series.isna().any():
                 raise ValueError("ConceptName validation failed: empty values found.")
             # Value required non-empty
@@ -426,8 +448,8 @@ class DataAccess:
             if v_series.isna().any():
                 raise ValueError("Value validation failed: empty values found.")
             # Start/End datetimes parseable
-            s_series = df.iloc[:, idxs['start_idx']]
-            e_series = df.iloc[:, idxs['end_idx']]
+            s_series = df.iloc[:, idxs['startdatetime_idx']]
+            e_series = df.iloc[:, idxs['enddatetime_idx']]
             parsed_s = pd.to_datetime(s_series, errors='coerce')
             parsed_e = pd.to_datetime(e_series, errors='coerce')
             n_bad_s = int(parsed_s.isna().sum())
@@ -438,18 +460,18 @@ class DataAccess:
         # normalize chunk in-place for insertion
         def normalize_chunk_for_insert(df, idxs):
             # coerce PatientId -> int (and ensure no NaN)
-            df.iloc[:, idxs['patient_idx']] = pd.to_numeric(df.iloc[:, idxs['patient_idx']], errors='coerce').astype('Int64').astype(int)
+            df.iloc[:, idxs['patientid_idx']] = pd.to_numeric(df.iloc[:, idxs['patientid_idx']], errors='coerce').astype('Int64').astype(int)
             # parse datetimes with UTC, convert to naive UTC (consistent storage), then format
             # Using astype('datetime64[ns]') removes timezone info while preserving UTC instant
-            parsed_s = pd.to_datetime(df.iloc[:, idxs['start_idx']], errors='coerce', utc=True)
+            parsed_s = pd.to_datetime(df.iloc[:, idxs['startdatetime_idx']], errors='coerce', utc=True)
             if getattr(parsed_s.dt, "tz", None) is not None:
                 parsed_s = parsed_s.dt.tz_convert('UTC').dt.tz_localize(None)
-            df.iloc[:, idxs['start_idx']] = parsed_s.dt.strftime('%Y-%m-%d %H:%M:%S')
+            df.iloc[:, idxs['startdatetime_idx']] = parsed_s.dt.strftime('%Y-%m-%d %H:%M:%S')
 
-            parsed_e = pd.to_datetime(df.iloc[:, idxs['end_idx']], errors='coerce', utc=True)
+            parsed_e = pd.to_datetime(df.iloc[:, idxs['enddatetime_idx']], errors='coerce', utc=True)
             if getattr(parsed_e.dt, "tz", None) is not None:
                 parsed_e = parsed_e.dt.tz_convert('UTC').dt.tz_localize(None)
-            df.iloc[:, idxs['end_idx']] = parsed_e.dt.strftime('%Y-%m-%d %H:%M:%S')
+            df.iloc[:, idxs['enddatetime_idx']] = parsed_e.dt.strftime('%Y-%m-%d %H:%M:%S')
 
             # ensure Value is string (non-null)
             df.iloc[:, idxs['value_idx']] = df.iloc[:, idxs['value_idx']].astype(str)
@@ -457,7 +479,7 @@ class DataAccess:
 
         # generator that yields tuples matching INSERT_PATIENT_QUERY
         def rows_from_df_for_insert(df, idxs):
-            p_idx = idxs['patient_idx']; c_idx = idxs['concept_idx']; s_idx = idxs['start_idx']; e_idx = idxs['end_idx']; v_idx = idxs['value_idx']; u_idx = idxs['unit_idx']
+            p_idx = idxs['patientid_idx']; c_idx = idxs['conceptname_idx']; s_idx = idxs['startdatetime_idx']; e_idx = idxs['enddatetime_idx']; v_idx = idxs['value_idx']; u_idx = idxs['unit_idx']
             for tup in df.itertuples(index=False, name=None):
                 def at(i):
                     if i is None:
