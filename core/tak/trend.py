@@ -124,7 +124,8 @@ class Trend(TAK):
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply trend classification to raw-concept data."""
         if df.empty:
-            return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+            logger.debug("[%s] apply() end | trend filtering resulted in no output rows", self.name)
+            return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
 
         logger.info("[%s] apply() start | input_rows=%d", self.name, len(df))
 

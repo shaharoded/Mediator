@@ -187,7 +187,8 @@ class RawConcept(TAK):
         df = df[df["ConceptName"].isin(valid_concepts)]
         if df.empty:
             logger.info("[%s] apply() end | post-filter=0 rows", self.name)
-            return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+            logger.debug("[%s] apply() end | raw concept filtering resulted in no output rows", self.name)
+            return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
 
         # 1) Normalize & filter values per-attribute type
         for a in self.attributes:
@@ -223,7 +224,7 @@ class RawConcept(TAK):
 
         if df.empty:
             logger.info("[%s] apply() end | post-type-filter=0 rows", self.name)
-            return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+            return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
 
         pid = int(df["PatientId"].iloc[0])
 

@@ -328,7 +328,8 @@ class Context(TAK):
             df: Input DataFrame containing BOTH derived-from concepts AND clippers (filtered by Mediator)
         """
         if df.empty:
-            return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+            logger.debug("[%s] apply() end | context filtering resulted in no output rows", self.name)
+            return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
 
         logger.info("[%s] apply() start | input_rows=%d", self.name, len(df))
 

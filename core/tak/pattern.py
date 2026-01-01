@@ -901,6 +901,7 @@ class LocalPattern(Pattern):
         if not instances:
             # - either there were no eligible anchors (rule not applicable) OR
             # - eligible anchors existed, but _find_pattern_instances decided they should be ignored (as per ignore_unfulfilled_anchors)
+            logger.debug("[%s] apply() end | pattern filtering resulted in no output rows", self.name)
             return pd.DataFrame(columns=[
                 "PatientId", "ConceptName", "StartDateTime", "EndDateTime",
                 "Value", "TimeConstraintScore", "ValueConstraintScore",
@@ -1876,6 +1877,7 @@ class GlobalPattern(Pattern):
 
         instances = list(instances_map.values())
         if not instances:
+            logger.debug("[%s] apply() end | pattern filtering resulted in no output rows", self.name)
             return pd.DataFrame(columns=[
                 "PatientId", "ConceptName", "StartDateTime", "EndDateTime",
                 "Value", "TimeConstraintScore", "ValueConstraintScore", "CyclicConstraintScore", "AbstractionType"

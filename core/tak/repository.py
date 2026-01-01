@@ -66,6 +66,28 @@ class TAKRepository:
         self.execution_order = self._topological_sort(self.graph)
         logger.info(f"TAK execution order: {self.execution_order}")
 
+        # Check for unreferenced raw concepts and contexts
+        unreferenced_raw_concepts = [
+            tak.name for tak in self.taks.values()
+            if tak.family == "raw-concept" and tak.name not in self.graph
+        ]
+        unreferenced_contexts = [
+            tak.name for tak in self.taks.values()
+            if tak.family == "context" and tak.name not in self.graph
+        ]
+
+        for raw_concept in unreferenced_raw_concepts:
+            logger.warning(
+                f"Raw concept '{raw_concept}' is not referenced by any other TAK. "
+                "Raw concepts are building blocks and are not outputted, so unreferenced ones are a waste of resources."
+            )
+
+        for context in unreferenced_contexts:
+            logger.warning(
+                f"Context '{context}' is not referenced by any other TAK. "
+                "Contexts should usually be referenced; otherwise, consider using states or events for analytical purposes."
+            )
+
     def _build_dependency_graph(self) -> Dict[str, Set[str]]:
         """
         Build a dependency graph: {tak_name: set_of_dependent_tak_names}

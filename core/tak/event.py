@@ -262,6 +262,7 @@ class Event(TAK):
         df = df[df["ConceptName"].isin(valid_concepts)].copy()
         if df.empty:
             logger.info("[%s] apply() end | post-filter=0 rows", self.name)
+            logger.debug("[%s] apply() end | event filtering resulted in no output rows", self.name)
             return pd.DataFrame(columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
 
         # Apply abstraction rules (always)
