@@ -262,6 +262,79 @@ class TAKRepository:
             with open(file_path, 'wb') as f:
                 pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
 
+    def export_portable(self, file_path: str) -> None:
+        """
+        Export TAKRepository as a portable JSON file containing only
+        essential metadata needed for cross-project usage.
+        
+        This format is project-agnostic and doesn't require Mediator-specific
+        class definitions to load. Useful for sharing dependency graphs and
+        basic TAK metadata across projects.
+        
+        Exported data includes:
+        - TAK metadata (name, family, categories, description)
+        - Derived_from relationships
+        - Dependency graph
+        - Execution order
+        """
+        portable_data = {
+            'taks': {},
+            'graph': {k: list(v) for k, v in self.graph.items()},
+            'execution_order': self.execution_order
+        }
+        
+        for name, tak in self.taks.items():
+            # Extract only serializable metadata
+            tak_data = {
+                'name': tak.name,
+                'family': tak.family,
+                'categories': getattr(tak, 'categories', []),
+                'description': getattr(tak, 'description', ''),
+            }
+            
+            # Add derived_from based on family
+            if hasattr(tak, 'derived_from'):
+                if isinstance(tak.derived_from, list):
+                    # Event, Context, Pattern: list of dicts
+                    tak_data['derived_from'] = tak.derived_from
+                else:
+                    # State, Trend: single string
+                    tak_data['derived_from'] = tak.derived_from
+            else:
+                tak_data['derived_from'] = None
+            
+            # Add parameters if present (ParameterizedRawConcept, Pattern)
+            if hasattr(tak, 'parameters') and tak.parameters:
+                tak_data['parameters'] = tak.parameters
+            
+            portable_data['taks'][name] = tak_data
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(portable_data, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"Exported portable TAK repository to {file_path}")
+    
+    @classmethod
+    def load_portable(cls, file_path: str) -> Dict:
+        """
+        Load a portable TAK repository from JSON.
+        
+        Returns a dictionary with the structure:
+        {
+            'taks': {tak_name: {metadata...}},
+            'graph': {tak_name: [dependencies...]},
+            'execution_order': [...]
+        }
+        
+        This is NOT a full TAKRepository object - it's a lightweight
+        data structure for cross-project usage.
+        """
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        logger.info(f"Loaded portable TAK repository from {file_path}")
+        return data
+
     def export_metadata(self) -> "pd.DataFrame":
         """
         Export TAK metadata to a pandas DataFrame for documentation/analysis.
