@@ -24,7 +24,7 @@ setup(
     description="Knowledge-Based Temporal Abstraction (KBTA) for clinical data",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/YOUR_USERNAME/Mediator",
+    url="https://github.com/shaharoded/Mediator",
     packages=find_packages(exclude=["unittests", "images"]),
     include_package_data=True,
     package_data={
