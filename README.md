@@ -105,6 +105,7 @@ Mediator/
 
 ```bash
 # Clone repository
+
 git clone https://github.com/shaharoded/Mediator.git
 cd Mediator
 
@@ -246,12 +247,23 @@ cd Mediator
 
 ### 2.2 Load in Target Machine
 
+**Install 7zip if not available in your station**
+```powershell-admin
+winget install --id=7zip.7zip -e
+
+And verify:
+
+Test-Path "C:\Program Files\7-Zip\7z.exe"
+```
+
 **Package code for manual transfer:**
 
 ```powershell
+# Remove existing archive if present, then create a new zip
+if (Test-Path mediator-deploy.zip) { Remove-Item mediator-deploy.zip -Force }
 & "C:\Program Files\7-Zip\7z.exe" a -tzip mediator-deploy.zip `
-  core backend run_mediator.ipynb setup.py MANIFEST.in requirements-py37.txt README.md LICENSE `
-  "-xr!backend\data\*"
+    core backend run_mediator.ipynb setup.py MANIFEST.in requirements-py37.txt README.md LICENSE `
+    "-xr!backend\data\*"
 ```
 >> If you have an old deploy file - Delete it!. This compression method merge the 2 files.
 >> I used 7z for it's exclusion patterns. Other ways to do this will work as well.
