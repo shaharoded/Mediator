@@ -87,7 +87,9 @@ class DataAccess:
         try:
             yield
         finally:
+            print("[Info] Rebuilding indexes...")
             self.create_input_indexes()
+            print("[Info] Indexes rebuilt.")
             self.conn.execute("PRAGMA foreign_keys=ON;")
             self.conn.execute("PRAGMA synchronous=NORMAL;")
     

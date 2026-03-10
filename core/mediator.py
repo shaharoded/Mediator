@@ -453,8 +453,8 @@ class Mediator:
             return pd.DataFrame(columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
         
         df = pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
-        df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
+        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"], format="%Y-%m-%d %H:%M:%S")
+        df["EndDateTime"] = pd.to_datetime(df["EndDateTime"], format="%Y-%m-%d %H:%M:%S")
         df["AbstractionType"] = "raw-concept"
         return df
     
@@ -680,8 +680,8 @@ class Mediator:
         
         # Return DataFrame with ConceptName and StartDateTime (clippers are point events)
         df = pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
-        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"])
-        df["EndDateTime"] = pd.to_datetime(df["EndDateTime"])
+        df["StartDateTime"] = pd.to_datetime(df["StartDateTime"], format="%Y-%m-%d %H:%M:%S")
+        df["EndDateTime"] = pd.to_datetime(df["EndDateTime"], format="%Y-%m-%d %H:%M:%S")
         return df[["ConceptName", "StartDateTime", "EndDateTime"]]
     
     def _apply_global_clippers(self, df: pd.DataFrame, clipper_df: Optional[pd.DataFrame]) -> pd.DataFrame:
