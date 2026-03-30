@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 # Heuristic file-size threshold to enable Dask automatically (in bytes)
 DASK_FILESIZE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
+DATE_SANITY_WINDOW_YEARS = 100
 
 # Local Code
 from .config import *
@@ -430,8 +431,36 @@ class DataAccess:
         if required_missing:
             raise ValueError(f"Missing required columns: {', '.join(required_missing)}. Rename CSV headers or preprocess file.")
 
+        # Non-blocking datetime sanity tracking (for suspicious but parseable timelines)
+        now = pd.Timestamp.now()
+        lower_bound = now - pd.DateOffset(years=DATE_SANITY_WINDOW_YEARS)
+        upper_bound = now + pd.DateOffset(years=DATE_SANITY_WINDOW_YEARS)
+        date_sanity = {
+            "rows_checked": 0,
+            "start_outside": 0,
+            "end_outside": 0,
+            "start_min": None,
+            "start_max": None,
+            "end_min": None,
+            "end_max": None,
+        }
+
+        def _update_min_max(current_min, current_max, series):
+            if series.empty:
+                return current_min, current_max
+            smin = series.min()
+            smax = series.max()
+            if pd.isna(smin) or pd.isna(smax):
+                return current_min, current_max
+            if current_min is None or smin < current_min:
+                current_min = smin
+            if current_max is None or smax > current_max:
+                current_max = smax
+            return current_min, current_max
+
         # validation helper for a pandas DataFrame chunk/partition (strict: any failure aborts)
         def validate_chunk_strict(df, idxs):
+            nonlocal date_sanity
             ln = len(df)
             if ln == 0:
                 return
@@ -458,6 +487,17 @@ class DataAccess:
             n_bad_e = int(parsed_e.isna().sum())
             if n_bad_s > 0 or n_bad_e > 0:
                 raise ValueError(f"Datetime validation failed: {n_bad_s}/{ln} unparsable StartDateTime, {n_bad_e}/{ln} unparsable EndDateTime.")
+
+            # Track suspicious but parseable datetimes outside the sanity window.
+            date_sanity["rows_checked"] += ln
+            date_sanity["start_outside"] += int(((parsed_s < lower_bound) | (parsed_s > upper_bound)).sum())
+            date_sanity["end_outside"] += int(((parsed_e < lower_bound) | (parsed_e > upper_bound)).sum())
+            date_sanity["start_min"], date_sanity["start_max"] = _update_min_max(
+                date_sanity["start_min"], date_sanity["start_max"], parsed_s
+            )
+            date_sanity["end_min"], date_sanity["end_max"] = _update_min_max(
+                date_sanity["end_min"], date_sanity["end_max"], parsed_e
+            )
 
         # normalize chunk in-place for insertion
         def normalize_chunk_for_insert(df, idxs):
@@ -541,6 +581,27 @@ class DataAccess:
 
 
         print(f"[Info] Finished loading. Inserted {total_inserted} rows.")
+        if date_sanity["start_outside"] > 0 or date_sanity["end_outside"] > 0:
+            print(
+                f"[Warning] Datetime sanity check: found out-of-window values (window: "
+                f"{lower_bound.strftime('%Y-%m-%d')} to {upper_bound.strftime('%Y-%m-%d')}, "
+                f"now +/- {DATE_SANITY_WINDOW_YEARS} years)."
+            )
+            print(
+                f"[Warning] StartDateTime outside window: {date_sanity['start_outside']} rows | "
+                f"EndDateTime outside window: {date_sanity['end_outside']} rows | "
+                f"Rows checked: {date_sanity['rows_checked']}"
+            )
+            if date_sanity["start_min"] is not None and date_sanity["start_max"] is not None:
+                print(
+                    f"[Warning] Observed StartDateTime range: "
+                    f"{date_sanity['start_min']} -> {date_sanity['start_max']}"
+                )
+            if date_sanity["end_min"] is not None and date_sanity["end_max"] is not None:
+                print(
+                    f"[Warning] Observed EndDateTime range: "
+                    f"{date_sanity['end_min']} -> {date_sanity['end_max']}"
+                )
         self.__print_db_info()
         return total_inserted
 

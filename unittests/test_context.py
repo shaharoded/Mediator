@@ -606,3 +606,59 @@ def test_context_on_event_application(repo_with_event_context, tmp_path):
     # Windowed: StartDateTime = 08:00 - 1h = 07:00, EndDateTime = 08:00 + 2h = 10:00
     assert row["StartDateTime"] == make_ts("07:00")
     assert row["EndDateTime"] == make_ts("10:00")
+
+
+def test_context_window_large_after_is_capped_not_overflow(tmp_path: Path):
+    """Large good-after windows should cap at pandas.Timestamp.max instead of overflowing."""
+    diagnosis_raw_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="DIABETES_DIAGNOSIS" concept-type="raw-boolean">
+  <categories>Diagnosis</categories>
+  <description>Diabetes diagnosis</description>
+  <attributes>
+    <attribute name="DIABETES_DIAGNOSIS" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+
+    diagnosis_context_xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="DIABETES_DIAGNOSIS_CONTEXT_TEST">
+    <categories>Diagnosis</categories>
+    <description>DIABETES context with large persistence</description>
+    <derived-from>
+        <attribute name="DIABETES_DIAGNOSIS" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+    <context-windows>
+        <persistence value="True" good-before="14d" good-after="120y"/>
+    </context-windows>
+</context>
+"""
+
+    raw_path = write_xml(tmp_path, "DIABETES_DIAGNOSIS.xml", diagnosis_raw_xml)
+    context_path = write_xml(tmp_path, "DIABETES_DIAGNOSIS_CONTEXT_TEST.xml", diagnosis_context_xml)
+
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(raw_path))
+    set_tak_repository(repo)
+    repo.register(Context.parse(context_path))
+
+    context = repo.get("DIABETES_DIAGNOSIS_CONTEXT_TEST")
+
+    # Mirrors problematic MIMIC-style late timestamp.
+    df_in = pd.DataFrame([
+        (100009, "DIABETES_DIAGNOSIS", pd.Timestamp("2162-05-16 15:56:00"), pd.Timestamp("2162-05-16 15:56:01"), ("True",), "raw-concept"),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
+
+    df_out = context.apply(df_in)
+
+    assert len(df_out) == 1
+    assert df_out.iloc[0]["ConceptName"] == "DIABETES_DIAGNOSIS_CONTEXT_TEST"
+    assert df_out.iloc[0]["EndDateTime"] == pd.Timestamp.max

@@ -203,7 +203,7 @@ python -m core.mediator \
 ### 1.5 Run Tests
 
 ```bash
-# Run all tests (53 tests)
+# Run all tests
 python -m pytest unittests/ -v
 
 # Run specific test modules

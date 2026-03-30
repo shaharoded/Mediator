@@ -387,8 +387,24 @@ class Context(TAK):
             
             # Apply window to all rows with this value (vectorized)
             mask = (df["Value"] == value)
-            df.loc[mask, "StartDateTime"] = df.loc[mask, "StartDateTime"] - pd.Timedelta(window["before"])
-            df.loc[mask, "EndDateTime"] = df.loc[mask, "EndDateTime"] + pd.Timedelta(window["after"])
+            before_delta = pd.Timedelta(window["before"])
+            after_delta = pd.Timedelta(window["after"])
+
+            if before_delta > pd.Timedelta(0):
+                min_safe_start = pd.Timestamp.min + before_delta
+                df.loc[mask, "StartDateTime"] = (
+                    df.loc[mask, "StartDateTime"]
+                    .clip(lower=min_safe_start)
+                    - before_delta
+                )
+
+            if after_delta > pd.Timedelta(0):
+                max_safe_end = pd.Timestamp.max - after_delta
+                df.loc[mask, "EndDateTime"] = (
+                    df.loc[mask, "EndDateTime"]
+                    .clip(upper=max_safe_end)
+                    + after_delta
+                )
         
         return df
 
