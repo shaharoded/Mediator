@@ -29,6 +29,7 @@
                         <allowed-value equal="Lunch"/>
                         <allowed-value equal="Dinner"/>
                         <allowed-value equal="Night-Snack"/>
+                        <allowed-value equal="True"/>
                     </attribute>
                 </anchor>
                 <event select='first'>

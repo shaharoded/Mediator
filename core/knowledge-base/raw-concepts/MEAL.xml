@@ -5,6 +5,7 @@
     <attributes>
         <attribute name="MEAL" type="nominal">
             <nominal-allowed-values>
+                <allowed-value value="True"/>
                 <allowed-value value="Breakfast"/>
                 <allowed-value value="Lunch"/>
                 <allowed-value value="Dinner"/>

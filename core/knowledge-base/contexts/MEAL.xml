@@ -27,6 +27,11 @@
                 <allowed-value equal="Night-Snack"/>
             </attribute>
         </rule>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
     </abstraction-rules>
     
     <context-windows>
@@ -34,5 +39,6 @@
         <persistence value="Lunch" good-before="2h" good-after="2h"/>
         <persistence value="Dinner" good-before="2h" good-after="2h"/>
         <persistence value="Night-Snack" good-before="2h" good-after="2h"/>
+        <persistence value="True" good-before="2h" good-after="2h"/>
     </context-windows>
 </context>
