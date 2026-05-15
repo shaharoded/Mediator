@@ -23,6 +23,7 @@ from .tak.state import State
 from .tak.trend import Trend
 from .tak.context import Context
 from .tak.pattern import Pattern, LocalPattern, GlobalPattern
+from .tak.utils import _map_tak_to_concepts
 from .config import TAK_FOLDER
 
 # Add parent directory to path for backend imports
@@ -990,14 +991,18 @@ class Mediator:
     ) -> Dict[int, Dict[str, Any]]:
         """
         Main entry point: Build repository → Process patients → Write outputs.
-        
+
         Args:
             max_concurrent: Maximum number of concurrent patient processes (0 = all cores)
             patient_subset: Optional list of patient IDs to process
         """
         # Phase 1: Build TAK repository. This is redundant for multiprocessing, but is a good reflection for logs, and will prompt errors early.
         self.build_repository()
-        
+
+        # Phase 1.5: Sanity-check concept-name coverage between input table and raw concepts
+        rows = self.da.fetch_records("SELECT DISTINCT ConceptName FROM InputPatientData;", ())
+        _map_tak_to_concepts(self.repo, {r[0] for r in rows}, self.global_clippers)
+
         # Phase 2: Process patients (multiprocessing)
         patient_stats = self.process_all_patients_parallel(
             max_concurrent=max_concurrent,

@@ -1,7 +1,75 @@
 from datetime import timedelta
 from dataclasses import dataclass
-from typing import Union
+from typing import Union, Dict, TYPE_CHECKING
+import logging
+
 from .external_functions import REPO
+
+if TYPE_CHECKING:
+    from .repository import TAKRepository
+
+logger = logging.getLogger(__name__)
+
+
+def _map_tak_to_concepts(
+    repo: "TAKRepository",
+    input_concepts: set,
+    global_clippers: Dict[str, str],
+) -> None:
+    """
+    Purpose: Detect concept-name mismatches between the input table and the TAK
+             repository early, so misconfigured raw concepts or stale input columns
+             surface before patient processing starts.
+    Method: Build the set of concept names referenced by non-parameterized
+            RawConcept attributes (these are the names actually queried against
+            InputPatientData) plus the global clippers, then symmetric-diff it
+            against the set of distinct ConceptName values in the input table and
+            log a warning per mismatch.
+
+    Args:
+        repo (TAKRepository): The finalized TAK repository.
+        input_concepts (set): Distinct ConceptName values present in InputPatientData.
+        global_clippers (Dict[str, str]): {clipper_name: 'START' | 'END'} — these
+            are queried from InputPatientData directly, not through a raw concept.
+    """
+    # Local imports to avoid circular dependencies
+    from .raw_concept import RawConcept, ParameterizedRawConcept
+
+    # Build the set of all attribute names referenced by non-parameterized raw concepts
+    # (used to detect "wasted" concept names in InputPatientData below).
+    all_referenced_attrs: set = set()
+    raw_concepts = []
+    for tak in repo.taks.values():
+        if isinstance(tak, RawConcept) and not isinstance(tak, ParameterizedRawConcept):
+            raw_concepts.append(tak)
+            for attr in tak.attributes:
+                all_referenced_attrs.add(attr["name"])
+    all_referenced_attrs.update(global_clippers.keys())
+
+    # 1) In input but referenced by NO raw concept (and no global clipper) → wasted data / typo
+    for cn in sorted(input_concepts - all_referenced_attrs):
+        logger.warning(
+            f"Concept '{cn}' is in InputPatientData but is not referenced by any raw-concept attribute "
+            f"(or global clipper). It will not be used by the pipeline."
+        )
+
+    # 2) Raw concept will NOT be calculable: ALL of its attribute names are missing from InputPatientData.
+    #    (Partial misses are normal — only a fully-missing raw concept breaks downstream TAKs.)
+    for tak in raw_concepts:
+        attr_names = [a["name"] for a in tak.attributes]
+        missing = [n for n in attr_names if n not in input_concepts]
+        if missing and len(missing) == len(attr_names):
+            logger.warning(
+                f"Raw concept '{tak.name}' cannot be calculated: none of its attributes "
+                f"{attr_names} appear in InputPatientData. Any TAK depending on it will receive empty input."
+            )
+
+    # 3) Global clippers missing from input → emit per missing clipper (each is its own concept)
+    for cn in sorted(set(global_clippers.keys()) - input_concepts):
+        logger.warning(
+            f"Global clipper '{cn}' does not appear in InputPatientData. "
+            f"Clipping for this boundary will be skipped."
+        )
 
 
 @dataclass(frozen=True)
