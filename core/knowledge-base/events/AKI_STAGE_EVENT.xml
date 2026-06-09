@@ -1,37 +1,37 @@
-  <?xml version="1.0" encoding="UTF-8"?>
-  <event name="AKI_STAGE_EVENT">
-      <categories>Events</categories>
-      <description>Lab-derived acute kidney injury stage based on creatinine absolute rise, creatinine ratio from baseline, and severe absolute creatinine. Used for contextual modeling.</description>
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="AKI_EVENT">
+    <categories>Biomarkers</categories>
+    <description>Lab-derived acute kidney injury stage based on creatinine absolute rise, creatinine ratio from baseline, severe absolute creatinine. basis for complication.</description>
 
-      <derived-from>
-          <attribute name="CREATININE_RISE_SERUM_MEASURE" tak="raw-concept" idx="0" ref="R1"/>
-          <attribute name="CREATININE_REL_SERUM_MEASURE" tak="raw-concept" idx="0" ref="R2"/>
-          <attribute name="CREATININE_SERUM_MEASURE" tak="raw-concept" idx="0" ref="C1"/>
-      </derived-from>
+    <derived-from>
+        <attribute name="CREATININE_SERUM_MEASURE" tak="raw-concept" idx="0" ref="C1"/>
+        <attribute name="CREATININE_RISE_SERUM_MEASURE" tak="parameterized-raw-concept" idx="0" ref="R1"/>
+        <attribute name="CREATININE_REL_SERUM_MEASURE" tak="parameterized-raw-concept" idx="0" ref="R2"/>
+    </derived-from>
 
-      <abstraction-rules>
-          <rule value="AKI Stage 3" operator="or">
-              <attribute ref="R2">
-                  <allowed-value min="3.0"/>
-              </attribute>
-              <attribute ref="C1">
-                  <allowed-value min="4.0"/>
-              </attribute>
-          </rule>
+    <abstraction-rules>
+        <rule value="Stage 3" operator="or">
+            <attribute ref="R2">
+                <allowed-value min="3.0"/>
+            </attribute>
+            <attribute ref="C1">
+                <allowed-value min="4.0"/>
+            </attribute>
+        </rule>
 
-          <rule value="AKI Stage 2" operator="or">
-              <attribute ref="R2">
-                  <allowed-value min="2.0" max="3.0"/>
-              </attribute>
-          </rule>
+        <rule value="Stage 2" operator="or">
+            <attribute ref="R2">
+                <allowed-value min="2.0" max="3.0"/>
+            </attribute>
+        </rule>
 
-          <rule value="AKI Stage 1" operator="or">
-              <attribute ref="R1">
-                  <allowed-value min="0.3"/>
-              </attribute>
-              <attribute ref="R2">
-                  <allowed-value min="1.5" max="2.0"/>
-              </attribute>
-          </rule>
-      </abstraction-rules>
-  </event>
+        <rule value="Stage 1" operator="or">
+            <attribute ref="R1">
+                <allowed-value min="0.3"/>
+            </attribute>
+            <attribute ref="R2">
+                <allowed-value min="1.5" max="2.0"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</event>

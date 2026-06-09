@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<event name="CRITICAL_ELECTROLYTE_DERANGEMENT_EVENT">
-    <categories>Complications</categories>
+<event name="ELECTROLYTE_DERANGEMENT_EVENT">
+    <categories>Biomarkers</categories>
     <description>Critical electrolyte derangement event</description>
     <derived-from>
         <attribute name="POTASSIUM_MEASURE" tak="raw-concept" idx="0" ref="A1"/>

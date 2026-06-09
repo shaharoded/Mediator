@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<event name="KIDNEY_COMPLICATION_EVENT">
-    <categories>Complications</categories>
-    <description>AKI renal complication, for prediction target</description>
+<event name="MYOCARDIAL_INJURY_EVENT">
+    <categories>Biomarkers</categories>
+    <description>Myocardial injury event (e.g., myocardial infarction). Derived from troponin (not full on complication but important biomarker)</description>
     <derived-from>
-        <attribute name="AKI_EVENT" tak="event" ref="E1"/>
+        <attribute name="TROPONIN_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
     </derived-from>
     
     <!-- 
@@ -15,11 +15,8 @@
     -->
     <abstraction-rules>
         <rule value="True" operator="or">
-            <attribute ref="E1">
-                <allowed-value equal="Stage 3"/>  <!-- exact match -->
-            </attribute>
-            <attribute ref="E1">
-                <allowed-value equal="Stage 2"/>  <!-- exact match -->
+            <attribute ref="A1">
+                <allowed-value min="600"/>  <!-- 1 time >= 600 -->
             </attribute>
         </rule>
     </abstraction-rules>

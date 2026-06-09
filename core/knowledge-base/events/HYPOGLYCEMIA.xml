@@ -5,7 +5,6 @@
     <derived-from>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
         <attribute name="STEADY_GLUCOSE_MEASURE_LOW_AFTER_FIRST" tak="raw-concept" idx="0" ref="S2"/>
-        <attribute name="HYPOGLYCEMIA" tak="raw-concept" idx="0" ref="O2"/>
     </derived-from>
     
     <!-- 
@@ -22,9 +21,6 @@
             </attribute>
             <attribute ref="S2">
                 <allowed-value max="70"/>  <!-- Stable <= 70 -->
-            </attribute>
-            <attribute ref="O2">
-                <allowed-value equal="True"/>  <!-- exact match -->
             </attribute>
         </rule>
     </abstraction-rules>
