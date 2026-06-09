@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<event name="SEVERE_DISGLYCEMIA_EVENT">
+<event name="HYPERGLYCEMIA_EVENT">
     <categories>Complications</categories>
-    <description>Severe dysglycemia event (extremely low or high glucose levels). Overlaps with regular dysglycemia events, but is more severe.</description>
+    <description>Hyperglycemia event (only after the 2nd unstable event or extreme measurement)</description>
     <derived-from>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="STEADY_GLUCOSE_MEASURE_HIGH_AFTER_FIRST" tak="raw-concept" idx="0" ref="S1"/>
+        <attribute name="HYPERGLYCEMIA" tak="raw-concept" idx="0" ref="O1"/>
     </derived-from>
     
     <!-- 
@@ -14,14 +16,15 @@
     - min="val1" max="val2"       → range [val1, val2]
     -->
     <abstraction-rules>
-        <rule value="Hypoglycemia" operator="or">
-            <attribute ref="A1">
-                <allowed-value max="54"/>  <!-- 1 time <= 54 -->
-            </attribute>
-        </rule>
-        <rule value="Hyperglycemia" operator="or">
+        <rule value="True" operator="or">
             <attribute ref="A1">
                 <allowed-value min="250"/>  <!-- 1 time >= 250 -->
+            </attribute>
+            <attribute ref="S1">
+                <allowed-value min="180"/>  <!-- Stable >= 180 -->
+            </attribute>
+            <attribute ref="O1">
+                <allowed-value equal="True"/> <!-- exact match -->
             </attribute>
         </rule>
     </abstraction-rules>

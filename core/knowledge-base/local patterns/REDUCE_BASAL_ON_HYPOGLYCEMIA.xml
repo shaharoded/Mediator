@@ -5,7 +5,7 @@
     <description>Captures if long term INSULIN (BASAL) was reduced after low glucose measured (if was given within 24h of the event, ignores otherwise)</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
     <derived-from>
-        <attribute name="DISGLYCEMIA_EVENT" tak="event" ref="A2"/>
+        <attribute name="HYPOGLYCEMIA_EVENT" tak="event" ref="A2"/>
         <attribute name="BASAL_BITZUA_RATIO" tak="raw-concept" idx="0" ref="E1"/>
     </derived-from>
 
@@ -18,7 +18,7 @@
             <temporal-relation how='before' max-distance='24h'>
                 <anchor>
                     <attribute ref="A2">
-                        <allowed-value equal="Hypoglycemia"/>
+                        <allowed-value equal="True"/>
                     </attribute>
                 </anchor>
                 <event select='first'>

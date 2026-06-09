@@ -7,16 +7,19 @@
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
         <attribute name="DEATH" tak="raw-concept" idx="0" ref="C1"/>
         <attribute name="RELEASE" tak="raw-concept" idx="0" ref="C2"/>
-        <attribute name="DISGLYCEMIA_EVENT" tak="event" ref="C3"/>
+        <attribute name="HYPOGLYCEMIA_EVENT" tak="event" ref="C3"/>
+        <attribute name="HYPERGLYCEMIA_EVENT" tak="event" ref="C4"/>
     </derived-from>
  
     <!-- Rules always share "OR" relationship. To create more complex patterns, reference a pattern in a different pattern TAK -->
     <abstraction-rules>
         <rule>
-            <context>
+            <context how="or">
                 <attribute ref="C3">
-                    <allowed-value equal="Hyperglycemia"/>
-                    <allowed-value equal="Hypoglycemia"/>
+                    <allowed-value equal="True"/>
+                </attribute>
+                <attribute ref="C4">
+                    <allowed-value equal="True"/>
                 </attribute>
             </context>
             <!-- Relation between 2 KBTA objects -->
