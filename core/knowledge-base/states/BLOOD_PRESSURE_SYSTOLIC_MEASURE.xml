@@ -5,18 +5,28 @@
     <derived-from name="BLOOD_PRESSURE_SYSTOLIC_MEASURE" tak="raw-concept"/>
 
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-after="4h" interpolate="true" max-skip="1"/>
+    <persistence good-after="4h" interpolate="false"/>
 
     <!-- Discretize and abstract -->
     <abstraction-rules>
-        <rule value="Low" operator="and">
+        <rule value="Severe Shock Hypotension" operator="and">
             <attribute idx="0">
-                <allowed-value max="90"/>
+                <allowed-value max="80"/>
             </attribute>
         </rule>
-        <rule value="Normal" operator="and">
+        <rule value="Hypotension" operator="and">
             <attribute idx="0">
-                <allowed-value min="90" max="120"/>
+                <allowed-value min="80" max="90"/>
+            </attribute>
+        </rule>
+        <rule value="Borderline Hypotension" operator="and">
+            <attribute idx="0">
+                <allowed-value min="90" max="100"/>
+            </attribute>
+        </rule>
+        <rule value="Low-Normal" operator="and">
+            <attribute idx="0">
+                <allowed-value min="100" max="120"/>
             </attribute>
         </rule>
         <rule value="Elevated" operator="and">

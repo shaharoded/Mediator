@@ -5,18 +5,23 @@
     <derived-from name="SODIUM_MEASURE" tak="raw-concept"/>
 
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-after="48h" interpolate="true" max-skip="1"/>
+    <persistence good-after="48h" interpolate="false"/>
 
     <!-- Discretize and abstract -->
     <abstraction-rules>
-        <rule value="Severe Hyponatremia" operator="and">
+        <rule value="Critical Hyponatremia" operator="and">
             <attribute idx="0">
                 <allowed-value max="120"/>
             </attribute>
         </rule>
+        <rule value="Severe Hyponatremia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="120" max="125"/>
+            </attribute>
+        </rule>
         <rule value="Moderate Hyponatremia" operator="and">
             <attribute idx="0">
-                <allowed-value min="120" max="130"/>
+                <allowed-value min="125" max="130"/>
             </attribute>
         </rule>
         <rule value="Mild Hyponatremia" operator="and">
@@ -31,17 +36,17 @@
         </rule>
         <rule value="Mild Hypernatremia" operator="and">
             <attribute idx="0">
-                <allowed-value min="145" max="155"/>
-            </attribute>
-        </rule>
-        <rule value="Moderate Hypernatremia" operator="and">
-            <attribute idx="0">
-                <allowed-value min="155" max="165"/>
+                <allowed-value min="145" max="150"/>
             </attribute>
         </rule>
         <rule value="Severe Hypernatremia" operator="and">
             <attribute idx="0">
-                <allowed-value min="165"/>
+                <allowed-value min="150" max="160"/>
+            </attribute>
+        </rule>
+        <rule value="Critical Hypernatremia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="160"/>
             </attribute>
         </rule>
     </abstraction-rules>

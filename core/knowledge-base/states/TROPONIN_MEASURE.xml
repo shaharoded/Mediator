@@ -5,7 +5,7 @@
     <derived-from name="TROPONIN_MEASURE" tak="raw-concept"/>
 
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-after="24h" interpolate="true" max-skip="1"/>
+    <persistence good-after="24h" interpolate="false"/>
 
     <!-- Discretize and abstract -->
     <abstraction-rules>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="CRITICAL_ELECTROLYTE_DERANGEMENT_EVENT">
+    <categories>Complications</categories>
+    <description>Critical electrolyte derangement event</description>
+    <derived-from>
+        <attribute name="POTASSIUM_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
+        <attribute name="SODIUM_MEASURE" tak="raw-concept" idx="0" ref="A2"/>
+        <attribute name="PH_MEASURE" tak="raw-concept" idx="0" ref="A3"/>
+        <attribute name="BICARBONATE_MEASURE" tak="raw-concept" idx="0" ref="A4"/>
+    </derived-from>
+    
+    <!-- 
+    Abstraction rules: constraint types allowed in <allowed-value>:
+    - equal="value"               → exact match
+    - min="value"                 → >= value
+    - max="value"                 → <= value
+    - min="val1" max="val2"       → range [val1, val2]
+    -->
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value max="2.5"/>
+            </attribute>
+            <attribute ref="A1">
+                <allowed-value min="6.5"/>
+            </attribute>
+            <attribute ref="A2">
+                <allowed-value max="120"/>
+            </attribute>
+            <attribute ref="A2">
+                <allowed-value min="160"/>
+            </attribute>
+            <attribute ref="A3">
+                <allowed-value max="7.1"/>
+            </attribute>
+            <attribute ref="A3">
+                <allowed-value min="7.55"/>
+            </attribute>
+            <attribute ref="A4">
+                <allowed-value max="10"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</event>

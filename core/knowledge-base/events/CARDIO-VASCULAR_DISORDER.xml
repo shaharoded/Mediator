@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <event name="CARDIO-VASCULAR_DISORDER_EVENT">
     <categories>Complications</categories>
-    <description>Marks Cardiovascular Disorder (in admission complication) event</description>
+    <description>Marks Cardiovascular (MI) Disorder (in admission complication) event</description>
     <derived-from>
         <!-- ref optional when no abstraction-rules -->
         <attribute name="CARDIO-VASCULAR_DISORDER" tak="raw-concept" idx="0" ref='A1'/>

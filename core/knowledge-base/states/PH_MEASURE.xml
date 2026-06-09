@@ -5,23 +5,33 @@
     <derived-from name="PH_MEASURE" tak="raw-concept"/>
 
     <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-after="6h" interpolate="true" max-skip="1"/>
+    <persistence good-after="6h" interpolate="false"/>
 
     <!-- Discretize and abstract -->
     <abstraction-rules>
-        <rule value="Severe Acidosis" operator="and">
+        <rule value="Critical Acidosis" operator="and">
             <attribute idx="0">
                 <allowed-value max="7.0"/>
             </attribute>
         </rule>
+        <rule value="Severe Acidosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="7.0" max="7.1"/>
+            </attribute>
+        </rule>
         <rule value="Moderate Acidosis" operator="and">
             <attribute idx="0">
-                <allowed-value min="7.0" max="7.2"/>
+                <allowed-value min="7.1" max="7.2"/>
             </attribute>
         </rule>
         <rule value="Mild Acidosis" operator="and">
             <attribute idx="0">
-                <allowed-value min="7.2" max="7.35"/>
+                <allowed-value min="7.2" max="7.3"/>
+            </attribute>
+        </rule>
+        <rule value="Borderline Acidosis" operator="and">
+            <attribute idx="0">
+                <allowed-value min="7.3" max="7.35"/>
             </attribute>
         </rule>
         <rule value="Normal" operator="and">

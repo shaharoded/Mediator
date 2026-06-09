@@ -4,13 +4,18 @@
     <description>Abstraction for the measurements of GLUCOSE (Lab / Capillary)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
 
-    <!-- Concatenate adjacent equal states within these windows; allow 1 outlier skip -->
-    <persistence good-after="24h" interpolate="true" max-skip="1"/>
+    <!-- Allow fast paste changing state, no smoothing -->
+    <persistence good-after="24h" interpolate="false"/>
 
     <abstraction-rules>
+        <rule value="Critical Hypoglycemia" operator="and">
+            <attribute idx="0">
+                <allowed-value max="40"/>
+            </attribute>
+        </rule>
         <rule value="Severe Hypoglycemia" operator="and">
             <attribute idx="0">
-                <allowed-value max="54"/>
+                <allowed-value min="40" max="54"/>
             </attribute>
         </rule>
         <rule value="Hypoglycemia" operator="and">
@@ -18,24 +23,34 @@
                 <allowed-value min="54" max="70"/>
             </attribute>
         </rule>
-        <rule value="Low Glucose" operator="and">
+        <rule value="Controlled Glucose" operator="and">
             <attribute idx="0">
                 <allowed-value min="70" max="140"/>
             </attribute>
         </rule>
-        <rule value="Normal Glucose" operator="and">
+        <rule value="Moderate Glucose" operator="and">
             <attribute idx="0">
                 <allowed-value min="140" max="180"/>
             </attribute>
         </rule>
-        <rule value="High Glucose" operator="and">
+        <rule value="Hyperglycemia" operator="and">
             <attribute idx="0">
                 <allowed-value min="180" max="250"/>
             </attribute>
         </rule>
-        <rule value="Hyperglycemia" operator="and">
+        <rule value="Severe Hyperglycemia" operator="and">
             <attribute idx="0">
-                <allowed-value min="250"/>
+                <allowed-value min="250" max="400"/>
+            </attribute>
+        </rule>
+        <rule value="Extreme Hyperglycemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="400" max="600"/>
+            </attribute>
+        </rule>
+        <rule value="HHS-Range Hyperglycemia" operator="and">
+            <attribute idx="0">
+                <allowed-value min="600"/>
             </attribute>
         </rule>
     </abstraction-rules>

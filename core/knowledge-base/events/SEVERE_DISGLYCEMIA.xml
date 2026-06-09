@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<event name="SEVERE_DISGLYCEMIA_EVENT">
+    <categories>Complications</categories>
+    <description>Severe dysglycemia event (extremely low or high glucose levels). Overlaps with regular dysglycemia events, but is more severe.</description>
+    <derived-from>
+        <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    
+    <!-- 
+    Abstraction rules: constraint types allowed in <allowed-value>:
+    - equal="value"               → exact match
+    - min="value"                 → >= value
+    - max="value"                 → <= value
+    - min="val1" max="val2"       → range [val1, val2]
+    -->
+    <abstraction-rules>
+        <rule value="Hypoglycemia" operator="or">
+            <attribute ref="A1">
+                <allowed-value max="54"/>  <!-- 1 time <= 54 -->
+            </attribute>
+        </rule>
+        <rule value="Hyperglycemia" operator="or">
+            <attribute ref="A1">
+                <allowed-value min="250"/>  <!-- 1 time >= 250 -->
+            </attribute>
+        </rule>
+    </abstraction-rules>
+</event>
