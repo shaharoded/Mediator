@@ -302,6 +302,10 @@ class TAKRepository:
                     tak_data['derived_from'] = tak.derived_from
             else:
                 tak_data['derived_from'] = None
+
+            # Add attribute names for raw-concepts (building blocks with no derived_from)
+            if hasattr(tak, 'attributes') and tak.attributes:
+                tak_data['attributes'] = [a["name"] for a in tak.attributes]
             
             # Add parameters if present (ParameterizedRawConcept, Pattern)
             if hasattr(tak, 'parameters') and tak.parameters:
