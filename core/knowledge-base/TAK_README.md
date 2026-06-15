@@ -357,7 +357,7 @@ A DataFrame with the same shape and columns as the parent raw concept, but with 
 3. **Interval Building (anchor-based):**
    - **Anchor rule:** First point sets anchor (no interval yet)
    - **Next point:** Stretch back to current anchor if `(t_i - anchor) <= good_after`
-   - **Gap exceeds window:** Emit hole interval `[anchor, t_i]` with `Value=None`, reset anchor
+   - **Gap exceeds window:** Reset the anchor to `t_i`; no interval is emitted for the hole (the gap is simply skipped in the output)
    - **Consecutive identical labels:** Merge by extending EndDateTime
 
 **Note:** Generally, `time_steady << good_after` (e.g., 12h lookback, 24h merge window)

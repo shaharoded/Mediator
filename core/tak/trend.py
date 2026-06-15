@@ -248,7 +248,7 @@ class Trend(TAK):
         Build intervals using the anchor rule:
         - First point creates no interval; it sets the anchor.
         - Each next point can stretch back to the current anchor if (t_i - anchor) <= good_after.
-        - If the gap exceeds good_after, emit a hole interval [anchor, t_i] with Value=None and reset anchor=t_i.
+        - If the gap exceeds good_after, the anchor is reset to t_i and no interval is emitted for the hole.
         - Labeled intervals use the current point's label and stretch [anchor, t_i].
         - Consecutive identical labels merge by extending EndDateTime.
         """
@@ -277,16 +277,8 @@ class Trend(TAK):
             t_i = times[i]
             lbl_i = labels[i]
 
-            # If too far from current anchor → hole [anchor, t_i], then reset anchor and skip label emission now
+            # If too far from current anchor → no interval is emitted for the hole; just reset anchor
             if (t_i - anchor_time) > np.timedelta64(int(good_after_td.value), 'ns'):
-                merged.append({
-                    "PatientId": int(pid_arr[i]),
-                    "ConceptName": str(cname_arr[i]),
-                    "StartDateTime": pd.Timestamp(anchor_time),
-                    "EndDateTime": pd.Timestamp(t_i),
-                    "Value": None,
-                    "AbstractionType": str(abst_arr[i]),
-                })
                 anchor_time = t_i
                 last_label = None
                 continue

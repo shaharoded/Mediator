@@ -111,19 +111,16 @@ def test_trend_anchor_based_intervals(repo_with_glucose_trend):
     # 4. [31h → 36h, "Steady"] (T=36h closes with "Steady" the current anchor at T=31h)
 
     
-    assert len(df_trend_out) == 3
+    assert len(df_trend_out) == 2
 
     assert df_trend_out.iloc[0]["Value"] == "Increasing"
     assert df_trend_out.iloc[0]["StartDateTime"] == make_ts("00:00")
     assert df_trend_out.iloc[0]["EndDateTime"] == make_ts("06:00")
 
-    assert df_trend_out.iloc[1]["Value"] is None
-    assert df_trend_out.iloc[1]["StartDateTime"] == make_ts("06:00")
-    assert df_trend_out.iloc[1]["EndDateTime"] == make_ts("07:00", day=1)
-
-    assert df_trend_out.iloc[2]["Value"] == "Steady"
-    assert df_trend_out.iloc[2]["StartDateTime"] == make_ts("07:00", day=1)
-    assert df_trend_out.iloc[2]["EndDateTime"] == make_ts("12:00", day=1)
+    # Hole between 6h and 31h is NOT emitted as a row (anchor reset only)
+    assert df_trend_out.iloc[1]["Value"] == "Steady"
+    assert df_trend_out.iloc[1]["StartDateTime"] == make_ts("07:00", day=1)
+    assert df_trend_out.iloc[1]["EndDateTime"] == make_ts("12:00", day=1)
 
     # ===== TEST CASE 2 =====
     print("\n" + "="*80)
@@ -235,7 +232,7 @@ def test_trend_anchor_based_intervals(repo_with_glucose_trend):
     # 4. [33h → 39h, "Steady"] (T=39h closes with "Steady" the current anchor at T=33h)
 
     
-    assert len(df_trend_out) == 4
+    assert len(df_trend_out) == 3
 
     # 1
     assert df_trend_out.iloc[0]["Value"] == "Steady"
@@ -247,12 +244,9 @@ def test_trend_anchor_based_intervals(repo_with_glucose_trend):
     assert df_trend_out.iloc[1]["StartDateTime"] == make_ts("02:00")
     assert df_trend_out.iloc[1]["EndDateTime"] == make_ts("08:00")
 
-    # 3 (hole)
-    assert df_trend_out.iloc[2]["Value"] is None
-    assert df_trend_out.iloc[2]["StartDateTime"] == make_ts("08:00")
-    assert df_trend_out.iloc[2]["EndDateTime"] == make_ts("09:00", day=1)
+    # Hole between 8h and 33h is NOT emitted as a row (anchor reset only)
 
-    # 4
-    assert df_trend_out.iloc[3]["Value"] == "Steady"
-    assert df_trend_out.iloc[3]["StartDateTime"] == make_ts("09:00", day=1)
-    assert df_trend_out.iloc[3]["EndDateTime"] == make_ts("14:00", day=1)
+    # 3
+    assert df_trend_out.iloc[2]["Value"] == "Steady"
+    assert df_trend_out.iloc[2]["StartDateTime"] == make_ts("09:00", day=1)
+    assert df_trend_out.iloc[2]["EndDateTime"] == make_ts("14:00", day=1)
