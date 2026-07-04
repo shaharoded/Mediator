@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="DIALYSIS" concept-type="raw-boolean">
+    <categories>Procedures</categories>
+    <description>Raw concept to mark the dialysis event, as it might be a predictive signal</description>
+    <attributes>
+        <attribute name="DIALYSIS" type="boolean"/>
+    </attributes>
+</raw-concept>

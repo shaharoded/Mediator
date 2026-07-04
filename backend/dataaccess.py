@@ -432,7 +432,7 @@ class DataAccess:
             raise ValueError(f"Missing required columns: {', '.join(required_missing)}. Rename CSV headers or preprocess file.")
 
         # Non-blocking datetime sanity tracking (for suspicious but parseable timelines)
-        now = pd.Timestamp.now()
+        now = pd.Timestamp.now(tz='UTC')
         lower_bound = now - pd.DateOffset(years=DATE_SANITY_WINDOW_YEARS)
         upper_bound = now + pd.DateOffset(years=DATE_SANITY_WINDOW_YEARS)
         date_sanity = {
@@ -481,8 +481,8 @@ class DataAccess:
             # Start/End datetimes parseable
             s_series = df.iloc[:, idxs['startdatetime_idx']]
             e_series = df.iloc[:, idxs['enddatetime_idx']]
-            parsed_s = pd.to_datetime(s_series, errors='coerce')
-            parsed_e = pd.to_datetime(e_series, errors='coerce')
+            parsed_s = pd.to_datetime(s_series, errors='coerce', utc=True)
+            parsed_e = pd.to_datetime(e_series, errors='coerce', utc=True)
             n_bad_s = int(parsed_s.isna().sum())
             n_bad_e = int(parsed_e.isna().sum())
             if n_bad_s > 0 or n_bad_e > 0:
