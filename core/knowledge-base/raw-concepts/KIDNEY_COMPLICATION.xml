@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="KIDNEY_COMPLICATION" concept-type="raw-boolean">
+    <categories>Complications</categories>
+    <description>Raw concept to mark the kidney complication event from observation code (only for Kinneret)</description>
+    <attributes>
+        <attribute name="KIDNEY_COMPLICATION" type="boolean"/>
+        <attribute name="KIDNEY_COMPLICATION_OBS" type="boolean"/> <!-- The only complication that also allows observation code to drive instance-->
+    </attributes>
+</raw-concept>

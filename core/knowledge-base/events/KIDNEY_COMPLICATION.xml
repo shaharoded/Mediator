@@ -5,6 +5,7 @@
     <derived-from>
         <attribute name="CREATININE_SERUM_MEASURE" tak="raw-concept" idx="0" ref="C1"/>
         <attribute name="CREATININE_REL_SERUM_MEASURE" tak="parameterized-raw-concept" idx="0" ref="R1"/>
+        <attribute name="KIDNEY_COMPLICATION" tak="raw-concept" idx="0" ref="O1"/>
     </derived-from>
     
     <!-- 
@@ -21,6 +22,9 @@
             </attribute>
             <attribute ref="C1">
                 <allowed-value min="4.0"/>  <!-- AKI Stage 3 by severe absolute creatinine -->
+            </attribute>
+            <attribute ref="O1">
+                <allowed-value equal="True"/>  <!-- AKI Stage 2+ by observation code -->
             </attribute>
         </rule>
     </abstraction-rules>
