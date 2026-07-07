@@ -306,6 +306,28 @@ STEADY_GLUCOSE_MEASURE_HIGH_XML = """\
 </parameterized-raw-concept>
 """
 
+# Mirrors the real STEADY_GLUCOSE_MEASURE_LOW TAK: emits a reading only when the
+# immediately preceding reading within 24 h was also <= 70.
+STEADY_GLUCOSE_MEASURE_LOW_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="STEADY_GLUCOSE_MEASURE_LOW">
+    <categories>Measurements</categories>
+    <description>Glucose reading emitted only when the immediately preceding reading within 24h was also &lt;= 70.</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    <parameters>
+        <parameter name="GLUCOSE_MEASURE" tak="raw-concept" how="before" dynamic="true" idx="0" ref="P1" good-before="24h"/>
+    </parameters>
+    <functions>
+        <function name="id_if_thresh_met">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+            <literal value="70"/>
+            <literal value="le"/>
+        </function>
+    </functions>
+</parameterized-raw-concept>
+"""
+
 
 # -----------------------------
 # DF builders (single patient)
@@ -966,3 +988,33 @@ def test_id_if_thresh_met_gate_consecutive_high_readings(tmp_path):
     assert out.iloc[0]["Value"][0] == 220
     assert out.iloc[1]["StartDateTime"] == make_ts("18:00", day=0)
     assert out.iloc[1]["Value"][0] == 190
+
+
+def test_id_if_thresh_met_gate_consecutive_low_readings(tmp_path):
+    """
+    Full integration test for STEADY_GLUCOSE_MEASURE_LOW logic:
+    a row is emitted only when the immediately preceding GLUCOSE_MEASURE
+    within 24 h was also <= 70.
+    """
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    param_path   = write_xml(tmp_path, "STEADY_GLUCOSE_MEASURE_LOW.xml", STEADY_GLUCOSE_MEASURE_LOW_XML)
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    df = df_for_good_window(
+        ("GLUCOSE_MEASURE", "06:00", 0, 100),  # no prior → skip
+        ("GLUCOSE_MEASURE", "10:00", 0,  60),  # prior 06:00 = 100 > 70 → gate drops → skip
+        ("GLUCOSE_MEASURE", "14:00", 0,  65),  # prior 10:00 = 60 <= 70 → emit
+        ("GLUCOSE_MEASURE", "18:00", 0,  55),  # prior 14:00 = 65 <= 70 → emit
+        ("GLUCOSE_MEASURE", "08:00", 2,  68),  # day 3: all priors > 24 h ago → skip
+    )
+    out = tak.apply(df)
+
+    assert len(out) == 2
+    assert out.iloc[0]["StartDateTime"] == make_ts("14:00", day=0)
+    assert out.iloc[0]["Value"][0] == 65
+    assert out.iloc[1]["StartDateTime"] == make_ts("18:00", day=0)
+    assert out.iloc[1]["Value"][0] == 55
