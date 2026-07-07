@@ -455,9 +455,26 @@ class Context(TAK):
 
     def _apply_clippers(self, df: pd.DataFrame, clipper_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Clip intervals using clipper boundaries.
-        Processes each context row to find overlapping clippers and adjust start times.
-        
+        Clip context intervals using clipper events.
+
+        clip_before and clip_after are treated as outward extensions of the clipper's
+        borders, forming an effective clipper zone:
+            effective_left  = clipper_start - clip_before
+            effective_right = clipper_end   + clip_after
+
+        Overlap detection uses these extended boundaries so that both cases are caught
+        even when the context does not overlap the raw clipper interval itself.
+
+        Case A — context started before the clipper (ctx_start < clipper_start):
+            Trim ctx_end to effective_left (= clipper_start - clip_before).
+            Semantics: "the clipper ends the active context window."
+
+        Case B — context starts within the suppression zone (ctx_start >= clipper_start):
+            Delay ctx_start to effective_right (= clipper_end + clip_after).
+            Semantics: "a recent clipper suppresses the context until clip_after has elapsed."
+
+        Intervals that become invalid (start >= end) after clipping are dropped.
+
         Args:
             df: Context output DataFrame
             clipper_df: DataFrame with clipper intervals (extracted from input)
@@ -465,64 +482,55 @@ class Context(TAK):
         if df.empty or clipper_df.empty:
             return df
 
-        # Track indices to drop
         indices_to_drop = set()
 
         for clipper_spec in self.clippers:
             clipper_name = clipper_spec["name"]
-            clipper_before = clipper_spec.get("clip_before")
-            clipper_after = clipper_spec.get("clip_after")
-            
-            # Filter to this specific clipper
-            clipper_df = clipper_df[clipper_df["ConceptName"] == clipper_name]
-            if clipper_df.empty:
+            clip_before = clipper_spec.get("clip_before")
+            clip_after = clipper_spec.get("clip_after")
+            clip_before_td = pd.Timedelta(clip_before) if clip_before is not None else pd.Timedelta(0)
+            clip_after_td = pd.Timedelta(clip_after) if clip_after is not None else pd.Timedelta(0)
+
+            this_clipper_df = clipper_df[clipper_df["ConceptName"] == clipper_name]
+            if this_clipper_df.empty:
                 logger.info("[%s] Clipper '%s' not found in input (skipping)", self.name, clipper_name)
                 continue
 
-            # For each context row, find ALL overlapping clippers
             for idx, ctx_row in df.iterrows():
                 pid = ctx_row["PatientId"]
                 ctx_start = ctx_row["StartDateTime"]
                 ctx_end = ctx_row["EndDateTime"]
-                
-                # Find overlapping clippers for this patient
-                patient_clippers = clipper_df[clipper_df["PatientId"] == pid]
+
+                patient_clippers = this_clipper_df[this_clipper_df["PatientId"] == pid]
                 if patient_clippers.empty:
                     continue
 
-                overlaps = patient_clippers[
-                    (patient_clippers["StartDateTime"] <= ctx_end) &
-                    (patient_clippers["EndDateTime"] >= ctx_start)
+                # Detect clippers whose effective zone [clipper_start - clip_before, clipper_end + clip_after]
+                # overlaps this context interval [ctx_start, ctx_end].
+                relevant = patient_clippers[
+                    (patient_clippers["StartDateTime"] - clip_before_td <= ctx_end) &
+                    (patient_clippers["EndDateTime"] + clip_after_td >= ctx_start)
                 ]
-                
-                if overlaps.empty:
-                    continue
 
-                # Apply clipping for EACH overlapping clipper
-                for _, clipper_row in overlaps.iterrows():
+                for _, clipper_row in relevant.iterrows():
                     clipper_start = clipper_row["StartDateTime"]
                     clipper_end = clipper_row["EndDateTime"]
+                    effective_left = clipper_start - clip_before_td
+                    effective_right = clipper_end + clip_after_td
 
-                    # Apply clip-before: trim context front if context starts before clipper
-                    if clipper_before is not None and ctx_start < clipper_start:
-                        new_start = clipper_start + pd.Timedelta(clipper_before)
-                        ctx_start = max(ctx_start, new_start)
+                    if ctx_start < clipper_start:
+                        # Case A: trim the context's end to the effective left border
+                        ctx_end = min(ctx_end, effective_left)
+                    else:
+                        # Case B: delay the context's start to the effective right border
+                        ctx_start = max(ctx_start, effective_right)
 
-                    # Apply clip-after: delay context start if context overlaps clipper end
-                    if clipper_after is not None:
-                        # Check if context still overlaps clipper after clip-before
-                        if ctx_start < clipper_end:
-                            delayed_start = clipper_end + pd.Timedelta(clipper_after)
-                            ctx_start = max(ctx_start, delayed_start)
-
-                # Update df with clipped start time
                 df.at[idx, "StartDateTime"] = ctx_start
-                
-                # Check if interval is still valid
+                df.at[idx, "EndDateTime"] = ctx_end
+
                 if ctx_start >= ctx_end:
                     indices_to_drop.add(idx)
 
-        # Remove contexts with invalid intervals
         if indices_to_drop:
             df = df.drop(index=list(indices_to_drop))
             logger.info("[%s] Removed %d context intervals (flipped after clipping)", self.name, len(indices_to_drop))

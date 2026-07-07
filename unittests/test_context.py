@@ -274,90 +274,99 @@ def test_context_apply_with_windowing(repo_with_hypoglycemia_context):
 
 
 def test_context_with_clippers(repo_with_clipped_context):
-    """Context clipping produces valid output when context doesn't fully overlap clipper."""
+    """Case A: clipper fires during context — ctx_end is trimmed to effective left border."""
     context = repo_with_clipped_context.get("CLIPPED_CONTEXT")
-    
-    # Input: MEAL @ 05:00 + ADMISSION clipper @ 06:30-08:00
+
+    # MEAL @ 05:00 → windowed [04:00 - 07:00]
+    # ADMISSION (clipper, clip-before=30m, clip-after=1h) @ 06:30 - 08:00
+    #   effective_left  = 06:30 - 30m = 06:00
+    #   effective_right = 08:00 + 1h  = 09:00
+    # Overlap: [06:00, 09:00] ∩ [04:00, 07:00] → yes
+    # ctx_start (04:00) < clipper_start (06:30) → Case A: ctx_end = min(07:00, 06:00) = 06:00
+    # Result: [04:00 - 06:00] 
     df_in = pd.DataFrame([
-        (1, "MEAL", make_ts("05:00"), make_ts("05:00"), ("Breakfast",), "raw-concept"),
-        (1, "ADMISSION", make_ts("06:30"), make_ts("08:00"), ("True",), "raw-concept"),  # Clipper
+        (1, "MEAL",      make_ts("05:00"), make_ts("05:00"), ("Breakfast",), "raw-concept"),
+        (1, "ADMISSION", make_ts("06:30"), make_ts("08:00"), ("True",),      "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    
-    # FIXED: No clipper_dfs parameter — Context separates internally
+
     df_out = context.apply(df_in)
-    
-    # Windowed: [04:00 - 07:00] (05:00 - 1h, 05:00 + 2h)
-    # Clipped:
-    #   - clip-before=30m: Context starts BEFORE clipper (04:00 < 06:30) → new start = 06:30 + 30m = 07:00
-    #   - clip-after=1h: Context start (07:00) < clipper end (08:00) → delay to 08:00 + 1h = 09:00
-    # Result: [09:00 - 07:00] → INVALID (flipped) → removed
-    assert len(df_out) == 0
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["StartDateTime"] == make_ts("04:00")
+    assert row["EndDateTime"]   == make_ts("06:00")
 
 
 def test_context_clipping_valid_output(repo_with_clipped_context):
-    """Context clipping that produces valid output (not removed)."""
+    """Case A: trimmed ctx_end produces a valid (non-zero) interval."""
     context = repo_with_clipped_context.get("CLIPPED_CONTEXT")
-    
-    # Input glucose @ 04:00 (early start, long window)
-    df_in = pd.DataFrame([
-        (1, "MEAL", make_ts("04:00"), make_ts("04:00"), ("Breakfast",), "raw-concept"),
-        (1, "ADMISSION", make_ts("05:30"), make_ts("06:00"), ("True",), "raw-concept"),  # Clipper
-    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    
-    df_out = context.apply(df_in)
-    
-    # Windowed: [03:00 - 06:00] (04:00 - 1h, 04:00 + 2h)
-    # Clipped:
-    #   - clip-before=30m: Context starts BEFORE clipper (03:00 < 05:30) → new start = 05:30 + 30m = 06:00
-    #   - clip-after=1h: Context start (06:00) >= clipper end (06:00)? YES → no delay
-    # Result: [06:00 - 06:00] → INVALID (start == end) → removed
-    assert len(df_out) == 0
 
-
-def test_context_clipping_really_valid_output(repo_with_clipped_context):
-    """Context clipping with valid output (context starts after clipper ends)."""
-    context = repo_with_clipped_context.get("CLIPPED_CONTEXT")
-    
-    # Input glucose @ 10:00
+    # MEAL @ 04:00 → windowed [03:00 - 06:00]
+    # ADMISSION @ 05:30 - 06:00  (clip-before=30m, clip-after=1h)
+    #   effective_left  = 05:30 - 30m = 05:00
+    #   effective_right = 06:00 + 1h  = 07:00
+    # Overlap: yes
+    # Case A: ctx_end = min(06:00, 05:00) = 05:00
+    # Result: [03:00 - 05:00]
     df_in = pd.DataFrame([
-        (1, "MEAL", make_ts("10:00"), make_ts("10:00"), ("Breakfast",), "raw-concept"),
-        (1, "ADMISSION", make_ts("08:00"), make_ts("08:30"), ("True",), "raw-concept"),  # Clipper
+        (1, "MEAL",      make_ts("04:00"), make_ts("04:00"), ("Breakfast",), "raw-concept"),
+        (1, "ADMISSION", make_ts("05:30"), make_ts("06:00"), ("True",),      "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    
+
     df_out = context.apply(df_in)
-    
-    # Windowed: [09:00 - 12:00] (10:00 - 1h, 10:00 + 2h)
-    # Clipper [08:00 - 08:30]: no overlap (clipper.end < context.start) → no clipping
-    # Result: [09:00 - 12:00] ✅ VALID
     assert len(df_out) == 1
     row = df_out.iloc[0]
-    assert row["StartDateTime"] == make_ts("09:00")
-    assert row["EndDateTime"] == make_ts("12:00")
+    assert row["StartDateTime"] == make_ts("03:00")
+    assert row["EndDateTime"]   == make_ts("05:00")
+
+
+def test_context_clipping_case_b_delays_start(repo_with_clipped_context):
+    """Case B: context starts within clip_after suppression zone — ctx_start is delayed."""
+    context = repo_with_clipped_context.get("CLIPPED_CONTEXT")
+
+    # MEAL @ 10:00 → windowed [09:00 - 12:00]
+    # ADMISSION @ 08:00 - 08:30  (clip-before=30m, clip-after=1h)
+    #   effective_left  = 08:00 - 30m = 07:30
+    #   effective_right = 08:30 + 1h  = 09:30
+    # Overlap: [07:30, 09:30] ∩ [09:00, 12:00] → yes (09:30 >= 09:00)
+    # ctx_start (09:00) >= clipper_start (08:00) → Case B: ctx_start = max(09:00, 09:30) = 09:30
+    # Result: [09:30 - 12:00]
+    df_in = pd.DataFrame([
+        (1, "MEAL",      make_ts("10:00"), make_ts("10:00"), ("Breakfast",), "raw-concept"),
+        (1, "ADMISSION", make_ts("08:00"), make_ts("08:30"), ("True",),      "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+
+    df_out = context.apply(df_in)
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["StartDateTime"] == make_ts("09:30")
+    assert row["EndDateTime"]   == make_ts("12:00")
 
 
 def test_context_multiple_clippers_applied(repo_with_clipped_context):
-    """Multiple clippers: only first clipper overlaps."""
+    """Case A with two clippers: only the first overlaps and trims the end."""
     context = repo_with_clipped_context.get("CLIPPED_CONTEXT")
-    
-    # Input glucose @ 05:00 + two clippers
+
+    # MEAL @ 05:00 → windowed [04:00 - 07:00]
+    # Clipper 1 @ 06:00 - 06:30  (clip-before=30m, clip-after=1h)
+    #   effective_left  = 06:00 - 30m = 05:30
+    #   effective_right = 06:30 + 1h  = 07:30
+    # Overlap with [04:00, 07:00]: yes
+    # Case A: ctx_end = min(07:00, 05:30) = 05:30  → [04:00 - 05:30]
+    # Clipper 2 @ 10:00 - 11:00:
+    #   effective_left  = 09:30, effective_right = 12:00
+    #   Overlap with [04:00, 05:30]: 09:30 <= 05:30? NO → skipped
+    # Result: [04:00 - 05:30]
     df_in = pd.DataFrame([
-        (1, "MEAL", make_ts("05:00"), make_ts("05:00"), ("Breakfast",), "raw-concept"),
-        (1, "ADMISSION", make_ts("06:00"), make_ts("06:30"), ("True",), "raw-concept"),
-        (1, "ADMISSION", make_ts("10:00"), make_ts("11:00"), ("True",), "raw-concept"),
+        (1, "MEAL",      make_ts("05:00"), make_ts("05:00"), ("Breakfast",), "raw-concept"),
+        (1, "ADMISSION", make_ts("06:00"), make_ts("06:30"), ("True",),      "raw-concept"),
+        (1, "ADMISSION", make_ts("10:00"), make_ts("11:00"), ("True",),      "raw-concept"),
     ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
-    
+
     df_out = context.apply(df_in)
-    
-    # Windowed: [04:00 - 07:00] (05:00 - 1h, 05:00 + 2h)
-    # Clipper 1 [06:00-06:30]: overlaps
-    #   - clip-before=30m: Context starts before clipper (04:00 < 06:00) → new start = 06:00 + 30m = 06:30
-    #   - clip-after=1h: Context start (06:30) is NOT < clipper end (06:30) → NO delay
-    # Clipper 2 [10:00-11:00]: no overlap with [06:30-07:00] → no clipping
-    # Result: [06:30 - 07:00] ✅ VALID
     assert len(df_out) == 1
     row = df_out.iloc[0]
-    assert row["StartDateTime"] == make_ts("06:30")
-    assert row["EndDateTime"] == make_ts("07:00")
+    assert row["StartDateTime"] == make_ts("04:00")
+    assert row["EndDateTime"]   == make_ts("05:30")
 
 
 def test_context_validation_requires_rules_for_multiple_attributes(tmp_path: Path):
@@ -606,6 +615,244 @@ def test_context_on_event_application(repo_with_event_context, tmp_path):
     # Windowed: StartDateTime = 08:00 - 1h = 07:00, EndDateTime = 08:00 + 2h = 10:00
     assert row["StartDateTime"] == make_ts("07:00")
     assert row["EndDateTime"] == make_ts("10:00")
+
+
+HIGH_GLUCOSE_CONTEXT_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="HIGH_GLUCOSE_CONTEXT">
+    <categories>Diagnosis</categories>
+    <description>HIGH GLUCOSE context — mirrors real production TAK logic</description>
+    <derived-from>
+        <attribute name="HYPER_EVENT" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <clippers>
+        <!-- Bolus during context ends the window immediately (Case A) -->
+        <!-- Bolus before context suppresses it for 4h (Case B)       -->
+        <clipper name="BOLUS" tak="raw-concept" clip-before="0s" clip-after="4h"/>
+    </clippers>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+    <context-windows>
+        <persistence value="True" good-before="0h" good-after="24h"/>
+    </context-windows>
+</context>
+"""
+
+RAW_HYPER_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="HYPER_EVENT" concept-type="raw-boolean">
+  <categories>Events</categories>
+  <description>Hyperglycemia event indicator</description>
+  <attributes>
+    <attribute name="HYPER_EVENT" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+
+RAW_BOLUS_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="BOLUS" concept-type="raw-boolean">
+  <categories>DrugAdministration</categories>
+  <description>Bolus insulin administration</description>
+  <attributes>
+    <attribute name="BOLUS" type="boolean"/>
+  </attributes>
+</raw-concept>
+"""
+
+
+@pytest.fixture
+def repo_with_high_glucose_context(tmp_path: Path) -> TAKRepository:
+    hyper_path  = write_xml(tmp_path, "HYPER_EVENT.xml", RAW_HYPER_XML)
+    bolus_path  = write_xml(tmp_path, "BOLUS.xml", RAW_BOLUS_XML)
+    ctx_path    = write_xml(tmp_path, "HIGH_GLUCOSE_CONTEXT.xml", HIGH_GLUCOSE_CONTEXT_XML)
+
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(hyper_path))
+    repo.register(RawConcept.parse(bolus_path))
+    set_tak_repository(repo)
+    repo.register(Context.parse(ctx_path))
+    return repo
+
+
+def test_high_glucose_clipper_case_a_bolus_during_context(repo_with_high_glucose_context):
+    """
+    Case A: bolus (point event) fires DURING the HIGH_GLUCOSE_CONTEXT window.
+
+    Hyper at 10:00 → context [10:00, 10:00+24h = 10:00 next day]
+    Bolus at 14:00 (point event, start == end)
+      effective_left  = 14:00 - 0s = 14:00
+      effective_right = 14:00 + 4h = 18:00
+    ctx_start (10:00) < clipper_start (14:00) → Case A
+      ctx_end = min(next-day 10:00, 14:00) = 14:00
+
+    Expected: context [10:00 - 14:00]
+    """
+    context = repo_with_high_glucose_context.get("HIGH_GLUCOSE_CONTEXT")
+
+    t_hyper = make_ts("10:00")
+    t_bolus = make_ts("14:00")
+    t_ctx_end_orig = t_hyper + pd.Timedelta(hours=24)
+
+    df_in = pd.DataFrame([
+        (1, "HYPER_EVENT", t_hyper, t_hyper, ("True",), "raw-concept"),
+        (1, "BOLUS",       t_bolus, t_bolus, ("True",), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+
+    df_out = context.apply(df_in)
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["StartDateTime"] == t_hyper
+    assert row["EndDateTime"]   == t_bolus   # trimmed to bolus time
+
+
+def test_high_glucose_clipper_case_b_bolus_before_context_within_4h(repo_with_high_glucose_context):
+    """
+    Case B: bolus (point event) fires BEFORE the context starts, within the 4h suppression window.
+
+    Bolus at 10:00 → effective_right = 10:00 + 4h = 14:00
+    Hyper at 12:00 → context [12:00, 12:00+24h]
+      effective_left  = 10:00 - 0s = 10:00
+      effective_right = 10:00 + 4h = 14:00
+    Overlap: [10:00, 14:00] ∩ [12:00, next-day 12:00] → yes
+    ctx_start (12:00) >= clipper_start (10:00) → Case B
+      ctx_start = max(12:00, 14:00) = 14:00
+
+    Expected: context [14:00 - next-day 12:00]
+    """
+    context = repo_with_high_glucose_context.get("HIGH_GLUCOSE_CONTEXT")
+
+    t_bolus = make_ts("10:00")
+    t_hyper = make_ts("12:00")
+
+    df_in = pd.DataFrame([
+        (1, "HYPER_EVENT", t_hyper, t_hyper, ("True",), "raw-concept"),
+        (1, "BOLUS",       t_bolus, t_bolus, ("True",), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+
+    df_out = context.apply(df_in)
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["StartDateTime"] == t_bolus + pd.Timedelta(hours=4)   # delayed to 14:00
+    assert row["EndDateTime"]   == t_hyper + pd.Timedelta(hours=24)  # end unchanged
+
+
+def test_high_glucose_clipper_case_b_bolus_outside_suppression_zone(repo_with_high_glucose_context):
+    """
+    Case B miss: bolus fires more than 4h before the context starts — no effect.
+
+    Bolus at 07:00 → effective_right = 07:00 + 4h = 11:00
+    Hyper at 12:00 → context [12:00, next-day 12:00]
+    Overlap: effective_right (11:00) >= ctx_start (12:00)? NO → skipped
+
+    Expected: context unchanged [12:00 - next-day 12:00]
+    """
+    context = repo_with_high_glucose_context.get("HIGH_GLUCOSE_CONTEXT")
+
+    t_bolus = make_ts("07:00")
+    t_hyper = make_ts("12:00")
+
+    df_in = pd.DataFrame([
+        (1, "HYPER_EVENT", t_hyper, t_hyper, ("True",), "raw-concept"),
+        (1, "BOLUS",       t_bolus, t_bolus, ("True",), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+
+    df_out = context.apply(df_in)
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["StartDateTime"] == t_hyper
+    assert row["EndDateTime"]   == t_hyper + pd.Timedelta(hours=24)
+
+
+CONTEXT_ZERO_CLIP_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="ZERO_CLIP_CONTEXT">
+    <categories>Test</categories>
+    <description>Context with zero clip offsets for boundary testing</description>
+    <derived-from>
+        <attribute name="HYPER_EVENT" tak="raw-concept" idx="0" ref="A1"/>
+    </derived-from>
+    <clippers>
+        <clipper name="BOLUS" tak="raw-concept" clip-before="0s" clip-after="0s"/>
+    </clippers>
+    <abstraction-rules>
+        <rule value="True" operator="or">
+            <attribute ref="A1">
+                <allowed-value equal="True"/>
+            </attribute>
+        </rule>
+    </abstraction-rules>
+    <context-windows>
+        <persistence value="True" good-before="0h" good-after="0h"/>
+    </context-windows>
+</context>
+"""
+
+
+@pytest.fixture
+def repo_with_zero_clip_context(tmp_path: Path) -> TAKRepository:
+    hyper_path = write_xml(tmp_path, "HYPER_EVENT.xml",          RAW_HYPER_XML)
+    bolus_path = write_xml(tmp_path, "BOLUS.xml",                RAW_BOLUS_XML)
+    ctx_path   = write_xml(tmp_path, "ZERO_CLIP_CONTEXT.xml",    CONTEXT_ZERO_CLIP_XML)
+    repo = TAKRepository()
+    repo.register(RawConcept.parse(hyper_path))
+    repo.register(RawConcept.parse(bolus_path))
+    set_tak_repository(repo)
+    repo.register(Context.parse(ctx_path))
+    return repo
+
+
+def test_clipper_two_case_b_most_restrictive_wins(repo_with_zero_clip_context):
+    """
+    Two clippers both in Case B — the one that pushes ctx_start furthest right wins.
+
+    Context [6:00, 9:00] (no windowing offsets), clip-before=0s clip-after=0s.
+    Clipper1 [5:00, 6:30]: ctx_start(6:00) >= clipper_start(5:00) → Case B → ctx_start = 6:30
+    Clipper2 [4:00, 7:00]: ctx_start(6:30) >= clipper_start(4:00) → Case B → ctx_start = max(6:30, 7:00) = 7:00
+    Expected: [7:00, 9:00]
+    """
+    context = repo_with_zero_clip_context.get("ZERO_CLIP_CONTEXT")
+
+    df_in = pd.DataFrame([
+        (1, "HYPER_EVENT", make_ts("06:00"), make_ts("09:00"), ("True",), "raw-concept"),
+        (1, "BOLUS",       make_ts("05:00"), make_ts("06:30"), ("True",), "raw-concept"),
+        (1, "BOLUS",       make_ts("04:00"), make_ts("07:00"), ("True",), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+
+    df_out = context.apply(df_in)
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["StartDateTime"] == make_ts("07:00")
+    assert row["EndDateTime"]   == make_ts("09:00")
+
+
+def test_clipper_double_edge_trim(repo_with_zero_clip_context):
+    """
+    One clipper trims the start (Case B) and another trims the end (Case A).
+
+    Context [6:00, 9:00], clip-before=0s clip-after=0s.
+    Clipper1 [5:00, 6:30]: ctx_start(6:00) >= clipper_start(5:00) → Case B → ctx_start = 6:30
+    Clipper2 [8:00, 9:00]: ctx_start(6:30) < clipper_start(8:00)  → Case A → ctx_end = min(9:00, 8:00) = 8:00
+    Expected: [6:30, 8:00]
+    """
+    context = repo_with_zero_clip_context.get("ZERO_CLIP_CONTEXT")
+
+    df_in = pd.DataFrame([
+        (1, "HYPER_EVENT", make_ts("06:00"), make_ts("09:00"), ("True",), "raw-concept"),
+        (1, "BOLUS",       make_ts("05:00"), make_ts("06:30"), ("True",), "raw-concept"),
+        (1, "BOLUS",       make_ts("08:00"), make_ts("09:00"), ("True",), "raw-concept"),
+    ], columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value","AbstractionType"])
+
+    df_out = context.apply(df_in)
+    assert len(df_out) == 1
+    row = df_out.iloc[0]
+    assert row["StartDateTime"] == make_ts("06:30")
+    assert row["EndDateTime"]   == make_ts("08:00")
 
 
 def test_context_window_large_after_is_capped_not_overflow(tmp_path: Path):
