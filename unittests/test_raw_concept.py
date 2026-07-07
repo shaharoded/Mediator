@@ -176,7 +176,7 @@ STEADY_GLUCOSE_MEASURE_LOW_AFTER_FIRST_XML = """\
     <categories>Measurements</categories>
     <description>Raw concept that outputs only the glucose measurements after the first low glucose measurement (meaning it's repetative if low)</description>
     <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
-    
+
     <!-- Will use the closest instance to the beginning of the pattern -->
     <parameters>
         <parameter name="LOW_GLUCOSE_IND" tak="raw-concept" how='before' dynamic="false" idx="0" ref="P1"/>
@@ -188,8 +188,123 @@ STEADY_GLUCOSE_MEASURE_LOW_AFTER_FIRST_XML = """\
         </function>
     </functions>
 
-</parameterized-raw-concept>    
+</parameterized-raw-concept>
     """
+
+BASE_GLUCOSE_MEASURE_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<raw-concept name="BASE_GLUCOSE_MEASURE" concept-type="raw-numeric">
+  <categories>Measurements</categories>
+  <description>Baseline glucose measure used as a parameter reference in ratio computations.</description>
+  <attributes>
+    <attribute name="BASE_GLUCOSE_MEASURE" type="numeric">
+      <numeric-allowed-values>
+        <allowed-value min="0" max="600"/>
+      </numeric-allowed-values>
+    </attribute>
+  </attributes>
+</raw-concept>
+"""
+
+# Divides current GLUCOSE_MEASURE by the closest prior GLUCOSE_MEASURE within a
+# configurable back-window.  Use .format(window="Xh") to instantiate.
+GLUCOSE_RATIO_GOOD_BEFORE_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="GLUCOSE_RATIO">
+    <categories>Measurements</categories>
+    <description>Glucose divided by the closest prior reading within the good-before window.</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    <parameters>
+        <parameter name="GLUCOSE_MEASURE" tak="raw-concept" how="before" dynamic="true" idx="0" ref="P1" good-before="{window}"/>
+    </parameters>
+    <functions>
+        <function name="div">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+        </function>
+    </functions>
+</parameterized-raw-concept>
+"""
+
+# Divides current GLUCOSE_MEASURE by the closest BASE_GLUCOSE_MEASURE reading within
+# a configurable forward-window.  Use .format(window="Xh") to instantiate.
+GLUCOSE_RATIO_GOOD_AFTER_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="GLUCOSE_RATIO">
+    <categories>Measurements</categories>
+    <description>Glucose divided by the closest base reading within the good-after window.</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    <parameters>
+        <parameter name="BASE_GLUCOSE_MEASURE" tak="raw-concept" how="all" dynamic="true" idx="0" ref="P1" good-after="{window}"/>
+    </parameters>
+    <functions>
+        <function name="div">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+        </function>
+    </functions>
+</parameterized-raw-concept>
+"""
+
+# Invalid: good-after is incompatible with how='before' — must raise at parse time.
+GLUCOSE_RATIO_GOOD_AFTER_HOW_BEFORE_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="GLUCOSE_RATIO">
+    <categories>Measurements</categories>
+    <description>Invalid combination: good-after with how=before.</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    <parameters>
+        <parameter name="GLUCOSE_MEASURE" tak="raw-concept" how="before" dynamic="true" idx="0" ref="P1" good-after="1h"/>
+    </parameters>
+    <functions>
+        <function name="div">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+        </function>
+    </functions>
+</parameterized-raw-concept>
+"""
+
+# Invalid: good-before on a static (dynamic=false) parameter — must raise at parse time.
+GLUCOSE_RATIO_GOOD_BEFORE_STATIC_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="GLUCOSE_RATIO">
+    <categories>Measurements</categories>
+    <description>Invalid combination: good-before with dynamic=false.</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    <parameters>
+        <parameter name="GLUCOSE_MEASURE" tak="raw-concept" how="before" dynamic="false" idx="0" ref="P1" good-before="1h"/>
+    </parameters>
+    <functions>
+        <function name="div">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+        </function>
+    </functions>
+</parameterized-raw-concept>
+"""
+
+# Mirrors the real STEADY_GLUCOSE_MEASURE_HIGH TAK: emits a reading only when the
+# immediately preceding reading within 24 h was also >= 180.
+STEADY_GLUCOSE_MEASURE_HIGH_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="STEADY_GLUCOSE_MEASURE_HIGH">
+    <categories>Measurements</categories>
+    <description>Glucose reading emitted only when the immediately preceding reading within 24h was also &gt;= 180.</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+    <parameters>
+        <parameter name="GLUCOSE_MEASURE" tak="raw-concept" how="before" dynamic="true" idx="0" ref="P1" good-before="24h"/>
+    </parameters>
+    <functions>
+        <function name="id_if_thresh_met">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+            <literal value="180"/>
+            <literal value="ge"/>
+        </function>
+    </functions>
+</parameterized-raw-concept>
+"""
 
 
 # -----------------------------
@@ -231,6 +346,15 @@ def df_for_raw_boolean():
         (1, "ADMISSION", make_ts("04:00"), make_ts("04:00"), ""),
     ]
     return pd.DataFrame(rows, columns=["PatientId","ConceptName","StartDateTime","EndDateTime","Value"])
+
+
+def df_for_good_window(*entries):
+    """Build a minimal TAK-format DataFrame from (concept, hhmm, day, value) tuples."""
+    rows = []
+    for concept, hhmm, day, value in entries:
+        ts = make_ts(hhmm, day=day)
+        rows.append((1, concept, ts, ts, (value,), "raw-concept"))
+    return pd.DataFrame(rows, columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
 
 
 def df_for_raw_same_timestamp():
@@ -679,3 +803,166 @@ def test_apply_creatinine_rel_serum_measure(tmp_path: Path):
     assert abs(out.iloc[1]["Value"][0] + 0.1) < 1e-6, f"Second diff wrong: {out.iloc[1]['Value'][0]}"
     assert all(out["ConceptName"] == "CREATININE_REL_SERUM_MEASURE")
     print("\n✅ CREATININE_REL_SERUM_MEASURE produces output as expected")
+
+
+# ------------------------------------------------------------------
+# good-before / good-after window tests
+# ------------------------------------------------------------------
+
+def test_good_before_within_window_uses_recent_prior(tmp_path):
+    """good-before="2h": only prior readings within 2 h are eligible as parameter."""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    param_path   = write_xml(tmp_path, "GLUCOSE_RATIO.xml", GLUCOSE_RATIO_GOOD_BEFORE_XML.format(window="2h"))
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    # Readings at 07:00 (100), 07:30 (80), 10:00 (200).
+    # For the 10:00 row, good-before="2h" means parameter must be >= 08:00.
+    # Both 07:00 and 07:30 fall outside → P1=None → row is skipped.
+    # 07:30 has 07:00 prior which is within its own 2 h window → emits 80/100=0.8.
+    df = df_for_good_window(
+        ("GLUCOSE_MEASURE", "07:00", 0, 100),
+        ("GLUCOSE_MEASURE", "07:30", 0, 80),
+        ("GLUCOSE_MEASURE", "10:00", 0, 200),
+    )
+    out = tak.apply(df)
+    assert len(out) == 1
+    assert abs(out.iloc[0]["Value"][0] - 0.8) < 1e-6
+    assert out.iloc[0]["StartDateTime"] == make_ts("07:30")
+
+
+def test_good_before_all_priors_outside_window_skips_row(tmp_path):
+    """good-before="30m": when all prior readings are older than 30 min, the row is skipped."""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    param_path   = write_xml(tmp_path, "GLUCOSE_RATIO.xml", GLUCOSE_RATIO_GOOD_BEFORE_XML.format(window="30m"))
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    # 07:00 (100) is 3 h before 10:00 — outside the 30-min window → P1=None → both rows skipped.
+    df = df_for_good_window(
+        ("GLUCOSE_MEASURE", "07:00", 0, 100),
+        ("GLUCOSE_MEASURE", "10:00", 0, 200),
+    )
+    out = tak.apply(df)
+    assert out.empty
+
+
+def test_good_before_reading_just_inside_window_is_used(tmp_path):
+    """good-before="3h": a reading exactly at the window boundary is included."""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    param_path   = write_xml(tmp_path, "GLUCOSE_RATIO.xml", GLUCOSE_RATIO_GOOD_BEFORE_XML.format(window="3h"))
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    # 07:00 is exactly 3 h before 10:00 — sits on the boundary (>=) and should qualify.
+    df = df_for_good_window(
+        ("GLUCOSE_MEASURE", "07:00", 0, 100),
+        ("GLUCOSE_MEASURE", "10:00", 0, 200),
+    )
+    out = tak.apply(df)
+    assert len(out) == 1
+    assert abs(out.iloc[0]["Value"][0] - 2.0) < 1e-6   # 200 / 100
+
+
+def test_good_after_within_window_uses_near_future_reading(tmp_path):
+    """good-after="4h": a BASE reading 3 h ahead is included; one 5 h ahead is excluded."""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    base_path    = write_xml(tmp_path, "BASE_GLUCOSE_MEASURE.xml", BASE_GLUCOSE_MEASURE_XML)
+    param_path   = write_xml(tmp_path, "GLUCOSE_RATIO.xml", GLUCOSE_RATIO_GOOD_AFTER_XML.format(window="4h"))
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(base_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    # GLUCOSE_MEASURE at 10:00 (100); BASE readings at 13:00 (50) and 16:00 (80).
+    # good-after="4h" → parameter must be <= 14:00.  13:00 qualifies, 16:00 does not.
+    df = df_for_good_window(
+        ("GLUCOSE_MEASURE",      "10:00", 0, 100),
+        ("BASE_GLUCOSE_MEASURE", "13:00", 0, 50),
+        ("BASE_GLUCOSE_MEASURE", "16:00", 0, 80),
+    )
+    out = tak.apply(df)
+    assert len(out) == 1
+    assert abs(out.iloc[0]["Value"][0] - 2.0) < 1e-6   # 100 / 50
+
+
+def test_good_after_all_readings_outside_window_skips_row(tmp_path):
+    """good-after="2h": when the only BASE reading is beyond the window, the row is skipped."""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    base_path    = write_xml(tmp_path, "BASE_GLUCOSE_MEASURE.xml", BASE_GLUCOSE_MEASURE_XML)
+    param_path   = write_xml(tmp_path, "GLUCOSE_RATIO.xml", GLUCOSE_RATIO_GOOD_AFTER_XML.format(window="2h"))
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    repo.register(RawConcept.parse(base_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    # BASE reading at 15:00 is 5 h after 10:00 — outside a 2-h good-after window.
+    df = df_for_good_window(
+        ("GLUCOSE_MEASURE",      "10:00", 0, 100),
+        ("BASE_GLUCOSE_MEASURE", "15:00", 0, 80),
+    )
+    out = tak.apply(df)
+    assert out.empty
+
+
+def test_good_after_with_how_before_raises_at_parse(tmp_path):
+    """good-after combined with how='before' must raise a ValueError at parse time."""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    with pytest.raises(ValueError, match="good-after.*how='before'"):
+        ParameterizedRawConcept.parse(write_xml(tmp_path, "BAD.xml", GLUCOSE_RATIO_GOOD_AFTER_HOW_BEFORE_XML))
+
+
+def test_good_before_with_dynamic_false_raises_at_parse(tmp_path):
+    """good-before on a static parameter (dynamic=false) must raise a ValueError at parse time."""
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    with pytest.raises(ValueError, match="good-before/good-after.*dynamic=true"):
+        ParameterizedRawConcept.parse(write_xml(tmp_path, "BAD.xml", GLUCOSE_RATIO_GOOD_BEFORE_STATIC_XML))
+
+
+def test_id_if_thresh_met_gate_consecutive_high_readings(tmp_path):
+    """
+    Full integration test for STEADY_GLUCOSE_MEASURE_HIGH logic:
+    a row is emitted only when the immediately preceding GLUCOSE_MEASURE
+    within 24 h was also >= 180.
+    """
+    glucose_path = write_xml(tmp_path, "GLUCOSE_MEASURE.xml", RAW_GLUCOSE_XML)
+    param_path   = write_xml(tmp_path, "STEADY_GLUCOSE_MEASURE_HIGH.xml", STEADY_GLUCOSE_MEASURE_HIGH_XML)
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    repo.register(RawConcept.parse(glucose_path))
+    tak = ParameterizedRawConcept.parse(param_path)
+    repo.register(tak)
+
+    df = df_for_good_window(
+        ("GLUCOSE_MEASURE", "06:00", 0, 150),  # no prior → skip
+        ("GLUCOSE_MEASURE", "10:00", 0, 200),  # prior 06:00 = 150 < 180 → gate drops → skip
+        ("GLUCOSE_MEASURE", "14:00", 0, 220),  # prior 10:00 = 200 >= 180 → emit
+        ("GLUCOSE_MEASURE", "18:00", 0, 190),  # prior 14:00 = 220 >= 180 → emit
+        ("GLUCOSE_MEASURE", "08:00", 2, 185),  # day 3: all priors > 24 h ago → skip
+    )
+    out = tak.apply(df)
+
+    assert len(out) == 2
+    assert out.iloc[0]["StartDateTime"] == make_ts("14:00", day=0)
+    assert out.iloc[0]["Value"][0] == 220
+    assert out.iloc[1]["StartDateTime"] == make_ts("18:00", day=0)
+    assert out.iloc[1]["Value"][0] == 190

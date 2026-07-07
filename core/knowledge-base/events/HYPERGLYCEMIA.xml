@@ -4,7 +4,7 @@
     <description>Hyperglycemia event (only after the 2nd unstable event or extreme measurement)</description>
     <derived-from>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
-        <attribute name="STEADY_GLUCOSE_MEASURE_HIGH_AFTER_FIRST" tak="raw-concept" idx="0" ref="S1"/>
+        <attribute name="STEADY_GLUCOSE_MEASURE_HIGH" tak="raw-concept" idx="0" ref="S1"/>
     </derived-from>
     
     <!-- 

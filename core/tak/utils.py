@@ -299,6 +299,13 @@ def apply_external_function_on_trapez(func_name: str, trapez: FuzzyLogicTrapez, 
     Raises:
         ValueError: If the function name is not recognized or wrong number of parameters.
     """
+    func_obj = REPO.get(func_name)
+    if func_obj is not None and getattr(func_obj, "_raw_concept_only", False):
+        raise ValueError(
+            f"Function '{func_name}' is only valid in parameterized-raw-concept context "
+            f"and cannot be used in trapezoid compliance functions."
+        )
+
     # Preprocess all values based on type
     if constraint_type == "time-constraint":
         # Parse all as durations and convert to seconds

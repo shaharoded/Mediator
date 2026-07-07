@@ -323,6 +323,30 @@ CTX_HIGH_GLUCOSE_XML = """\
 </context>
 """
 
+# Same as CTX_HIGH_GLUCOSE_XML but adds the BOLUS_BITZUA clipper (clip-after=4h).
+# Used in tests that exercise the full clipping pipeline for INSULIN_ON_HYPERGLYCEMIA.
+CTX_HIGH_GLUCOSE_WITH_CLIPPER_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<context name="HIGH_GLUCOSE_CONTEXT">
+  <categories>Test</categories>
+  <description>High glucose context with BOLUS clipper: 4h quiet period after each bolus.</description>
+  <derived-from>
+    <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="A1"/>
+  </derived-from>
+  <clippers>
+    <clipper name="BOLUS_BITZUA" tak="raw-concept" clip-before="0s" clip-after="4h"/>
+  </clippers>
+  <abstraction-rules>
+    <rule value="True" operator="or">
+      <attribute ref="A1"><allowed-value min="180"/></attribute>
+    </rule>
+  </abstraction-rules>
+  <context-windows>
+    <persistence good-before="0h" good-after="24h"/>
+  </context-windows>
+</context>
+"""
+
 RAW_WEIGHT_MEASURE_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <raw-concept name="WEIGHT_MEASURE" concept-type="raw-numeric">
@@ -3413,3 +3437,167 @@ def test_global_context_and_vs_or_behavior(repo_protocol_kb):
 
     assert len(out_and) == 0, "AND gating must block when HIGH_GLUCOSE_CONTEXT is not True"
     assert len(out_or) > 0, "OR gating must allow when DIABETES_DIAGNOSIS_CONTEXT is True"
+
+
+# --------------------------------------------------------------------------------------
+# INSULIN_ON_HYPERGLYCEMIA — BOLUS clipper integration tests
+#
+# These tests run the full pipeline (raw data → HIGH_GLUCOSE_CONTEXT with clipper →
+# INSULIN_ON_HYPERGLYCEMIA_PATTERN) to verify that BOLUS_BITZUA correctly trims or
+# suppresses the HIGH_GLUCOSE_CONTEXT window, and that the pattern only fires when
+# the clipped context is still active during the meal.
+#
+# HIGH_GLUCOSE_CONTEXT clipper semantics (clip-before=0s, clip-after=4h):
+#   Case A (ctx_start < bolus_start): trim ctx_end to bolus_start.
+#   Case B (ctx_start within [bolus_start, bolus_start+4h]): delay ctx_start to bolus_start+4h.
+# --------------------------------------------------------------------------------------
+
+@pytest.fixture
+def repo_high_glucose_clipper(tmp_path):
+    """
+    Minimal repo identical to repo_protocol_kb except HIGH_GLUCOSE_CONTEXT is replaced
+    by CTX_HIGH_GLUCOSE_WITH_CLIPPER_XML (adds BOLUS_BITZUA clipper, clip-after=4h).
+    """
+    xml_blobs = {
+        "GLUCOSE_MEASURE.xml":               RAW_GLUCOSE_MEASURE_XML,
+        "BOLUS_BITZUA.xml":                  RAW_BOLUS_XML,
+        "BASAL_BITZUA.xml":                  RAW_BASAL_XML,
+        "MEAL.xml":                          RAW_MEAL_XML,
+        "MEAL_CONTEXT.xml":                  CTX_MEAL_XML,
+        "HIGH_GLUCOSE_CONTEXT.xml":          CTX_HIGH_GLUCOSE_WITH_CLIPPER_XML,
+        "INSULIN_ON_HYPERGLYCEMIA_PATTERN.xml": LOCAL_INSULIN_ON_HYPERGLYCEMIA_XML,
+    }
+    repo = TAKRepository()
+    set_tak_repository(repo)
+    TAG_ORDER = {"raw-concept": 0, "parameterized-raw-concept": 1, "context": 2, "event": 2, "pattern": 3}
+    paths = []
+    for fname, xml in xml_blobs.items():
+        p = tmp_path / fname
+        p.write_text(xml, encoding="utf-8")
+        paths.append(p)
+    paths.sort(key=lambda p: (TAG_ORDER.get(ET.parse(p).getroot().tag, 99), p.name))
+    for path in paths:
+        _register_xml_strict(repo, path)
+    return repo
+
+
+def test_bolus_clips_context_pattern_does_not_fire_during_quiet_period(repo_high_glucose_clipper):
+    """
+    Case A clipping: high glucose at 08:00 → context [08:00, +24h].
+    Bolus at 10:00 trims context end to 10:00 (clip-before=0s → effective_left=10:00).
+    Meal window 12:00-14:00 + reactive bolus at 13:00 both fall outside the trimmed
+    context → pattern must NOT fire.
+    """
+    meal_ctx  = repo_high_glucose_clipper.get("MEAL_CONTEXT")
+    high_ctx  = repo_high_glucose_clipper.get("HIGH_GLUCOSE_CONTEXT")
+    pattern   = repo_high_glucose_clipper.get("INSULIN_ON_HYPERGLYCEMIA_PATTERN")
+
+    raw_df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), 200),   # triggers context
+        (1, "BOLUS_BITZUA",    make_ts("10:00"), make_ts("10:00"), 5),     # clips context end to 10:00
+        (1, "MEAL",            make_ts("12:00"), make_ts("14:00"), "True"),
+        (1, "BOLUS_BITZUA",    make_ts("13:00"), make_ts("13:00"), 3),     # reactive insulin (inside quiet zone)
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+
+    # Compute contexts; high_ctx needs both glucose AND bolus rows for clipping
+    df_meal_ctx = meal_ctx.apply(raw_df[raw_df["ConceptName"] == "MEAL"])
+    df_high_ctx = high_ctx.apply(
+        raw_df[raw_df["ConceptName"].isin(["GLUCOSE_MEASURE", "BOLUS_BITZUA"])]
+    )
+
+    # Verify the clipping: the True window must end at the bolus time (10:00)
+    true_windows = df_high_ctx[df_high_ctx["Value"] == "True"]
+    assert len(true_windows) == 1
+    assert true_windows.iloc[0]["EndDateTime"] == make_ts("10:00")
+
+    df_in = pd.concat([
+        df_meal_ctx,
+        df_high_ctx,
+        raw_df[raw_df["ConceptName"] == "BOLUS_BITZUA"],
+    ], ignore_index=True)
+
+    out = pattern.apply(df_in)
+    # Meal at 12:00 is outside the clipped context window [08:00,10:00] → context gate fails, anchor dropped
+    assert out.empty
+
+
+def test_bolus_does_not_clip_context_when_absent_pattern_fires(repo_high_glucose_clipper):
+    """
+    Baseline: no prior bolus → HIGH_GLUCOSE_CONTEXT stays active for 24h.
+    Meal window 12:00-14:00 and reactive bolus at 13:00 fall inside the active
+    context → pattern must fire.
+    """
+    meal_ctx  = repo_high_glucose_clipper.get("MEAL_CONTEXT")
+    high_ctx  = repo_high_glucose_clipper.get("HIGH_GLUCOSE_CONTEXT")
+    pattern   = repo_high_glucose_clipper.get("INSULIN_ON_HYPERGLYCEMIA_PATTERN")
+
+    raw_df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), 200),
+        (1, "MEAL",            make_ts("12:00"), make_ts("14:00"), "True"),
+        (1, "BOLUS_BITZUA",    make_ts("13:00"), make_ts("13:00"), 3),    # first bolus (no prior clipper)
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+
+    df_meal_ctx = meal_ctx.apply(raw_df[raw_df["ConceptName"] == "MEAL"])
+    df_high_ctx = high_ctx.apply(
+        raw_df[raw_df["ConceptName"].isin(["GLUCOSE_MEASURE", "BOLUS_BITZUA"])]
+    )
+
+    df_in = pd.concat([
+        df_meal_ctx,
+        df_high_ctx,
+        raw_df[raw_df["ConceptName"] == "BOLUS_BITZUA"],
+    ], ignore_index=True)
+
+    out = pattern.apply(df_in)
+    satisfied = out[out["Value"] == "True"]
+    assert len(satisfied) == 1
+
+
+def test_pattern_fires_after_suppression_zone_ends_new_high_glucose(repo_high_glucose_clipper):
+    """
+    Full lifecycle: bolus clips the first context window (Case A), then a new high-glucose
+    reading after the 4h suppression zone creates a fresh context that the meal overlaps.
+
+    Timeline:
+      08:00 — glucose=200   → context 1 [08:00, +24h]
+      10:00 — bolus=5       → clips context 1 end to 10:00; suppression zone [10:00, 14:00]
+      15:00 — glucose=220   → new context attempt at 15:00 (> suppression end 14:00, Case A N/A)
+                               context 2 starts at 15:00 [15:00, +24h]
+      16:00-18:00 — Meal
+      16:30 — bolus=4       → reactive insulin; HIGH_GLUCOSE_CONTEXT is True at 16:00
+
+    Expected: pattern fires for the 16:00 meal.
+    """
+    meal_ctx  = repo_high_glucose_clipper.get("MEAL_CONTEXT")
+    high_ctx  = repo_high_glucose_clipper.get("HIGH_GLUCOSE_CONTEXT")
+    pattern   = repo_high_glucose_clipper.get("INSULIN_ON_HYPERGLYCEMIA_PATTERN")
+
+    raw_df = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("08:00"), make_ts("08:00"), 200),
+        (1, "BOLUS_BITZUA",    make_ts("10:00"), make_ts("10:00"), 5),
+        (1, "GLUCOSE_MEASURE", make_ts("15:00"), make_ts("15:00"), 220),  # after suppression ends
+        (1, "MEAL",            make_ts("16:00"), make_ts("18:00"), "True"),
+        (1, "BOLUS_BITZUA",    make_ts("16:30"), make_ts("16:30"), 4),
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value"])
+
+    df_meal_ctx = meal_ctx.apply(raw_df[raw_df["ConceptName"] == "MEAL"])
+    df_high_ctx = high_ctx.apply(
+        raw_df[raw_df["ConceptName"].isin(["GLUCOSE_MEASURE", "BOLUS_BITZUA"])]
+    )
+
+    # First context window must be clipped to 10:00; second starts at 15:00
+    true_windows = df_high_ctx[df_high_ctx["Value"] == "True"].sort_values("StartDateTime")
+    assert len(true_windows) == 2
+    assert true_windows.iloc[0]["EndDateTime"] == make_ts("10:00")   # clipped
+    assert true_windows.iloc[1]["StartDateTime"] == make_ts("15:00") # fresh window
+
+    df_in = pd.concat([
+        df_meal_ctx,
+        df_high_ctx,
+        raw_df[raw_df["ConceptName"] == "BOLUS_BITZUA"],
+    ], ignore_index=True)
+
+    out = pattern.apply(df_in)
+    satisfied = out[out["Value"] == "True"]
+    assert len(satisfied) == 1
+    assert satisfied.iloc[0]["StartDateTime"] == make_ts("16:30")

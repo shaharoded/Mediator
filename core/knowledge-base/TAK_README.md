@@ -251,8 +251,10 @@ Note that this TAK needs to resolve it's parameter on the row level, which may i
 1. For each row of the parent raw concept, resolve parameter values:
     - If a matching parameter row exists (by name and closest in time), use its value.
     - Otherwise, use the parameter's default value. If no default and no match - return empty results df.
-    - `how='before'/'all'` controls if the reolved value is taken from all patient timeline, or just a predecessor row.
+    - `how='before'/'all'` controls if the resolved value is taken from all patient timeline, or just a predecessor row.
     - `dynamic='true'/'false'` controls if the parameter is resolved once (steady baseline) or at every occurrence (sliding window).
+    - `good-before="Xh"` (dynamic only) — only rows at most X time units **before** the current row qualify; older rows are excluded even if they are the closest. If no qualifying row exists and no default is set, the current row is skipped (not emitted).
+    - `good-after="Xh"` (dynamic only, incompatible with `how='before'`) — only rows at most X time units **after** the current row qualify; further-future rows are excluded with the same skip semantics.
 2. Apply the specified function (e.g., `div`) to the parent value and parameter(s).
 3. Emit a new row with the result as the value, and the same temporal columns as the parent.
 
@@ -262,12 +264,14 @@ A DataFrame with the same shape and columns as the parent raw concept, but with 
 **Use Cases:**
 - Calculating ratios (e.g., glucose divided by first glucose measurement)
 - Normalizing measurements by patient-specific attributes (e.g., dosage per kg)
+- Detecting consecutive-state patterns (e.g., emit only when the immediately preceding reading within 24 h also exceeded a threshold, using `good-before` and a gate function)
 - Any derived raw value that can be expressed as a function of other raw values and parameters
 
 **Notes:**
 - Parameterized raw concepts are resolved and emitted before events, states, trends, contexts, and patterns.
 - All parameters must have a default value to ensure robust calculation.
 - Functions are extensible and can be registered in the external functions module.
+- Gate functions (marked `raw_concept_only=True`, e.g., `id_if_thresh_met`) return `None` to signal that the current row should be skipped, and cannot be used in trapezoid compliance functions.
 ---
 
 ### 3. Events

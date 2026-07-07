@@ -399,14 +399,31 @@ class ParameterizedRawConcept(RawConcept):
                 how = param_el.attrib.get("how", "all")
                 if param_name == parent_name and how == "all":
                     raise ValueError(f"{tak_name}: parameter cannot reference the parent TAK '{parent_name}' with how='all', this is temporal data leakage. Use how='before' instead.")
+                dynamic = param_el.attrib.get("dynamic", "true").lower() == "true"
+                good_before = param_el.attrib.get("good-before")
+                good_after  = param_el.attrib.get("good-after")
+
+                if (good_before is not None or good_after is not None) and not dynamic:
+                    raise ValueError(
+                        f"{tak_name}: parameter '{param_name}' — good-before/good-after "
+                        f"require dynamic=true (static parameters are resolved once at baseline)."
+                    )
+                if good_after is not None and how == "before":
+                    raise ValueError(
+                        f"{tak_name}: parameter '{param_name}' — good-after is incompatible "
+                        f"with how='before' (all candidates are already strictly before ref_time)."
+                    )
+
                 param = {
                     "name": param_name,
                     "tak": param_el.attrib["tak"],
                     "idx": int(param_el.attrib["idx"]) if "idx" in param_el.attrib else 0,
                     "how": how,  # 'before' or 'all'
-                    "dynamic": param_el.attrib.get("dynamic", "true").lower() == "true",
+                    "dynamic": dynamic,
                     "ref": param_el.attrib["ref"],
-                    "default": param_el.attrib.get("default")
+                    "default": param_el.attrib.get("default"),
+                    "good_before": good_before,
+                    "good_after":  good_after,
                 }
                 parameters.append(param)
 
@@ -422,7 +439,8 @@ class ParameterizedRawConcept(RawConcept):
             func = {
                 "name": func_el.attrib["name"],
                 "value_idx": int(value_el.attrib["idx"]),
-                "param_refs": [p.attrib["ref"] for p in func_el.findall("parameter")]
+                "param_refs": [p.attrib["ref"] for p in func_el.findall("parameter")],
+                "literals": [l.attrib["value"] for l in func_el.findall("literal")],
             }
             functions.append(func)
         if not functions:
@@ -502,8 +520,17 @@ class ParameterizedRawConcept(RawConcept):
             how = param.get("how", "all")
             if how == "before":
                 param_rows = param_rows[param_rows["StartDateTime"] < ref_time]
-        
-        # 2. Find closest in time
+
+        # 2. Apply good-before / good-after window (dynamic params only — validated at parse time)
+        if not param_rows.empty:
+            good_before = param.get("good_before")
+            good_after  = param.get("good_after")
+            if good_before is not None:
+                param_rows = param_rows[param_rows["StartDateTime"] >= ref_time - pd.Timedelta(good_before)]
+            if good_after is not None:
+                param_rows = param_rows[param_rows["StartDateTime"] <= ref_time + pd.Timedelta(good_after)]
+
+        # 3. Find closest in time
         if not param_rows.empty:
             # Calculate absolute time distance
             # Note: We use .values to avoid index alignment issues during subtraction if indices differ
@@ -605,19 +632,27 @@ class ParameterizedRawConcept(RawConcept):
             if any(v is None for v in current_param_values.values()):
                 continue
 
-            # Apply functions
+            # Apply functions — None return signals "skip this row" (used by gate functions)
+            skip_row = False
             for func in self.functions:
                 func_name = func["name"]
                 value_idx = func["value_idx"]
                 param_refs = func["param_refs"]
-                
+
                 args = [tuple_val[value_idx]]
                 for ref in param_refs:
                     args.append(current_param_values.get(ref))
-                
-                # Use apply_external_function instead of REPO directly
+
+                for lit in func.get("literals", []):
+                    args.append(lit)
                 result = apply_external_function(func_name, *args)
-                tuple_val[value_idx] = result  # in-place update
+                if result is None:
+                    skip_row = True
+                    break
+                tuple_val[value_idx] = result
+
+            if skip_row:
+                continue
             
             out_rows.append({
                 "PatientId": row["PatientId"],

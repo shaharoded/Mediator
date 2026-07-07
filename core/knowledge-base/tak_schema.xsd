@@ -146,6 +146,9 @@
                                             </xs:restriction>
                                         </xs:simpleType>
                                     </xs:attribute>
+                                    <!-- Optional time-window constraints (dynamic=true only) -->
+                                    <xs:attribute name="good-before" type="xs:string" use="optional"/>
+                                    <xs:attribute name="good-after"  type="xs:string" use="optional"/>
                                 </xs:complexType>
                             </xs:element>
                         </xs:sequence>
@@ -165,6 +168,11 @@
                                         <xs:element name="parameter" minOccurs="0" maxOccurs="unbounded">
                                             <xs:complexType>
                                                 <xs:attribute name="ref" type="xs:string" use="required"/>
+                                            </xs:complexType>
+                                        </xs:element>
+                                        <xs:element name="literal" minOccurs="0" maxOccurs="unbounded">
+                                            <xs:complexType>
+                                                <xs:attribute name="value" type="xs:string" use="required"/>
                                             </xs:complexType>
                                         </xs:element>
                                     </xs:sequence>

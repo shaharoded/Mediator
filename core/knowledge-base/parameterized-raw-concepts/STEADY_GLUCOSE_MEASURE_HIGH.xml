@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<parameterized-raw-concept name="STEADY_GLUCOSE_MEASURE_HIGH">
+    <categories>Measurements</categories>
+    <description>Outputs glucose measurements where the immediately preceding reading within 24h was also >= 180, indicating a sustained (not first-time) hyperglycemic state.</description>
+    <derived-from name="GLUCOSE_MEASURE" tak="raw-concept"/>
+
+    <!-- Resolve the immediately preceding GLUCOSE_MEASURE per row (dynamic, before, within 24h).
+         If no prior reading exists within 24h, P1 is None and the row is skipped. -->
+    <parameters>
+        <parameter name="GLUCOSE_MEASURE" tak="raw-concept" how='before' dynamic="true" idx="0" ref="P1" good-before="24h"/>
+    </parameters>
+
+    <!-- Pass through the current value only if the preceding reading was also >= 180.
+         Returns None (skip signal) if the preceding value was below threshold. -->
+    <functions>
+        <function name="id_if_thresh_met">
+            <value idx="0"/>
+            <parameter ref="P1"/>
+            <literal value="180"/>
+            <literal value="ge"/>
+        </function>
+    </functions>
+
+</parameterized-raw-concept>

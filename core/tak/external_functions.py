@@ -4,16 +4,22 @@ from typing import Dict, Callable
 REPO: Dict[str, Callable] = {}
 
 
-def register(name: str):
+def register(name: str, raw_concept_only: bool = False):
     """
-    Decorator to register external functions for compliance calculations.
-    
+    Decorator to register external functions.
+
+    Args:
+        name: Key under which the function is stored in REPO.
+        raw_concept_only: If True, the function is only valid in parameterized-raw-concept
+            context and will raise if called via apply_external_function_on_trapez.
+
     Usage:
         @register("my_function")
         def my_function(x, *params):
             return x * params[0]
     """
     def wrapper(func: Callable):
+        func._raw_concept_only = raw_concept_only
         REPO[name] = func
         return func
     return wrapper
@@ -114,6 +120,34 @@ def subtract(x, *args):
     for arg in args:
         result -= arg
     return result
+
+
+@register("id_if_thresh_met", raw_concept_only=True)
+def id_if_thresh_met(value, prev_value, threshold=180, op="ge"):
+    """
+    Purpose: Gate function for consecutive-state detection. Returns the current value
+             only if the preceding measurement satisfies the threshold condition.
+             Returns None to signal that the current row should be skipped.
+
+    Args:
+        value (numeric): The current row's value (passed through if gate passes).
+        prev_value (numeric): The preceding measurement's value (the gate check).
+        threshold (numeric): The threshold to compare against. Defaults to 180.
+        op (str): Comparison operator — 'ge' (>=) or 'le' (<=). Defaults to 'ge'.
+
+    Returns:
+        numeric: value unchanged if condition met, else None (skip signal).
+    """
+    if prev_value is None:
+        return None
+    prev = float(prev_value)
+    thresh = float(threshold)
+    if op == "ge":
+        return value if prev >= thresh else None
+    elif op == "le":
+        return value if prev <= thresh else None
+    else:
+        raise ValueError(f"id_if_thresh_met: unknown operator '{op}', must be 'ge' or 'le'")
 
 
 # --- Custom Functions (Example) ---
