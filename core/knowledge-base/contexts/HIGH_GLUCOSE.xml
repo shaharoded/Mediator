@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <context name="HIGH_GLUCOSE_CONTEXT">
     <categories>Diagnosis</categories>
-    <description>HIGH GLUCOSE context to mark time windows where insulin treatment is needed, derived from steady glucose measurements</description>
+    <description>HIGH GLUCOSE context to mark time windows where insulin treatment is needed, derived from steady high glucose measurements and space from last bolus admission</description>
     <derived-from>
         <attribute name="HYPERGLYCEMIA_EVENT" tak="event" ref="A1"/>
     </derived-from>
@@ -11,8 +11,8 @@
         <!-- Instance of non-high glucose immediately terminates the context window -->
         <clipper name="NORMAL_GLUCOSE_IND" tak="raw-concept" clip-before="0s" clip-after="1s"/>
         <clipper name="LOW_GLUCOSE_IND" tak="raw-concept" clip-before="0s" clip-after="1s"/>
-        <!-- Admission of BOLUS before HIGH GLUCOSE gives "quiet" of 4 hours -->
-        <clipper name="BOLUS_BITZUA" tak="raw-concept" clip-before="0s" clip-after="4h"/>
+        <!-- Admission of BOLUS before HIGH GLUCOSE gives "quiet" of 4 hours to see if patient reacted but should not trim the context window -->
+        <clipper name="BOLUS_BITZUA" tak="raw-concept" clip-after="4h"/>
     </clippers>
 
     <abstraction-rules>
@@ -27,5 +27,4 @@
         <!-- A high glucose diagnosis -->
         <persistence value="True" good-before="0h" good-after="24h"/>
     </context-windows>
-
 </context>

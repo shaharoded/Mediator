@@ -328,8 +328,8 @@ class Mediator:
             ("States", self.kb_path / "states", State, self.states),
             ("Trends", self.kb_path / "trends", Trend, self.trends),
             ("Contexts", self.kb_path / "contexts", Context, self.contexts),
-            ("Local Patterns", self.kb_path / "local patterns", LocalPattern, self.patterns),
-            ("Global Patterns", self.kb_path / "global patterns", GlobalPattern, self.patterns)
+            ("Local Patterns", self.kb_path / "local-patterns", LocalPattern, self.patterns),
+            ("Global Patterns", self.kb_path / "global-patterns", GlobalPattern, self.patterns)
         ]
         
         total_files = sum(len(list(path.glob("*.xml"))) for _, path, _, _ in phases if path.exists())

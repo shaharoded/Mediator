@@ -393,6 +393,7 @@ A DataFrame with the same shape and columns as the parent raw concept, but with 
    - For each clipper event (e.g., DEATH at `t_death`):
      - **clip-before:** If context starts before clipper, trim the end time of the context to `t_clipper + clip_before`
      - **clip-after:** If context starts with or after clipper, delay the start to `t_clipper_end + clip_after`
+     - A context can define one of them, both, or none
    - **Invalid intervals** (start >= end) are removed
 
 **Output:** Windowed intervals (e.g., `[08:00 → 20:00, "Low Basal"]`)

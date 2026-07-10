@@ -6,8 +6,6 @@
     <derived-from>
         <attribute name="MEAL_CONTEXT" tak="context" ref="A1"/>
         <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" ref="C1"/>
-        
-        <!-- BOLUS_BITZUA is used to clip HIGH_GLUCOSE_CONTEXT, so "before" relation will fit -->
         <attribute name="REACTIVE_INSULIN_BITZUA_CONTEXT" tak="context" ref="E1"/>
     </derived-from>
 
@@ -34,7 +32,7 @@
                 </anchor>
                 <event select='first'>
                     <attribute ref="E1">
-                        <allowed-value equal="IV"/>
+                        <allowed-value equal="Long"/>
                         <allowed-value equal="Short"/>
                     </attribute>
                 </event>
