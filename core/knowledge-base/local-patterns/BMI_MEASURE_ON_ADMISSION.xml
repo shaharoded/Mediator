@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<pattern name="BMI_MEASURE_ON_ADMISSION" concept-type="local-pattern">
+<pattern name="BMI_MEASURE_ON_ADMISSION_PATTERN" concept-type="local-pattern">
     <categories>Admission</categories>
     <description>Captures if BMI (Body Mass Index) or weight were measured within reasonable time of admission. The data process place a BMI/ weight instance if was measured 6 month prior to admission.</description>
     <derived-from>
