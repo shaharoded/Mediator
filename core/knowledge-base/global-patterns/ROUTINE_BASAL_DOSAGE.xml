@@ -7,7 +7,8 @@
         <attribute name="BASAL_BITZUA" tak="raw-concept" idx="0" ref="E1"/>
         <attribute name="DEATH" tak="raw-concept" idx="0" ref="C1"/>
         <attribute name="RELEASE" tak="raw-concept" idx="0" ref="C2"/>
-        <attribute name="HIGH_GLUCOSE_CONTEXT" tak="context" idx="0" ref="C3"/>
+        <!-- Using event and not context, so that a 24-hour window will not be colored by a context triggred before it started -->
+        <attribute name="HYPERGLYCEMIA_EVENT" tak="event" idx="0" ref="C3"/>
         <attribute name="BASAL_HOME_BITZUA_CONTEXT" tak="context" idx="0" ref="C4"/>
     </derived-from>
 

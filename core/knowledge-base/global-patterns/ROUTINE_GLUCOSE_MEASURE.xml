@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <pattern name="ROUTINE_GLUCOSE_MEASURE_PATTERN" concept-type="global-pattern">
     <categories>RoutineTreatment</categories>
-    <description>Captures if glucose measurement was performed routinly every 24 hours, 3 times if glucose level is above 180, else 1 time</description>
+    <description>Captures if glucose measurement was performed routinly once every 24 hours, and at least 3 times a day if glucose level is hyper/ hypo</description>
     <derived-from>
         <attribute name="ADMISSION" tak="raw-concept" idx="0" ref="I1"/>
         <attribute name="GLUCOSE_MEASURE" tak="raw-concept" idx="0" ref="E1"/>
@@ -48,7 +48,7 @@
             <compliance-function>
                 <cyclic-constraint-compliance>
                     <function name="id">
-                        <trapez trapezA="0" trapezB="3" trapezC="3" trapezD="100"/>
+                        <trapez trapezA="0" trapezB="3" trapezC="100" trapezD="100"/>
                     </function>
                 </cyclic-constraint-compliance>
             </compliance-function>

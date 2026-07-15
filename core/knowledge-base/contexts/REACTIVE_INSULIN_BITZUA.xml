@@ -5,16 +5,14 @@
     <derived-from>
         <!--Short reactive-->
         <attribute name="BOLUS_BITZUA" tak="raw-concept" idx="0" ref="A1"/>
-        <!--Long but still covers protocol-->
         <attribute name="INSULIN_BITZUA" tak="raw-concept" idx="0" ref="A2"/>
+
+        <!--Long but still covers protocol-->
         <attribute name="BASAL_BITZUA" tak="raw-concept" idx="0" ref="A3"/>
     </derived-from>
 
     <abstraction-rules>
         <rule value="Long" operator="or">
-            <attribute ref="A2">
-                <allowed-value min="0.01"/>
-            </attribute>
             <attribute ref="A3">
                 <allowed-value min="1"/>
             </attribute>
@@ -23,11 +21,14 @@
             <attribute ref="A1">
                 <allowed-value min="1"/>
             </attribute>
+            <attribute ref="A2">
+                <allowed-value min="0.01"/>
+            </attribute>
         </rule>
     </abstraction-rules>
 
     <context-windows>
         <persistence value="Short" good-before="0h" good-after="4h"/>
-        <persistence value="Long" good-before="12h" good-after="12h"/>
+        <persistence value="Long" good-before="0h" good-after="4h"/>
     </context-windows>
 </context>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <pattern name="ROUTINE_GLUCOSE_MEASURE_ON_STEROIDS_PATTERN" concept-type="global-pattern">
     <categories>RoutineTreatment</categories>
-    <description>Captures if glucose measurement was performed routinly every 24 hours, 3 times if patient is treated with steroids in hospital</description>
+    <description>Captures if glucose measurement was performed routinly every 24 hours, 3 times a day if patient is treated with steroids in hospital</description>
     <derived-from>
         <attribute name="STEROIDS_IV_BITZUA" tak="raw-concept" idx="0" ref="I1"/>
         <attribute name="STEROIDS_PO_BITZUA" tak="raw-concept" idx="0" ref="I2"/>

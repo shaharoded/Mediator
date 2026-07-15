@@ -75,7 +75,7 @@ def setup_logging(log_file: Optional[Path] = None, console_level: int = logging.
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
 
-def _init_worker(kb_path_str: str, db_path_str: str, global_clippers: Dict[str, str]):
+def _init_worker(kb_path_str: str, db_path_str: str, global_clippers: Dict[str, str], execution_order_filter: Optional[List[str]] = None):
     """
     Runs once per ProcessPool worker process.
     Builds Mediator + TAK repository once and reuses for all patients handled by this process.
@@ -94,6 +94,13 @@ def _init_worker(kb_path_str: str, db_path_str: str, global_clippers: Dict[str, 
 
     # Build TAK repository once per process
     _WORKER_MEDIATOR.build_repository(silent=True)
+
+    # Optionally restrict execution to a TAK subset (partial re-run)
+    if execution_order_filter is not None:
+        subset = set(execution_order_filter)
+        _WORKER_MEDIATOR.repo.execution_order = [
+            t for t in _WORKER_MEDIATOR.repo.execution_order if t in subset
+        ]
 
 def _process_patient_worker(patient_id: int, write_queue) -> Dict[str, Union[int, str]]:
     """
@@ -877,7 +884,8 @@ class Mediator:
     def process_all_patients_parallel(
         self,
         max_concurrent: int = 0,
-        patient_subset: Optional[List[int]] = None
+        patient_subset: Optional[List[int]] = None,
+        tak_subset: Optional[List[str]] = None,
     ) -> Dict[int, Dict[str, Any]]:
         """
         Process all patients through TAK pipeline with multiprocessing.
@@ -924,7 +932,7 @@ class Mediator:
         failed_patient_ids: List[int] = []
         total_rows = 0
         with ProcessPoolExecutor(max_workers=max_concurrent, mp_context=ctx, initializer=_init_worker,
-                                    initargs=(str(self.kb_path), str(self.db_path), self.global_clippers),
+                                    initargs=(str(self.kb_path), str(self.db_path), self.global_clippers, tak_subset),
                                     ) as executor:
             future_to_pid = {}
             for pid in patient_ids:
