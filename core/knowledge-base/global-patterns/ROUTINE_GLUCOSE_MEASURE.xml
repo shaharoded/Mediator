@@ -80,7 +80,7 @@
             <compliance-function>
                 <cyclic-constraint-compliance>
                     <function name="id">
-                        <trapez trapezA="0" trapezB="1" trapezC="1" trapezD="100"/>
+                        <trapez trapezA="0" trapezB="1" trapezC="100" trapezD="100"/>
                     </function>
                 </cyclic-constraint-compliance>
             </compliance-function>

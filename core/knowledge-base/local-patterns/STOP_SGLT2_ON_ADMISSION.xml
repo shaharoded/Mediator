@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <pattern name="STOP_SGLT2_ON_ADMISSION_PATTERN" concept-type="local-pattern">
     <categories>Admission</categories>
-    <description>Captures if perscribed antidiabetic medications with high hypo risk were stopped during the first 3 days of admission</description>
+    <description>Captures whether a prescribed SGLT2 inhibitor (high hypo/DKA risk) was withheld during admission. SGLT2 inhibitors should be held for the entire hospitalization, so ANY in-hospital administration is scored as non-adherence (asymptotically 0) and never administering is full adherence (1.0) - deliberately stricter than the 72h antidiabetic stop.</description>
     <!-- Attributes must be 1D. Can reference all tak types for complex cases. -->
     <derived-from>
         <attribute name="ADMISSION_EVENT" tak="event" ref="A1"/>
@@ -38,9 +38,13 @@
             <compliance-function>
                 <time-constraint-compliance>
                     <function name="id">
-                        <!-- If found will have a score of 0 (max hospitalization is 14 days, so will never get a positive score) -->
-                        <!-- If not found will have a score of 1 (since time constraint not found is assumed larger than node D) -->
-                        <trapez trapezA="14d" trapezB="21d" trapezC="21d" trapezD="21d"/>
+                        <!-- Rising ramp. A=0h so any recorded dose lands ON the ramp, never the
+                             val<A branch that would wrongly return missing_score. B=C=D=25y flattens
+                             the ramp so the score for the first in-hospital dose = time_from_admission / 25y:
+                             even a dose at day 14 is 14/9125 = 0.0015, i.e. asymptotically 0 across the
+                             whole possible stay. A patient never given SGLT2 is an unfulfilled anchor and
+                             takes the trapez missing_score = 1.0 (full adherence). -->
+                        <trapez trapezA="0h" trapezB="25y" trapezC="25y" trapezD="25y"/>
                     </function>
                 </time-constraint-compliance>
             </compliance-function>
