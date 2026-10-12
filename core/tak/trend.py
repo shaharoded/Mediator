@@ -16,11 +16,11 @@ from .raw_concept import RawConcept
 
 class Trend(TAK):
     """
-    Trend abstraction: compute local slopes over time-steady windows, build intervals using anchor logic.
+    Trend abstraction: compute local slopes over time-steady windows, build causal intervals.
     - Derived from one raw-concept with exactly 1 numeric attribute
     - Outputs: "Increasing", "Decreasing", "Steady"
     - Uses linear regression over time-steady window to compute slope
-    - Intervals stretch backward to last anchor (point where previous interval ended)
+    - Eligible intervals use the earlier point's label; good_after limits the gap between points
     """
     def __init__(
         self,
@@ -31,7 +31,7 @@ class Trend(TAK):
         attribute_idx: int,  # which attribute in tuple to track
         significant_variation: float,  # threshold for trend detection
         time_steady: timedelta,  # lookback window for slope calculation
-        good_after: timedelta,  # maximum gap for anchor-based stretching
+        good_after: timedelta,
     ):
         super().__init__(name=name, categories=categories, description=description, family="trend")
         self.derived_from = derived_from
@@ -245,17 +245,16 @@ class Trend(TAK):
 
     def _build_intervals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Build intervals using the anchor rule:
-        - First point creates no interval; it sets the anchor.
-        - Each next point can stretch back to the current anchor if (t_i - anchor) <= good_after.
-        - If the gap exceeds good_after, the anchor is reset to t_i and no interval is emitted for the hole.
-        - Labeled intervals use the current point's label and stretch [anchor, t_i].
-        - Consecutive identical labels merge by extending EndDateTime.
+        Build forward intervals from each point's already-known classification.
+        Each interval starts at its measurement and ends at the next measurement,
+        provided their gap does not exceed good_after. No interval is emitted
+        across a larger gap or after the final point. Intervals are half-open
+        [start, end), so a new label never applies before its measurement.
+        Contiguous identical labels merge.
         """
         if df.empty:
             return df
 
-        # Ensure chronological order and numpy-friendly arrays
         df = df.sort_values("StartDateTime").reset_index(drop=True)
         times = pd.to_datetime(df["StartDateTime"]).to_numpy(dtype="datetime64[ns]")
         labels = df["Value"].to_numpy()
@@ -265,40 +264,23 @@ class Trend(TAK):
         good_after_td = pd.Timedelta(self.good_after)
 
         merged: List[dict] = []
-        n = len(df)
-
-        # Initialize anchor with the first point (no interval yet)
-        anchor_time = times[0]
-        last_label = None  # label of the last labeled segment we emitted (None if none)
-        # For merging: we extend the last emitted segment if same label & contiguous
-        # (We always set anchor = current time after processing a point.)
-
-        for i in range(1, n):
-            t_i = times[i]
-            lbl_i = labels[i]
-
-            # If too far from current anchor → no interval is emitted for the hole; just reset anchor
-            if (t_i - anchor_time) > np.timedelta64(int(good_after_td.value), 'ns'):
-                anchor_time = t_i
-                last_label = None
+        for index, timestamp in enumerate(times[:-1]):
+            start_time = pd.Timestamp(timestamp)
+            end_time = pd.Timestamp(times[index + 1])
+            if end_time <= start_time or end_time - start_time > good_after_td:
                 continue
-
-            # Within good_after → create/extend labeled segment with CURRENT label
-            if merged and last_label == lbl_i and merged[-1]["Value"] == lbl_i and merged[-1]["EndDateTime"] == pd.Timestamp(anchor_time):
-                # Extend last labeled segment to current time
-                merged[-1]["EndDateTime"] = pd.Timestamp(t_i)
+            label = str(labels[index])
+            if merged and merged[-1]["Value"] == label and merged[-1]["EndDateTime"] == start_time:
+                merged[-1]["EndDateTime"] = end_time
             else:
-                # Start new labeled segment [anchor, t_i] with current label
                 merged.append({
-                    "PatientId": int(pid_arr[i]),
-                    "ConceptName": str(cname_arr[i]),
-                    "StartDateTime": pd.Timestamp(anchor_time),
-                    "EndDateTime": pd.Timestamp(t_i),
-                    "Value": str(lbl_i),
-                    "AbstractionType": str(abst_arr[i]),
+                    "PatientId": int(pid_arr[index]),
+                    "ConceptName": str(cname_arr[index]),
+                    "StartDateTime": start_time,
+                    "EndDateTime": end_time,
+                    "Value": label,
+                    "AbstractionType": str(abst_arr[index]),
                 })
-            last_label = lbl_i
-            anchor_time = t_i  # move anchor forward
 
         # Return in the same schema as apply() expects next
         if not merged:

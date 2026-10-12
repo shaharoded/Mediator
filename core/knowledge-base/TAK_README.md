@@ -339,7 +339,7 @@ A DataFrame with the same shape and columns as the parent raw concept, but with 
 - `<derived-from>` — Single raw-concept (numeric attribute)
 - `significant-variation` — Threshold for trend detection
 - `<time-steady>` — Lookback window for slope calculation (all points in this window are collected)
-- `<persistence good-after>` — Maximum gap for interval stretching
+- `<persistence good-after>` — Maximum gap between points forming an interval
 
 **Algorithm:**
 1. **Slope Calculation (per point `i`):**
@@ -358,11 +358,11 @@ A DataFrame with the same shape and columns as the parent raw concept, but with 
    else → "Steady"
    ```
 
-3. **Interval Building (anchor-based):**
-   - **Anchor rule:** First point sets anchor (no interval yet)
-   - **Next point:** Stretch back to current anchor if `(t_i - anchor) <= good_after`
-   - **Gap exceeds window:** Reset the anchor to `t_i`; no interval is emitted for the hole (the gap is simply skipped in the output)
-   - **Consecutive identical labels:** Merge by extending EndDateTime
+3. **Interval Building (forward classification):**
+   - **Forward labels:** Use point `i`'s classification for `[t_i, t_next)`; never classify backward.
+   - **Gap limit:** Emit only when `0 < t_next - t_i <= good_after`; skip larger gaps entirely.
+   - **Following point required:** Its label may differ. The final point creates no interval of its own, and no artificial duration is added.
+   - **Merge:** Combine contiguous intervals with identical labels.
 
 **Note:** Generally, `time_steady << good_after` (e.g., 12h lookback, 24h merge window)
 
@@ -1278,7 +1278,8 @@ Time  | Value
 **Output:**
 ```
 StartDateTime | EndDateTime | Value
-00:00         | 06:00       | Increasing  (merged 4 consecutive "Increasing" classifications)
+00:00         | 02:00       | Steady
+02:00         | 06:00       | Increasing
 ```
 
 ---

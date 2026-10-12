@@ -65,8 +65,56 @@ def test_parse_trend_validates_structure(repo_with_glucose_trend):
     assert trend.good_after == timedelta(hours=24)
 
 
-def test_trend_anchor_based_intervals(repo_with_glucose_trend):
-    """Test anchor-based interval building with your example."""
+@pytest.mark.parametrize("changed_value,label", [(200, "Increasing"), (50, "Decreasing")])
+@pytest.mark.parametrize("following_hour", [None, 64, 74, 75])
+def test_direction_requires_following_measurement(repo_with_glucose_trend, changed_value, label, following_hour):
+    trend = repo_with_glucose_trend.get("GLUCOSE_MEASURE_TREND")
+    hours = [44, 46, 50]
+    values = [100, 100, changed_value]
+    if following_hour is not None:
+        hours.append(following_hour)
+        values.append(100)
+    data = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("00:00") + timedelta(hours=hour),
+         make_ts("00:00") + timedelta(hours=hour), value, "raw-concept")
+        for hour, value in zip(hours, values)
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
+
+    classified = trend._compute_trends(data)
+    expected_labels = ["Steady", "Steady", label]
+    if following_hour is not None:
+        expected_labels.append("Steady")
+    assert classified["Value"].tolist() == expected_labels
+
+    cutoff = make_ts("00:00", day=2)
+    prefix = data[data["StartDateTime"] <= cutoff]
+    pd.testing.assert_frame_equal(
+        classified.iloc[:len(prefix)].reset_index(drop=True), trend._compute_trends(prefix),
+    )
+    result = trend.apply(data)
+    supported = following_hour is not None and following_hour - 50 <= 24
+    assert result["Value"].tolist() == (["Steady", label] if supported else ["Steady"])
+    assert result.iloc[0]["StartDateTime"] == make_ts("20:00", day=1)
+    assert result.iloc[0]["EndDateTime"] == make_ts("02:00", day=2)
+    if supported:
+        assert result.iloc[1]["StartDateTime"] == make_ts("02:00", day=2)
+        assert result.iloc[1]["EndDateTime"] == make_ts("00:00") + timedelta(hours=following_hour)
+    assert (result["EndDateTime"] > result["StartDateTime"]).all()
+    assert trend.apply(prefix)["Value"].tolist() == ["Steady"]
+
+
+@pytest.mark.parametrize("labels", [["Increasing"], ["Decreasing"], ["Increasing", "Decreasing"]])
+def test_no_interval_without_later_timestamp(repo_with_glucose_trend, labels):
+    trend = repo_with_glucose_trend.get("GLUCOSE_MEASURE_TREND")
+    data = pd.DataFrame([
+        (1, "GLUCOSE_MEASURE", make_ts("00:00"), make_ts("00:00"), label, "raw-concept")
+        for label in labels
+    ], columns=["PatientId", "ConceptName", "StartDateTime", "EndDateTime", "Value", "AbstractionType"])
+    assert trend._build_intervals(data).empty
+
+
+def test_trend_forward_intervals(repo_with_glucose_trend):
+    """Test forward classification with the original regression and gap examples."""
     raw_tak = repo_with_glucose_trend.get("GLUCOSE_MEASURE")
     trend_tak = repo_with_glucose_trend.get("GLUCOSE_MEASURE_TREND")
     
@@ -104,23 +152,14 @@ def test_trend_anchor_based_intervals(repo_with_glucose_trend):
     print(f"\nTotal intervals: {len(df_trend_out)}")
     print("="*80)
     
-    # Expected output:
-    # 1. [0h → 4h, "Increase"] (T=0h anchor, T=2h closes with "Increasing", T=4h extends with "Increasing")
-    # 2. [4h → 6h, "Steady"] (T=6h closes with "Steady" the current anchor at T=4h)
-    # 3. NO interval for 6h → 31h (anchor at T=6h, but 31h-6h=25h, outside window)
-    # 4. [31h → 36h, "Steady"] (T=36h closes with "Steady" the current anchor at T=31h)
-
-    
-    assert len(df_trend_out) == 2
-
-    assert df_trend_out.iloc[0]["Value"] == "Increasing"
-    assert df_trend_out.iloc[0]["StartDateTime"] == make_ts("00:00")
-    assert df_trend_out.iloc[0]["EndDateTime"] == make_ts("06:00")
-
-    # Hole between 6h and 31h is NOT emitted as a row (anchor reset only)
-    assert df_trend_out.iloc[1]["Value"] == "Steady"
-    assert df_trend_out.iloc[1]["StartDateTime"] == make_ts("07:00", day=1)
-    assert df_trend_out.iloc[1]["EndDateTime"] == make_ts("12:00", day=1)
+    expected = [[0,2,"Steady"],
+                [2,6,"Increasing"],
+                [31,36,"Steady"]]
+    assert list(df_trend_out[["StartDateTime", "EndDateTime", "Value"]].itertuples(index=False, name=None)) == [
+        (make_ts("00:00") + timedelta(hours=start),
+         make_ts("00:00") + timedelta(hours=end), label)
+        for start, end, label in expected
+    ]
 
     # ===== TEST CASE 2 =====
     print("\n" + "="*80)
@@ -157,39 +196,16 @@ def test_trend_anchor_based_intervals(repo_with_glucose_trend):
     print(f"\nTotal intervals: {len(df_trend_out)}")
     print("="*80)
     
-    # Expected output:
-    # Classification of anchors: Steady → Increasing → Decreasing → Decreasing → Increasing → Steady → Steady
-    # 1. [0h → 2h, "Increasing"]
-    # 2. [2h → 5h, "Decreasing"]
-    # 3. [5h → 21h, "Increasing"]
-    # 4. [26h → 31h, "Steady"]
-    
-    assert len(df_trend_out) == 5
-
-    # 1
-    assert df_trend_out.iloc[0]["Value"] == "Increasing"
-    assert df_trend_out.iloc[0]["StartDateTime"] == make_ts("00:00")
-    assert df_trend_out.iloc[0]["EndDateTime"] == make_ts("02:00")
-
-    # 2
-    assert df_trend_out.iloc[1]["Value"] == "Decreasing"
-    assert df_trend_out.iloc[1]["StartDateTime"] == make_ts("02:00")
-    assert df_trend_out.iloc[1]["EndDateTime"] == make_ts("05:00")
-
-    # 3
-    assert df_trend_out.iloc[2]["Value"] == "Steady"
-    assert df_trend_out.iloc[2]["StartDateTime"] == make_ts("05:00")
-    assert df_trend_out.iloc[2]["EndDateTime"] == make_ts("02:00", day=1)
-
-    # 4
-    assert df_trend_out.iloc[3]["Value"] == "Increasing"
-    assert df_trend_out.iloc[3]["StartDateTime"] == make_ts("02:00", day=1)
-    assert df_trend_out.iloc[3]["EndDateTime"] == make_ts("07:00", day=1)
-
-    # 5
-    assert df_trend_out.iloc[4]["Value"] == "Steady"
-    assert df_trend_out.iloc[4]["StartDateTime"] == make_ts("07:00", day=1)
-    assert df_trend_out.iloc[4]["EndDateTime"] == make_ts("12:00", day=1)
+    expected = [[0,2,"Steady"],
+                [2,4,"Increasing"],
+                [4,26,"Decreasing"],
+                [26,31,"Steady"],
+                [31,36,"Increasing"]]
+    assert list(df_trend_out[["StartDateTime", "EndDateTime", "Value"]].itertuples(index=False, name=None)) == [
+        (make_ts("00:00") + timedelta(hours=start),
+         make_ts("00:00") + timedelta(hours=end), label)
+        for start, end, label in expected
+    ]
     # ===== TEST CASE 3 =====
     print("\n" + "="*80)
     print("TEST CASE 3: T=0h(100), T=2h(100), T=4h(150), T=6h(200), T=8h(210), T=33h(120), T=38h(130)")
@@ -224,29 +240,11 @@ def test_trend_anchor_based_intervals(repo_with_glucose_trend):
     print(f"\nTotal intervals: {len(df_trend_out)}")
     print("="*80)
     
-    # Expected output:
-    # 1. [0h → 2h, "Steady"]
-    # 1. [2h → 6h, "Increase"] (T=0h anchor, T=2h closes with "Increasing", T=4h extends with "Increasing")
-    # 2. [6h → 8h, "Steady"] (T=6h closes with "Steady" the current anchor at T=4h)
-    # 3. NO interval for 8h → 33h (anchor at T=8h, but 33h-8h=25h, outside window)
-    # 4. [33h → 39h, "Steady"] (T=39h closes with "Steady" the current anchor at T=33h)
-
-    
-    assert len(df_trend_out) == 3
-
-    # 1
-    assert df_trend_out.iloc[0]["Value"] == "Steady"
-    assert df_trend_out.iloc[0]["StartDateTime"] == make_ts("00:00")
-    assert df_trend_out.iloc[0]["EndDateTime"] == make_ts("02:00")
-
-    # 2
-    assert df_trend_out.iloc[1]["Value"] == "Increasing"
-    assert df_trend_out.iloc[1]["StartDateTime"] == make_ts("02:00")
-    assert df_trend_out.iloc[1]["EndDateTime"] == make_ts("08:00")
-
-    # Hole between 8h and 33h is NOT emitted as a row (anchor reset only)
-
-    # 3
-    assert df_trend_out.iloc[2]["Value"] == "Steady"
-    assert df_trend_out.iloc[2]["StartDateTime"] == make_ts("09:00", day=1)
-    assert df_trend_out.iloc[2]["EndDateTime"] == make_ts("14:00", day=1)
+    expected = [[0,4,"Steady"],
+                [4,8,"Increasing"],
+                [33,38,"Steady"]]
+    assert list(df_trend_out[["StartDateTime", "EndDateTime", "Value"]].itertuples(index=False, name=None)) == [
+        (make_ts("00:00") + timedelta(hours=start),
+         make_ts("00:00") + timedelta(hours=end), label)
+        for start, end, label in expected
+    ]
