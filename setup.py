@@ -19,12 +19,9 @@ if requirements_path.exists():
 setup(
     name="mediator-kbta",
     version="1.0.0",
-    author="Shahar Oded",
-    author_email="your.email@example.com",
     description="Knowledge-Based Temporal Abstraction (KBTA) for clinical data",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/shaharoded/Mediator",
     packages=find_packages(exclude=["unittests", "images"]),
     include_package_data=True,
     package_data={

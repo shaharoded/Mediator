@@ -106,7 +106,7 @@ Mediator/
 ```bash
 # Clone repository
 
-git clone https://github.com/shaharoded/Mediator.git
+git clone REPOSITORY_URL
 cd Mediator
 
 # Create virtual environment
@@ -239,7 +239,7 @@ This method is designed to be deployed on an older version of python as found in
 
 ```bash
 # Clone repository
-git clone https://github.com/shaharoded/Mediator.git
+git clone REPOSITORY_URL
 cd Mediator
 ```
 
@@ -314,7 +314,7 @@ In case you need to change the KB TAKs, simply keep in the KB folder only the fi
 
 ```bash
 # Clone repository
-git clone https://github.com/shaharoded/Mediator.git
+git clone REPOSITORY_URL
 cd Mediator
 
 # Build Docker image
@@ -586,4 +586,4 @@ The following are not important for my use case but might be nice for other appl
 
 ---
 
-**Maintained by:** Shahar Oded
+**Maintained by:** Anonymous authors

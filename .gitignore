@@ -13,3 +13,4 @@ logs/*.log
 mediator-deploy.zip
 .vscode/
 .pytest_cache/
+/backend/data/analysis/
