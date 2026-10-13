@@ -221,7 +221,9 @@ def main():
                   scope=json.loads(SCOPE.read_text()),workers=4,elapsed_seconds=time.monotonic()-started,
                   metrics='Duration of baseline, altered, overlap, matching-label overlap, and union; evaluated only in 0–48h prefix',
                   database_access='Read-only SQLite, no output table writes',
-                  exclusion='Derived numeric concepts, other abstraction families, and downstream predictions')
+                  exclusion='Derived numeric concepts, other abstraction families, and downstream predictions',
+                  trend_source_sha256=hashlib.sha256((MEDIATOR_ROOT/'core/tak/trend.py').read_bytes()).hexdigest(),
+                  state_source_sha256=hashlib.sha256((MEDIATOR_ROOT/'core/tak/state.py').read_bytes()).hexdigest())
     (ROOT/(prefix+'metadata.json')).write_text(json.dumps(metadata,indent=2))
     print(f'Completed in {metadata["elapsed_seconds"]:.1f}s',flush=True)
 

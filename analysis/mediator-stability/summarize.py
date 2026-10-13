@@ -102,13 +102,19 @@ def main():
                 r=summary[(summary.condition==condition)&(summary.family==family)&(summary.metric==metric)].iloc[0]
                 cells.append(f'{r.percentage:.2f} [{r.ci_low:.2f}, {r.ci_high:.2f}]')
             lines.append('| '+LABELS[condition]+' | '+family+' | '+' | '.join(cells)+' |')
+    def estimate(condition, family, metric):
+        return float(summary[(summary.condition==condition)&(summary.family==family)&
+                             (summary.metric==metric)].iloc[0].percentage)
     lines+=['', '## Interpretation', '',
-            'Under the larger bounded value perturbation, pooled interval agreement remained '
-            'approximately 97% for both families. Sensitivity was not uniform: basal-insulin '
-            'state agreement was approximately 88%, bicarbonate 91%, and albumin 91%. '
-            'Concept-level support counts are provided in concept_results.csv.', '',
-            'Under 10% random removal, trend interval agreement was 86.91%, while baseline '
-            'coverage retained was 90.76% and label agreement on shared coverage was 95.76%. '
+            f'Under the larger bounded value perturbation, pooled interval agreement was '
+            f'{estimate("noise_5pct", "state", "labeled_interval_agreement"):.2f}% for states and '
+            f'{estimate("noise_5pct", "trend", "labeled_interval_agreement"):.2f}% for trends. '
+            'Per-concept variation and support counts are provided in concept_results.csv.', '',
+            f'Under 10% random removal, trend interval agreement was '
+            f'{estimate("remove_10pct", "trend", "labeled_interval_agreement"):.2f}%, while baseline '
+            f'coverage retained was {estimate("remove_10pct", "trend", "baseline_coverage_retained"):.2f}% '
+            f'and label agreement on shared coverage was '
+            f'{estimate("remove_10pct", "trend", "label_agreement_on_shared_coverage"):.2f}%. '
             'Thus, the interval-level result reflects both coverage loss and label changes. '
             'These distinct metrics should not be presented interchangeably.']
     lines+=['','## Scope of the conclusion','',
